@@ -1,12 +1,6 @@
 import torch
 import triton
 import triton.language as tl
-import math
-
-    
-    
-
-
 @triton.jit
 def _tree_mask_kernel(
     tree_mask, parents,
@@ -14,7 +8,6 @@ def _tree_mask_kernel(
     stride_pb, stride_pi,
     *,
     total_tokens: tl.constexpr,
-    BLOCK_T: tl.constexpr,
 ):
     """Compute tree mask for speculative decoding.
 
@@ -28,13 +21,13 @@ def _tree_mask_kernel(
     parents: ``[B, T]`` tensor of parent indices for each token.
     stride_*: strides for the respective tensors.
     total_tokens: total number of tokens in the tree (compile-time constant).
-    BLOCK_T: block size for parallelising over the token dimension.
     """
 
     # Program ID corresponds to the batch index
     b_idx = tl.program_id(axis=0)
 
-    token_offsets = tl.arange(0, BLOCK_T)
+    # Handle the entire token dimension in one vectorised block
+    token_offsets = tl.arange(0, total_tokens)
 
     # Initialise root token mask: it can only see itself
     root_ptr = tree_mask + b_idx * stride_tb + 0 * stride_tr + token_offsets * stride_tc
@@ -255,7 +248,6 @@ def triton_compute_tree_mask(parents, total_tokens):
         stride_pb,
         stride_pi,
         total_tokens=total_tokens,
-        BLOCK_T=triton.next_power_of_2(total_tokens),
     )
 
     return tree_mask
