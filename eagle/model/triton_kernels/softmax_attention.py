@@ -13,6 +13,7 @@ def _softmax_attention_kernel(
     stride_ob, stride_oh, stride_os, stride_od,
     stride_mb, stride_mh, stride_ms, stride_mt,
     BLOCK_SIZE: tl.constexpr,
+    HAS_MASK: tl.constexpr,
 ):
     """
     Compute softmax attention in a single kernel.
@@ -31,6 +32,7 @@ def _softmax_attention_kernel(
         scale: scaling factor for attention scores
         stride_*: strides for the respective tensors
         BLOCK_SIZE: block size for tiling
+        HAS_MASK: whether an attention mask is supplied
     """
     # Program ID
     pid = tl.program_id(axis=0)
@@ -62,9 +64,14 @@ def _softmax_attention_kernel(
         score = tl.sum(q_vec * k_vec, axis=0) * scale
         
         # Apply attention mask if provided
-        if mask_ptr is not None:
-            mask_val = tl.load(mask_ptr + batch_idx * stride_mb + head_idx * stride_mh + 
-                              seq_idx * stride_ms + kv_idx * stride_mt)
+        if HAS_MASK:
+            mask_val = tl.load(
+                mask_ptr
+                + batch_idx * stride_mb
+                + head_idx * stride_mh
+                + seq_idx * stride_ms
+                + kv_idx * stride_mt
+            )
             score = score + mask_val
         
         # Apply causal mask
@@ -132,14 +139,39 @@ def triton_softmax_attention(q, k, v, mask=None, scale=None):
     # Launch kernel
     grid = (batch_size * num_heads * seq_len_q,)
     _softmax_attention_kernel[grid](
-        q, k, v, output, mask if mask is not None else 0,
-        batch_size, num_heads, seq_len_q, seq_len_kv, head_dim, scale,
-        stride_qb, stride_qh, stride_qs, stride_qd,
-        stride_kb, stride_kh, stride_ks, stride_kd,
-        stride_vb, stride_vh, stride_vs, stride_vd,
-        stride_ob, stride_oh, stride_os, stride_od,
-        stride_mb, stride_mh, stride_ms, stride_mt,
+        q,
+        k,
+        v,
+        output,
+        mask if mask is not None else q,
+        batch_size,
+        num_heads,
+        seq_len_q,
+        seq_len_kv,
+        head_dim,
+        scale,
+        stride_qb,
+        stride_qh,
+        stride_qs,
+        stride_qd,
+        stride_kb,
+        stride_kh,
+        stride_ks,
+        stride_kd,
+        stride_vb,
+        stride_vh,
+        stride_vs,
+        stride_vd,
+        stride_ob,
+        stride_oh,
+        stride_os,
+        stride_od,
+        stride_mb,
+        stride_mh,
+        stride_ms,
+        stride_mt,
         BLOCK_SIZE=BLOCK_SIZE,
+        HAS_MASK=mask is not None,
     )
     
     return output
