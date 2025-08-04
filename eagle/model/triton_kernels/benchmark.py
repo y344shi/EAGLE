@@ -169,7 +169,7 @@ def benchmark_kv_cache(model, batch_size=1, seq_len=512, head_dim=64, num_heads=
     avg_time_original = (end_time - start_time) / num_runs
     
     # Import Triton implementation
-    from eagle.model.triton_kernels import triton_append_to_kv_cache
+from eagle.model.triton_kernels import triton_append_to_kv_cache
     
     # Benchmark Triton implementation
     torch.cuda.synchronize()
@@ -184,6 +184,55 @@ def benchmark_kv_cache(model, batch_size=1, seq_len=512, head_dim=64, num_heads=
     avg_time_triton = (end_time - start_time) / num_runs
     
     return avg_time_original, avg_time_triton
+
+
+def benchmark_fused_step(batch_size=1, head_dim=64, vocab_size=32000, max_seq_len=16, num_runs=100):
+    """Benchmark the fused attention/KV-cache/top-k prototype."""
+
+    from eagle.model.triton_kernels import (
+        triton_attention,
+        triton_append_to_kv_cache,
+        triton_compute_topk,
+        fused_attention_kv_tree,
+    )
+
+    q = torch.randn(batch_size, head_dim, device="cuda")
+    k_cache = torch.zeros(batch_size, max_seq_len, head_dim, device="cuda")
+    v_cache = torch.zeros_like(k_cache)
+    k_new = torch.randn(batch_size, head_dim, device="cuda")
+    v_new = torch.randn(batch_size, head_dim, device="cuda")
+    logits = torch.randn(batch_size, vocab_size, device="cuda")
+    current_length = torch.zeros(batch_size, dtype=torch.int32, device="cuda")
+
+    # Benchmark separate kernels
+    torch.cuda.synchronize()
+    start_time = time.time()
+    for _ in range(num_runs):
+        kc = k_cache.clone()
+        vc = v_cache.clone()
+        curr = current_length.clone()
+        triton_append_to_kv_cache(
+            kc.unsqueeze(1), vc.unsqueeze(1),
+            k_new.unsqueeze(1).unsqueeze(2), v_new.unsqueeze(1).unsqueeze(2), curr
+        )
+        triton_attention(
+            q.unsqueeze(1).unsqueeze(2),
+            kc.unsqueeze(1)[:, :, :1, :],
+            vc.unsqueeze(1)[:, :, :1, :]
+        )
+        triton_compute_topk(logits, 1)
+    torch.cuda.synchronize()
+    separate = (time.time() - start_time) / num_runs
+
+    # Benchmark fused kernel
+    torch.cuda.synchronize()
+    start_time = time.time()
+    for _ in range(num_runs):
+        fused_attention_kv_tree(q, k_cache, v_cache, k_new, v_new, logits, current_length)
+    torch.cuda.synchronize()
+    fused = (time.time() - start_time) / num_runs
+
+    return separate, fused
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark EAGLE model with Triton kernels")
@@ -248,6 +297,13 @@ def main():
     print(f"Original implementation: {avg_time_original * 1000:.4f} ms")
     print(f"Triton implementation: {avg_time_triton * 1000:.4f} ms")
     print(f"Speedup: {avg_time_original / avg_time_triton:.2f}x")
+
+    # Benchmark fused prototype
+    print("\n=== Fused Kernel Prototype Benchmark ===")
+    sep, fused = benchmark_fused_step(args.batch_size, 64, tokenizer.vocab_size, args.seq_len, 50)
+    print(f"Separate kernels: {sep * 1000:.4f} ms")
+    print(f"Fused kernel: {fused * 1000:.4f} ms")
+    print(f"Speedup: {sep / fused:.2f}x")
     
     # Benchmark KV cache operations
     print("\n=== KV Cache Operations Benchmark ===")
