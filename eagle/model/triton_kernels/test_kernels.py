@@ -36,56 +36,59 @@ class TestTritonKernels(unittest.TestCase):
     def test_attention(self):
         """Test attention computation."""
         print("\n=== Testing Attention Computation ===")
+
+        if self.device.type != "cuda":
+            self.skipTest("Triton attention requires CUDA")
         
         # Create random inputs
         q = torch.randn(self.batch_size, self.num_heads, self.seq_len, self.head_dim, device=self.device)
         k = torch.randn(self.batch_size, self.num_heads, self.seq_len, self.head_dim, device=self.device)
         v = torch.randn(self.batch_size, self.num_heads, self.seq_len, self.head_dim, device=self.device)
         scale = 1.0 / np.sqrt(self.head_dim)
-        
+
         # PyTorch implementation
         def pytorch_attention(q, k, v, scale):
             # [batch_size, num_heads, seq_len_q, seq_len_k]
             scores = torch.matmul(q, k.transpose(-1, -2)) * scale
-            
+
             # Apply causal mask (for autoregressive generation)
             causal_mask = torch.triu(torch.ones(self.seq_len, self.seq_len, device=self.device), diagonal=1).bool()
             scores.masked_fill_(causal_mask.unsqueeze(0).unsqueeze(0), float("-inf"))
-            
+
             # Apply softmax
             attn_weights = torch.softmax(scores, dim=-1)
-            
+
             # Compute weighted sum
             output = torch.matmul(attn_weights, v)
             return output
-        
+
         # Run PyTorch implementation
         start_time = time.time()
         pytorch_output = pytorch_attention(q, k, v, scale)
         pytorch_time = time.time() - start_time
         print(f"PyTorch time: {pytorch_time * 1000:.4f} ms")
-        
+
         # Run Triton implementation
         from eagle.model.triton_kernels.attention import triton_attention
         start_time = time.time()
         triton_output = triton_attention(q, k, v, scale)
         triton_time = time.time() - start_time
-        
+
         # Check correctness
         self.assertTrue(torch.allclose(pytorch_output, triton_output, rtol=self.rtol, atol=self.atol),
                         "Attention outputs do not match")
-        
+
         # Print performance comparison
         print(f"Triton time: {triton_time * 1000:.4f} ms")
         print(f"Speedup: {pytorch_time / triton_time:.2f}x")
-        
+
         # Test with different sequence lengths
         for seq_len in [32, 64, 128]:
             print(f"\nTesting with sequence length {seq_len}")
             q = torch.randn(self.batch_size, self.num_heads, seq_len, self.head_dim, device=self.device)
             k = torch.randn(self.batch_size, self.num_heads, seq_len, self.head_dim, device=self.device)
             v = torch.randn(self.batch_size, self.num_heads, seq_len, self.head_dim, device=self.device)
-            
+
             # Adjust causal mask for PyTorch implementation
             def pytorch_attention_adjusted(q, k, v, scale):
                 scores = torch.matmul(q, k.transpose(-1, -2)) * scale
@@ -94,22 +97,22 @@ class TestTritonKernels(unittest.TestCase):
                 attn_weights = torch.softmax(scores, dim=-1)
                 output = torch.matmul(attn_weights, v)
                 return output
-            
+
             # Run PyTorch implementation
             start_time = time.time()
             pytorch_output = pytorch_attention_adjusted(q, k, v, scale)
             pytorch_time = time.time() - start_time
             print(f"PyTorch time: {pytorch_time * 1000:.4f} ms")
-            
+
             # Run Triton implementation
             start_time = time.time()
             triton_output = triton_attention(q, k, v, scale)
             triton_time = time.time() - start_time
-            
+
             # Check correctness
             self.assertTrue(torch.allclose(pytorch_output, triton_output, rtol=self.rtol, atol=self.atol),
                             f"Attention outputs do not match for sequence length {seq_len}")
-            
+
             # Print performance comparison
             print(f"Triton time: {triton_time * 1000:.4f} ms")
             print(f"Speedup: {pytorch_time / triton_time:.2f}x")
@@ -461,6 +464,9 @@ class TestTritonKernels(unittest.TestCase):
     def test_update_inputs(self):
         """Test input sequence update."""
         print("\n=== Testing Input Sequence Update ===")
+
+        if self.device.type != "cuda":
+            self.skipTest("Triton update_inputs requires CUDA")
         
         # Create random inputs
         input_len = 4
