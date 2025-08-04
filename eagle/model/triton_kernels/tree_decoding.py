@@ -1,10 +1,41 @@
 import torch
 import triton
 import triton.language as tl
-import math
 
-    
-    
+
+@triton.jit
+def _topk_kernel(
+    logits, values, indices,
+    stride_lb, stride_lv,
+    stride_vb, stride_vk,
+    stride_ib, stride_ik,
+    vocab_size,
+    K: tl.constexpr,
+):
+    """Naive Top-K selection kernel."""
+    pid = tl.program_id(axis=0)
+
+    logits_row = logits + pid * stride_lb
+    values_row = values + pid * stride_vb
+    indices_row = indices + pid * stride_ib
+
+    top_vals = tl.full((K,), float("-inf"), logits.dtype)
+    top_idx = tl.zeros((K,), dtype=tl.int32)
+
+    for v in range(0, vocab_size):
+        val = tl.load(logits_row + v * stride_lv)
+        for j in range(0, K):
+            if val > top_vals[j]:
+                for s in range(K - 1, j, -1):
+                    top_vals[s] = top_vals[s - 1]
+                    top_idx[s] = top_idx[s - 1]
+                top_vals[j] = val
+                top_idx[j] = v
+                break
+
+    for j in range(0, K):
+        tl.store(values_row + j * stride_vk, top_vals[j])
+        tl.store(indices_row + j * stride_ik, top_idx[j])
 
 
 @triton.jit
@@ -190,13 +221,29 @@ def triton_compute_topk(logits, k):
         values: top-k values tensor of shape [batch_size, k]
         indices: top-k indices tensor of shape [batch_size, k]
     """
-    # Use PyTorch's topk function as a fallback
+    batch_size, vocab_size = logits.shape
+
+    if logits.is_cuda:
+        values = torch.empty((batch_size, k), dtype=logits.dtype, device=logits.device)
+        indices = torch.empty((batch_size, k), dtype=torch.int32, device=logits.device)
+
+        stride_lb, stride_lv = logits.stride()
+        stride_vb, stride_vk = values.stride()
+        stride_ib, stride_ik = indices.stride()
+
+        grid = (batch_size,)
+        _topk_kernel[grid](
+            logits, values, indices,
+            stride_lb, stride_lv,
+            stride_vb, stride_vk,
+            stride_ib, stride_ik,
+            vocab_size,
+            K=k,
+        )
+        return values, indices
+
     values, indices = torch.topk(logits, k, dim=-1)
-    
-    # Convert indices to int32 to match the expected output type
-    indices = indices.to(torch.int32)
-    
-    return values, indices
+    return values, indices.to(torch.int32)
     
     return values, indices
 
@@ -213,29 +260,37 @@ def triton_compute_tree_mask(parents, total_tokens):
         tree_mask: tree mask tensor of shape [batch_size, total_tokens, total_tokens]
     """
     batch_size = parents.shape[0]
-    
-    # Create output tensor
-    tree_mask = torch.zeros((batch_size, total_tokens, total_tokens), 
+
+    tree_mask = torch.zeros((batch_size, total_tokens, total_tokens),
                            dtype=torch.int32, device=parents.device)
-    
-    # Initialize: each token can see itself
+
+    if parents.is_cuda:
+        stride_tb, stride_tr, stride_tc = tree_mask.stride()
+        stride_pb, stride_pi = parents.stride()
+        grid = (batch_size * total_tokens,)
+        _tree_mask_kernel[grid](
+            tree_mask, parents,
+            stride_tb, stride_tr, stride_tc,
+            stride_pb, stride_pi,
+            batch_size, total_tokens,
+            BLOCK_T=1,
+        )
+        return tree_mask
+
     for b in range(batch_size):
         for t in range(total_tokens):
             tree_mask[b, t, t] = 1
-    
-    # For each token, determine which previous tokens it can attend to
+
     for b in range(batch_size):
         for t in range(1, total_tokens):
             parent = parents[b, t].item()
             if parent == 0:
-                # Root token (0) only sees itself
                 continue
             else:
-                # Copy parent's mask for previous tokens
                 for i in range(t):
                     if tree_mask[b, parent, i] == 1:
                         tree_mask[b, t, i] = 1
-    
+
     return tree_mask
 
 
@@ -253,47 +308,42 @@ def triton_evaluate_posterior(logits, candidates):
     """
     batch_size, seq_len, vocab_size = logits.shape
     _, num_candidates, cand_seq_len = candidates.shape
-    
-    # Create output tensors
+
     best_candidate = torch.zeros(batch_size, dtype=torch.int32, device=logits.device)
     accept_length = torch.zeros(batch_size, dtype=torch.int32, device=logits.device)
-    
-    # For each batch
+
+    if logits.is_cuda:
+        stride_lb, stride_ls, stride_lv = logits.stride()
+        stride_cb, stride_cs, stride_ct = candidates.stride()
+        grid = (batch_size,)
+        _evaluate_posterior_kernel[grid](
+            logits, candidates, best_candidate, accept_length,
+            stride_lb, stride_ls, stride_lv,
+            stride_cb, stride_cs, stride_ct,
+            batch_size, seq_len, vocab_size,
+        )
+        return best_candidate, accept_length
+
     for b in range(batch_size):
         max_accept_len = 0
         max_candidate_idx = 0
-        
-        # Evaluate each candidate
         for c in range(num_candidates):
-            # Count accepted tokens for this candidate
             accept_len = 0
-            
-            # Check each position
             for s in range(seq_len):
-                # Get candidate token
                 if s < cand_seq_len:
                     candidate_token = candidates[b, c, s].item()
-                    
-                    # Get predicted token (argmax of logits)
                     if s < seq_len:
                         predicted_token = torch.argmax(logits[b, s]).item()
-                        
-                        # Check if prediction matches
                         if predicted_token == candidate_token:
                             accept_len += 1
                         else:
-                            # Stop at first mismatch
                             break
-            
-            # Update best candidate if this one has longer accepted sequence
             if accept_len > max_accept_len:
                 max_accept_len = accept_len
                 max_candidate_idx = c
-        
-        # Store results
         best_candidate[b] = max_candidate_idx
         accept_length[b] = max_accept_len
-    
+
     return best_candidate, accept_length
 
 
@@ -334,5 +384,5 @@ def triton_update_inputs(input_ids, candidates, best_candidate, accept_length):
         stride_ob, stride_os,
         batch_size, input_len, seq_len,
     )
-    
+
     return output_ids
