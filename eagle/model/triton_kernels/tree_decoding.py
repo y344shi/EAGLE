@@ -13,7 +13,7 @@ def _tree_mask_kernel(
     stride_pb,
     stride_pi,
     *,
-    TOTAL_TOKENS: tl.constexpr,
+    total_tokens: tl.constexpr,
 ):
     """Compute tree mask for speculative decoding.
 
@@ -26,28 +26,28 @@ def _tree_mask_kernel(
     tree_mask: ``[B, T, T]`` output tensor storing the visibility mask.
     parents: ``[B, T]`` tensor of parent indices for each token.
     stride_*: strides for the respective tensors.
-    TOTAL_TOKENS: total number of tokens in the tree (compile-time constant).
+    total_tokens: total number of tokens in the tree (compile-time constant).
     """
 
     # Program ID corresponds to the batch index
     b_idx = tl.program_id(axis=0)
 
     # Handle the entire token dimension in one vectorised block
-    token_offsets = tl.arange(0, TOTAL_TOKENS)
+    token_offsets = tl.arange(0, total_tokens)
 
     # Initialise root token mask: it can only see itself
     root_ptr = tree_mask + b_idx * stride_tb + 0 * stride_tr + token_offsets * stride_tc
     root_mask = (token_offsets == 0).to(tl.int32)
-    tl.store(root_ptr, root_mask, mask=token_offsets < TOTAL_TOKENS)
+    tl.store(root_ptr, root_mask, mask=token_offsets < total_tokens)
 
     # Sequentially build masks for the remaining tokens
-    for t in range(1, TOTAL_TOKENS):
+    for t in range(1, total_tokens):
         parent = tl.load(parents + b_idx * stride_pb + t * stride_pi)
 
         parent_ptr = (
             tree_mask + b_idx * stride_tb + parent * stride_tr + token_offsets * stride_tc
         )
-        parent_mask = tl.load(parent_ptr, mask=token_offsets < TOTAL_TOKENS, other=0)
+        parent_mask = tl.load(parent_ptr, mask=token_offsets < total_tokens, other=0)
 
         # Tokens inherit visibility from their parent for previous positions and
         # can always see themselves.
@@ -60,7 +60,7 @@ def _tree_mask_kernel(
         out_ptr = (
             tree_mask + b_idx * stride_tb + t * stride_tr + token_offsets * stride_tc
         )
-        tl.store(out_ptr, current_mask, mask=token_offsets < TOTAL_TOKENS)
+        tl.store(out_ptr, current_mask, mask=token_offsets < total_tokens)
 
 
 @triton.jit
@@ -255,7 +255,7 @@ def triton_compute_tree_mask(parents, total_tokens):
         stride_tc,
         stride_pb,
         stride_pi,
-        TOTAL_TOKENS=total_tokens,
+        total_tokens=total_tokens,
     )
 
     return tree_mask
