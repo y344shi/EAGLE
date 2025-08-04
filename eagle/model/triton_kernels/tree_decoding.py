@@ -12,7 +12,6 @@ def _tree_mask_kernel(
     stride_tc,
     stride_pb,
     stride_pi,
-    *,
     total_tokens: tl.constexpr,
 ):
     """Compute tree mask for speculative decoding.
@@ -47,7 +46,8 @@ def _tree_mask_kernel(
         parent_ptr = (
             tree_mask + b_idx * stride_tb + parent * stride_tr + token_offsets * stride_tc
         )
-        parent_mask = tl.load(parent_ptr, mask=token_offsets < total_tokens, other=0)
+        parent_mask_raw = tl.load(parent_ptr, mask=token_offsets < total_tokens, other=0)
+        parent_mask = tl.where(parent == 0, 0, parent_mask_raw)
 
         # Tokens inherit visibility from their parent for previous positions and
         # can always see themselves.
