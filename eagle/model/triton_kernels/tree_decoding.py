@@ -12,52 +12,52 @@ def _tree_mask_kernel(
     tree_mask, parents,
     stride_tb, stride_tr, stride_tc,
     stride_pb, stride_pi,
-    batch_size, total_tokens,
+    *,
+    total_tokens: tl.constexpr,
     BLOCK_T: tl.constexpr,
 ):
+    """Compute tree mask for speculative decoding.
+
+    The kernel processes one batch per program and iterates sequentially over
+    tokens to respect parent-child dependencies.  Within each iteration the
+    entire token dimension is handled in parallel using vector operations.
+
+    Parameters
+    ----------
+    tree_mask: ``[B, T, T]`` output tensor storing the visibility mask.
+    parents: ``[B, T]`` tensor of parent indices for each token.
+    stride_*: strides for the respective tensors.
+    total_tokens: total number of tokens in the tree (compile-time constant).
+    BLOCK_T: block size for parallelising over the token dimension.
     """
-    Compute tree mask for speculative decoding.
-    
-    Parameters:
-        tree_mask: output tree mask tensor
-        parents: parent indices for each token
-        stride_*: strides for the respective tensors
-        batch_size: number of sequences in the batch
-        total_tokens: total number of tokens in the tree
-        BLOCK_T: block size for token dimension
-    """
-    # Program ID
-    pid = tl.program_id(axis=0)
-    
-    # Compute batch and token indices
-    batch_idx = pid // total_tokens
-    token_idx = pid % total_tokens
-    
-    # Root token can always see itself
-    if token_idx == 0:
-        for i in range(total_tokens):
-            if i == 0:
-                tl.store(tree_mask + batch_idx * stride_tb + token_idx * stride_tr + i * stride_tc, 1)
-            else:
-                tl.store(tree_mask + batch_idx * stride_tb + token_idx * stride_tr + i * stride_tc, 0)
-        return
-    
-    # For non-root tokens
-    # Get parent index
-    parent_idx = tl.load(parents + batch_idx * stride_pb + token_idx * stride_pi)
-    
-    # Copy parent's mask and set self-visibility
-    for i in range(total_tokens):
-        if i == token_idx:
-            # Token can see itself
-            tl.store(tree_mask + batch_idx * stride_tb + token_idx * stride_tr + i * stride_tc, 1)
-        elif i < token_idx:
-            # Check if parent can see this token
-            parent_mask_val = tl.load(tree_mask + batch_idx * stride_tb + parent_idx * stride_tr + i * stride_tc)
-            tl.store(tree_mask + batch_idx * stride_tb + token_idx * stride_tr + i * stride_tc, parent_mask_val)
-        else:
-            # Cannot see future tokens
-            tl.store(tree_mask + batch_idx * stride_tb + token_idx * stride_tr + i * stride_tc, 0)
+
+    # Program ID corresponds to the batch index
+    b_idx = tl.program_id(axis=0)
+
+    token_offsets = tl.arange(0, BLOCK_T)
+
+    # Initialise root token mask: it can only see itself
+    root_ptr = tree_mask + b_idx * stride_tb + 0 * stride_tr + token_offsets * stride_tc
+    root_mask = (token_offsets == 0).to(tl.int32)
+    tl.store(root_ptr, root_mask, mask=token_offsets < total_tokens)
+
+    # Sequentially build masks for the remaining tokens
+    for t in range(1, total_tokens):
+        parent = tl.load(parents + b_idx * stride_pb + t * stride_pi)
+
+        parent_ptr = tree_mask + b_idx * stride_tb + parent * stride_tr + token_offsets * stride_tc
+        parent_mask = tl.load(parent_ptr, mask=token_offsets < total_tokens, other=0)
+
+        # Tokens inherit visibility from their parent for previous positions and
+        # can always see themselves.
+        current_mask = tl.where(
+            token_offsets == t,
+            1,
+            tl.where(token_offsets < t, parent_mask, 0),
+        )
+
+        out_ptr = tree_mask + b_idx * stride_tb + t * stride_tr + token_offsets * stride_tc
+        tl.store(out_ptr, current_mask, mask=token_offsets < total_tokens)
 
 
 @triton.jit
@@ -244,7 +244,7 @@ def triton_compute_tree_mask(parents, total_tokens):
     stride_tb, stride_tr, stride_tc = tree_mask.stride()
     stride_pb, stride_pi = parents.stride()
 
-    grid = (batch_size * total_tokens,)
+    grid = (batch_size,)
 
     _tree_mask_kernel[grid](
         tree_mask,
@@ -254,8 +254,7 @@ def triton_compute_tree_mask(parents, total_tokens):
         stride_tc,
         stride_pb,
         stride_pi,
-        batch_size,
-        total_tokens,
+        total_tokens=total_tokens,
         BLOCK_T=triton.next_power_of_2(total_tokens),
     )
 
