@@ -1,0 +1,115 @@
+Setting up environment...
+Project root: /home/y344shi/fork/EAGLE
+Current directory: /home/y344shi/fork/EAGLE/eagle/model/triton_kernels
+Python path: ['/home/y344shi/fork/EAGLE', '/home/y344shi/fork/EAGLE/eagle/model/triton_kernels', '/home/y344shi/miniconda3/envs/ura/lib/python311.zip', '/home/y344shi/miniconda3/envs/ura/lib/python3.11', '/home/y344shi/miniconda3/envs/ura/lib/python3.11/lib-dynload', '/home/y344shi/miniconda3/envs/ura/lib/python3.11/site-packages', '/home/y344shi/ura/mirage_softmax/python']
+Triton version: 3.3.0
+PyTorch version: 2.7.0+cu128
+CUDA available: True
+CUDA device: NVIDIA GeForce RTX 3090
+
+Environment set up successfully. You can now run the tests.
+To run the tests, use: python run_tests.py
+
+Running tests...
+Using CUDA device: NVIDIA GeForce RTX 3090
+Using cuda device: NVIDIA GeForce RTX 3090
+
+=== Testing Attention Computation ===
+PyTorch time: 173.2476 ms
+Triton time: 194.6285 ms
+Speedup: 0.89x
+
+Testing with sequence length 32
+PyTorch time: 4.8194 ms
+Triton time: 0.1543 ms
+Speedup: 31.24x
+
+Testing with sequence length 64
+PyTorch time: 0.6657 ms
+Triton time: 0.2301 ms
+Speedup: 2.89x
+
+Testing with sequence length 128
+PyTorch time: 0.8819 ms
+Triton time: 0.1311 ms
+Speedup: 6.73x
+Using cuda device: NVIDIA GeForce RTX 3090
+
+=== Testing Top-K Computation ===
+PyTorch time: 26.6457 ms
+Triton time: 0.3254 ms
+Speedup: 81.88x
+
+Testing with k=10
+PyTorch time: 0.1082 ms
+Triton time: 0.0944 ms
+Speedup: 1.15x
+
+Testing with k=50
+PyTorch time: 0.1404 ms
+Triton time: 0.1023 ms
+Speedup: 1.37x
+
+Testing with k=100
+PyTorch time: 0.0825 ms
+Triton time: 0.0873 ms
+Speedup: 0.95x
+Using cuda device: NVIDIA GeForce RTX 3090
+
+=== Testing Posterior Probability Evaluation ===
+PyTorch time: 2.9967 ms
+Triton time: 2.7304 ms
+Speedup: 1.10x
+
+Verifying expected results:
+Best candidates: tensor([0, 0], device='cuda:0', dtype=torch.int32)
+Accept lengths: tensor([5, 5], device='cuda:0', dtype=torch.int32)
+Using cuda device: NVIDIA GeForce RTX 3090
+
+=== Testing KV Cache Operations ===
+
+Testing append_to_kv_cache
+PyTorch time: 0.9618 ms
+Triton time: 0.4730 ms
+Speedup: 2.03x
+
+Testing retrieve_from_kv_cache
+PyTorch time: 0.4923 ms
+Triton time: 0.4764 ms
+Speedup: 1.03x
+Using cuda device: NVIDIA GeForce RTX 3090
+
+=== Testing Tree Mask Computation ===
+PyTorch time: 9.2998 ms
+Triton time: 8.3425 ms
+Speedup: 1.11x
+
+Testing with tree size 16
+PyTorch time: 36.2940 ms
+Triton time: 21.5335 ms
+Speedup: 1.69x
+
+Testing with tree size 32
+PyTorch time: 183.7368 ms
+Triton time: 86.5219 ms
+Speedup: 2.12x
+Using cuda device: NVIDIA GeForce RTX 3090
+
+=== Testing Input Sequence Update ===
+PyTorch time: 8.7733 ms
+Triton time: 2.1100 ms
+Speedup: 4.16x
+
+Verifying expected results:
+Input shape: torch.Size([2, 4])
+Output shape: torch.Size([2, 8])
+
+================================================================================
+TRITON KERNELS TEST REPORT
+================================================================================
+
+Total tests: 6
+Passed: 6
+Failed: 0
+Errors: 0
+All tests passed successfully!
