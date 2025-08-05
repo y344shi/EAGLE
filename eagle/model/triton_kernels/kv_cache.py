@@ -105,21 +105,42 @@ def triton_append_to_kv_cache(k_cache, v_cache, k_new, v_new, current_length):
     """
     batch_size, num_heads, max_seq_len, head_dim = k_cache.shape
     _, _, new_seq_len, _ = k_new.shape
-    
-    # For each batch element
+
+    # Use Triton kernel when tensors are on CUDA
+    if k_cache.is_cuda:
+        stride_kcb, stride_kch, stride_kcn, stride_kck = k_cache.stride()
+        stride_vcb, stride_vch, stride_vcn, stride_vck = v_cache.stride()
+        stride_knb, stride_knh, stride_knn, stride_knk = k_new.stride()
+        stride_vnb, stride_vnh, stride_vnn, stride_vnk = v_new.stride()
+
+        grid = (batch_size * num_heads * new_seq_len,)
+        _append_to_kv_cache_kernel[grid](
+            k_cache, v_cache, k_new, v_new, current_length,
+            stride_kcb, stride_kch, stride_kcn, stride_kck,
+            stride_vcb, stride_vch, stride_vcn, stride_vck,
+            stride_knb, stride_knh, stride_knn, stride_knk,
+            stride_vnb, stride_vnh, stride_vnn, stride_vnk,
+            batch_size, num_heads, new_seq_len, head_dim, max_seq_len,
+            BLOCK_K=32,
+        )
+
+        grid_len = (triton.cdiv(batch_size, 128),)
+        _update_length_kernel[grid_len](
+            current_length, new_seq_len, batch_size, BLOCK=128
+        )
+        return
+
+    # Fallback PyTorch implementation
     for b in range(batch_size):
         curr_len = current_length[b].item()
-        
-        # Check if we have enough space in the cache
+
         if curr_len + new_seq_len > max_seq_len:
-            # If not enough space, only copy what fits
             copy_len = max(0, max_seq_len - curr_len)
             if copy_len > 0:
                 k_cache[b, :, curr_len:curr_len+copy_len, :] = k_new[b, :, :copy_len, :]
                 v_cache[b, :, curr_len:curr_len+copy_len, :] = v_new[b, :, :copy_len, :]
                 current_length[b] += copy_len
         else:
-            # Copy new keys and values to cache
             k_cache[b, :, curr_len:curr_len+new_seq_len, :] = k_new[b, :, :, :]
             v_cache[b, :, curr_len:curr_len+new_seq_len, :] = v_new[b, :, :, :]
             current_length[b] += new_seq_len
@@ -199,25 +220,39 @@ def triton_retrieve_from_kv_cache(k_cache, v_cache, indices):
     """
     batch_size, num_heads, max_seq_len, head_dim = k_cache.shape
     _, out_seq_len = indices.shape
-    
-    # Create output tensors
-    k_out = torch.empty((batch_size, num_heads, out_seq_len, head_dim), 
+
+    k_out = torch.empty((batch_size, num_heads, out_seq_len, head_dim),
                         dtype=k_cache.dtype, device=k_cache.device)
-    v_out = torch.empty((batch_size, num_heads, out_seq_len, head_dim), 
+    v_out = torch.empty((batch_size, num_heads, out_seq_len, head_dim),
                         dtype=v_cache.dtype, device=v_cache.device)
-    
-    # For each batch element
+
+    if k_cache.is_cuda:
+        stride_kcb, stride_kch, stride_kcn, stride_kck = k_cache.stride()
+        stride_vcb, stride_vch, stride_vcn, stride_vck = v_cache.stride()
+        stride_kob, stride_koh, stride_kon, stride_kok = k_out.stride()
+        stride_vob, stride_voh, stride_von, stride_vok = v_out.stride()
+        stride_ib, stride_in = indices.stride()
+
+        grid = (batch_size * num_heads * out_seq_len,)
+        _retrieve_from_kv_cache_kernel[grid](
+            k_cache, v_cache, k_out, v_out, indices,
+            stride_kcb, stride_kch, stride_kcn, stride_kck,
+            stride_vcb, stride_vch, stride_vcn, stride_vck,
+            stride_kob, stride_koh, stride_kon, stride_kok,
+            stride_vob, stride_voh, stride_von, stride_vok,
+            stride_ib, stride_in,
+            batch_size, num_heads, out_seq_len, head_dim,
+            BLOCK_B=1, BLOCK_H=1, BLOCK_N=1, BLOCK_K=32,
+        )
+        return k_out, v_out
+
+    # Fallback PyTorch implementation
     for b in range(batch_size):
         for s in range(out_seq_len):
-            # Get index to retrieve
             idx = indices[b, s].item()
-            
-            # Ensure index is valid
             if idx < 0 or idx >= max_seq_len:
                 continue
-                
-            # Copy from cache to output
             k_out[b, :, s, :] = k_cache[b, :, idx, :]
             v_out[b, :, s, :] = v_cache[b, :, idx, :]
-    
+
     return k_out, v_out
