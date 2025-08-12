@@ -150,3 +150,5 @@ The integration module (`integration.py`) provides a high-level interface for us
 - Support for mixed precision (FP16/BF16) computation
 - Dynamic kernel selection based on input size and hardware capabilities
 - Integration with other acceleration techniques, such as FlashAttention and quantization
+- Design a fused speculative decoding mega kernel combining draft generation,
+  verification, KV-cache updates and input sequence updates
