@@ -21,6 +21,8 @@ from .cnets import Model
 from .cnets1 import Model as Model1
 from .configs import EConfig
 
+from eagle.model.ea_trace import enable_ea_trace
+
 
 class EaModel(nn.Module):
 
@@ -431,6 +433,7 @@ class EaModel(nn.Module):
         )
         new_token = 0
         max_length = max_length - self.ea_layer.total_tokens - 10
+        enable_ea_trace(only_first_loop=True)
         for idx in range(max_length):
             # with Timer("all"):
             self.base_model.model.tree_mask = tree_mask
