@@ -13,6 +13,7 @@ from accelerate.utils import set_seed
 set_seed(0)
 
 import time
+import torch
 
 import shortuuid
 from fastchat.llm_judge.common import load_questions
@@ -115,6 +116,9 @@ def get_model_answers(
         use_eagle3=args.use_eagle3,
     )
 
+    if getattr(args, "torch_compile", False):
+        model = torch.compile(model)
+
     tokenizer = model.get_tokenizer()
 
     if temperature > 1e-5:
@@ -210,6 +214,9 @@ def get_model_answers(
             })
     print('Warmup done')
 
+    total_new_tokens = 0
+    total_wall_time = 0
+
     # questions=questions[6:]
     for question in tqdm(questions):
 
@@ -290,6 +297,8 @@ def get_model_answers(
                 })
             # torch.cuda.empty_cache()
             choices.append({"index": i, "turns": turns, "idxs": idxs, "new_tokens": new_tokens, "wall_time": wall_time})
+            total_new_tokens += sum(new_tokens)
+            total_wall_time += sum(wall_time)
 
         # Dump answers
         os.makedirs(os.path.dirname(answer_file), exist_ok=True)
@@ -302,6 +311,9 @@ def get_model_answers(
                 "tstamp": time.time(),
             }
             fout.write(json.dumps(ans_json) + "\n")
+
+    if total_wall_time > 0:
+        print(f"Average tokens per second: {total_new_tokens / total_wall_time:.2f}")
 
 
 def reorg_answer_file(answer_file):
@@ -407,6 +419,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_eagle3",
         action="store_true"
+    )
+
+    parser.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="Use torch.compile to optimize the model",
     )
 
     args = parser.parse_args()
