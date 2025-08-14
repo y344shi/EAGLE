@@ -76,7 +76,7 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 - <a href="https://github.com/intel-analytics/ipex-llm/pull/11104">Intel® LLM Library for PyTorch</a>
 - <a href="https://llm.mlc.ai/docs/deploy/rest.html">MLC-LLM</a>
 - <a href="https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/eagle">NVIDIA TensorRT-LLM</a>
-- <a href="https://docs.sglang.ai/backend/speculative_decoding.html">SGLang</a>
+- <a href="https://docs.sglang.ai/advanced_features/speculative_decoding.html">SGLang</a>
 - <a href="https://github.com/sgl-project/SpecForge">SpecForge</a>
 - <a href="https://github.com/vllm-project/vllm/pull/16937">vLLM</a>
 
@@ -149,7 +149,7 @@ pip install -r requirements.txt
 | [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B)    | [AngelSlim/Qwen3-8B_eagle3](https://huggingface.co/AngelSlim/Qwen3-8B_eagle3) | [Qwen/Qwen3-30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B)    | [AngelSlim/Qwen3-a3B_eagle3](https://huggingface.co/AngelSlim/Qwen3-a3B_eagle3) |
 | [Qwen/Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B)    | [AngelSlim/Qwen3-4B_eagle3](https://huggingface.co/AngelSlim/Qwen3-4B_eagle3) | [Qwen/Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B)    | [AngelSlim/Qwen3-32B_eagle3](https://huggingface.co/AngelSlim/Qwen3-32B_eagle3) |
 | [Qwen/Qwen3-1.7B](https://huggingface.co/Qwen/Qwen3-1.7B)    | [AngelSlim/Qwen3-1.7B_eagle3](https://huggingface.co/AngelSlim/Qwen3-1.7B_eagle3) | [Qwen/Qwen3-14B](https://huggingface.co/Qwen/Qwen3-14B)    | [AngelSlim/Qwen3-14B_eagle3](https://huggingface.co/AngelSlim/Qwen3-14B_eagle3) |
-| [openbmb/MiniCPM4-8B](https://huggingface.co/openbmb/MiniCPM4-8B)    | [linglingdan/Eagle3_for_MiniCPM4](https://modelscope.cn/models/linglingdan/Eagle3_for_MiniCPM4) | |  |
+
 
 ## EAGLE Weights
 
