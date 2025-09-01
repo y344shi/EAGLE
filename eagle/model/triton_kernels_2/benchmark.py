@@ -187,6 +187,8 @@ def main():
     def measure_block(do_patch: bool, label: str):
         if do_patch:
             patch_eagle_model(model)
+        else:
+            unpatch_eagle_model(model)
         try:
             total_dt = 0.0
             for _ in range(max(args.runs, 1)):

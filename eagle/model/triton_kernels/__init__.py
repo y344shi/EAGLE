@@ -1,59 +1,26 @@
 """
-Triton-optimized kernels for the EAGLE model.
-
-This package provides Triton-optimized CUDA kernels for the EAGLE model.
+Triton kernels for EAGLE model.
 """
 
-# Import direct implementations from modules
-from .attention import triton_attention
-from .kv_cache import triton_append_to_kv_cache, triton_retrieve_from_kv_cache
-from .tree_decoding import (
-    triton_compute_topk,
-    triton_compute_tree_mask,
-    triton_evaluate_posterior,
-    triton_update_inputs
-)
-
-# Import integration utilities
-from .integration import (
-    triton_attention_with_fallback,
-    triton_append_to_kv_cache_with_fallback,
-    triton_retrieve_from_kv_cache_with_fallback,
-    triton_compute_topk_with_fallback,
-    triton_compute_tree_mask_with_fallback,
-    triton_evaluate_posterior_with_fallback,
-    triton_update_inputs_with_fallback,
-    optimize_eagle_with_triton,
-)
+from .tree_attention import tree_attention, tree_decoding_triton
+from .topk_expand import topk_expand_triton, topk_generate_triton
+from .posterior_eval import evaluate_posterior_triton
+from .kv_block_copy import kv_block_copy_triton, update_inference_inputs_triton
+from .mask_preparation import prepare_decoder_attention_mask_triton
+from .integration import triton_kernels, TritonEagleKernels
+from .ea_model_patch import patch_eagle_model, unpatch_eagle_model
 
 __all__ = [
-    # Direct implementations
-    'triton_attention',
-    'triton_append_to_kv_cache',
-    'triton_retrieve_from_kv_cache',
-    'triton_compute_topk',
-    'triton_compute_tree_mask',
-    'triton_evaluate_posterior',
-    'triton_update_inputs',
-    
-    # Integration utilities
-    'triton_attention_with_fallback',
-    'triton_append_to_kv_cache_with_fallback',
-    'triton_retrieve_from_kv_cache_with_fallback',
-    'triton_compute_topk_with_fallback',
-    'triton_compute_tree_mask_with_fallback',
-    'triton_evaluate_posterior_with_fallback',
-    'triton_update_inputs_with_fallback',
-    'optimize_eagle_with_triton',
+    'tree_attention',
+    'tree_decoding_triton',
+    'topk_expand_triton',
+    'topk_generate_triton',
+    'evaluate_posterior_triton',
+    'kv_block_copy_triton',
+    'update_inference_inputs_triton',
+    'prepare_decoder_attention_mask_triton',
+    'triton_kernels',
+    'TritonEagleKernels',
+    'patch_eagle_model',
+    'unpatch_eagle_model',
 ]
-
-# Check if Triton is available
-try:
-    import triton
-    HAS_TRITON = True
-except ImportError:
-    import warnings
-    warnings.warn(
-        "Triton is not installed. To install Triton, run: pip install triton"
-    )
-    HAS_TRITON = False
