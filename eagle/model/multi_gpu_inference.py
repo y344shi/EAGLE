@@ -520,7 +520,7 @@ def load_model_multi_gpu(
     
     # Handle tensor parallelism for base model loading
     if use_tensor_parallel:
-        print(f"Loading base model ({Type}) with tensor parallelism across cuda:0 and cuda:1...")
+        print(f"Loading base model ({Type}) with tensor parallelism across cuda:5 and cuda:6...")
         
         # Get model config to determine number of layers
         from transformers import AutoConfig
@@ -531,24 +531,24 @@ def load_model_multi_gpu(
         device_map = {}
         
         # Put embedding on first GPU
-        device_map["model.embed_tokens"] = "cuda:0"
+        device_map["model.embed_tokens"] = "cuda:5"
         
         # Split layers evenly between cuda:0 and cuda:1
         layers_per_gpu = num_layers // 2
         
         for i in range(num_layers):
             if i < layers_per_gpu:
-                device_map[f"model.layers.{i}"] = "cuda:0"
+                device_map[f"model.layers.{i}"] = "cuda:5"
             else:
-                device_map[f"model.layers.{i}"] = "cuda:1"
+                device_map[f"model.layers.{i}"] = "cuda:6"
         
         # Put final norm and lm_head on second GPU
-        device_map["model.norm"] = "cuda:1"
-        device_map["lm_head"] = "cuda:1"
+        device_map["model.norm"] = "cuda:6"
+        device_map["lm_head"] = "cuda:6"
         
-        print(f"  - Layers 0-{layers_per_gpu-1} on cuda:0")
-        print(f"  - Layers {layers_per_gpu}-{num_layers-1} on cuda:1")
-        print(f"  - Embedding on cuda:0, norm and lm_head on cuda:1")
+        print(f"  - Layers 0-{layers_per_gpu-1} on cuda:5")
+        print(f"  - Layers {layers_per_gpu}-{num_layers-1} on cuda:6")
+        print(f"  - Embedding on cuda:0, norm and lm_head on cuda:6")
         
     else:
         print(f"Loading base model ({Type}) on device {base_device}...")
