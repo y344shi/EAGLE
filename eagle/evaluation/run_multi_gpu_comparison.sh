@@ -23,13 +23,9 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --use-eagle3)
-        USE_EAGLE3="--use-eagle3"
-        shift
-        ;;
-    --use-tensor-parallel)
-        USE_TENSOR_PARALLEL="--use-tensor-parallel"
-        shift
-        ;;
+      USE_EAGLE3=true
+      shift
+      ;;
     --base-device)
       BASE_DEVICE="$2"
       shift 2
@@ -69,7 +65,7 @@ if [ -z "$BASE_MODEL_PATH" ] || [ -z "$EA_MODEL_PATH" ]; then
 fi
 
 # Prepare command
-CMD="/home/y344shi/miniconda3/envs/eagle/bin/python -m eagle.evaluation.compare_multi_gpu"
+CMD="python3 -m eagle.evaluation.compare_multi_gpu"
 CMD="$CMD --base-model $BASE_MODEL_PATH"
 CMD="$CMD --ea-model $EA_MODEL_PATH"
 CMD="$CMD --base-device $BASE_DEVICE"
@@ -83,14 +79,12 @@ if [ "$USE_EAGLE3" = true ]; then
   CMD="$CMD --use-eagle3"
 fi
 
-if [ "$USE_TENSOR_PARALLEL" = "--use-tensor-parallel" ]; then
-  CMD="$CMD --use-tensor-parallel"
-fi
-
 if [ "$IS_LLAMA3" = true ]; then
   CMD="$CMD --is-llama3"
 fi
-
+if [ "$USE_TENSOR_PARALLEL" = true ]; then
+  CMD="$CMD --use-tensor-parallel"
+fi
 # Print the command
 echo "Running: $CMD"
 
