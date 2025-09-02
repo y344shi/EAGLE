@@ -44,13 +44,9 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --use-tensor-parallel)
-        USE_TENSOR_PARALLEL=true
-        shift
-        ;;
-    --run-all)
-        RUN_ALL=true
-        shift
-        ;;
+      USE_TENSOR_PARALLEL=true
+      shift
+      ;;
     --prompt)
       PROMPT="$2"
       shift 2
@@ -95,11 +91,6 @@ if [ "$USE_TENSOR_PARALLEL" = true ]; then
   CMD="$CMD --use-tensor-parallel"
 fi
 # Print the command
-echo "Running: $CMD"
-
-# Execute the command
-eval $CMD
-
 echo "Running: $CMD"
 
 # Execute the command
