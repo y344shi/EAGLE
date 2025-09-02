@@ -59,9 +59,27 @@ def parse_args():
     return parser.parse_args()
 
 def measure_generation_time(model, input_ids, args, num_runs=5):
-    """Measure the generation time for a given model."""
+    """Measure the generation time for a given model and return the last output."""
     times = []
     tokens = []
+    last_output_ids = None
+    
+    # Warmup runs (same as gen_ea_answer_llama3chat.py)
+    print(f"  Performing warmup runs...")
+    for warmup_idx in range(3):
+        print(f"    Warmup {warmup_idx + 1}/3...")
+        torch.cuda.synchronize()
+        _, _, _ = model.eagenerate(
+            input_ids=input_ids,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            top_k=args.top_k,
+            max_new_tokens=min(10, args.max_new_tokens),  # Short warmup
+            is_llama3=args.is_llama3,
+            log=True
+        )
+        torch.cuda.synchronize()
+    print(f"  Warmup completed!")
     
     print(f"  Starting {num_runs} performance measurement runs...")
     for run_idx in range(num_runs):
@@ -92,6 +110,9 @@ def measure_generation_time(model, input_ids, args, num_runs=5):
             run_tokens = new_tokens
             tokens.append(new_tokens)
         
+        # Store the output from the last run
+        last_output_ids = output_ids
+        
         print(f"    Run {run_idx + 1}/{num_runs}: Completed in {run_time:.2f}s, generated {run_tokens} tokens ({run_tokens/run_time:.2f} tokens/sec)")
     
     print(f"  All {num_runs} runs completed!")
@@ -99,7 +120,8 @@ def measure_generation_time(model, input_ids, args, num_runs=5):
         "mean_time": np.mean(times),
         "std_time": np.std(times),
         "mean_tokens": np.mean(tokens),
-        "tokens_per_second": np.mean(tokens) / np.mean(times)
+        "tokens_per_second": np.mean(tokens) / np.mean(times),
+        "last_output_ids": last_output_ids
     }
 
 def main():
@@ -115,74 +137,74 @@ def main():
     print(f"Input length: {input_ids.shape[1]} tokens")
     
     # Load single-GPU model
-    # print("\nLoading single-GPU model...")
-    # single_gpu_model = load_model_multi_gpu(
-    #     args.base_model,
-    #     args.ea_model,
-    #     use_eagle3=args.use_eagle3,
-    #     use_multi_gpu=False,
-    #     base_device=args.base_device,
-    #     depth=args.depth,
-    #     threshold=args.threshold
-    # )
+    print("\nLoading single-GPU model...")
+    single_gpu_model = load_model_multi_gpu(
+        args.base_model,
+        args.ea_model,
+        use_eagle3=args.use_eagle3,
+        use_multi_gpu=False,
+        base_device=args.base_device,
+        depth=args.depth,
+        threshold=args.threshold,
+        total_token=args.total_token,
+        torch_dtype=torch.float16,
+        low_cpu_mem_usage=True
+    )
     
-    # # Measure single-GPU performance first
-    # print(f"\nMeasuring single-GPU performance ({args.num_runs} runs)...")
-    # single_gpu_results = measure_generation_time(single_gpu_model, input_ids, args, args.num_runs)
+    # Measure single-GPU performance first
+    print(f"\nMeasuring single-GPU performance ({args.num_runs} runs)...")
+    single_gpu_results = measure_generation_time(single_gpu_model, input_ids, args, args.num_runs)
     
-    # # Generate text with single-GPU for comparison
-    # with torch.no_grad():
-    #     single_gpu_output_ids = single_gpu_model.eagenerate(
-    #         input_ids=input_ids,
-    #         temperature=args.temperature,
-    #         top_p=args.top_p,
-    #         top_k=args.top_k,
-    #         max_new_tokens=args.max_new_tokens,
-    #         is_llama3=args.is_llama3
-    #     )
-    # single_gpu_output = tokenizer.decode(single_gpu_output_ids[0], skip_special_tokens=True)
+    # Use the output from the last measurement run (no need to generate again)
+    single_gpu_output = tokenizer.decode(single_gpu_results["last_output_ids"][0], skip_special_tokens=True)
     
-    # # Print and save single-GPU results summary
-    # print("\n===== SINGLE-GPU RESULTS SUMMARY =====")
-    # print(f"Device: {args.base_device}")
-    # print(f"Mean generation time: {single_gpu_results['mean_time']:.4f}s ± {single_gpu_results['std_time']:.4f}s")
-    # print(f"Mean tokens generated: {single_gpu_results['mean_tokens']:.1f}")
-    # print(f"Tokens per second: {single_gpu_results['tokens_per_second']:.2f}")
-    # print(f"Output length: {len(single_gpu_output)} characters")
+    # Print and save single-GPU results summary
+    print("\n===== SINGLE-GPU RESULTS SUMMARY =====")
+    print(f"Device: {args.base_device}")
+    print(f"Mean generation time: {single_gpu_results['mean_time']:.4f}s ± {single_gpu_results['std_time']:.4f}s")
+    print(f"Mean tokens generated: {single_gpu_results['mean_tokens']:.1f}")
+    print(f"Tokens per second: {single_gpu_results['tokens_per_second']:.2f}")
+    print(f"Output length: {len(single_gpu_output)} characters")
     
-    # # Save single-GPU results to file
-    # import json
-    # from datetime import datetime
+    # Save single-GPU results to file
+    import json
+    from datetime import datetime
     
-    # single_gpu_summary = {
-    #     "timestamp": datetime.now().isoformat(),
-    #     "model_config": {
-    #         "base_model": args.base_model,
-    #         "ea_model": args.ea_model,
-    #         "use_eagle3": args.use_eagle3,
-    #         "device": args.base_device,
-    #         "max_new_tokens": args.max_new_tokens,
-    #         "num_runs": args.num_runs
-    #     },
-    #     "performance": single_gpu_results,
-    #     "prompt": args.prompt,
-    #     "output": single_gpu_output,
-    #     "output_length_chars": len(single_gpu_output)
-    # }
+    # Convert tensors to serializable format
+    performance_results = {
+        "mean_time": float(single_gpu_results["mean_time"]),
+        "std_time": float(single_gpu_results["std_time"]),
+        "mean_tokens": float(single_gpu_results["mean_tokens"]),
+        "tokens_per_second": float(single_gpu_results["tokens_per_second"])
+    }
     
-    # output_file = f"single_gpu_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    # with open(output_file, 'w', encoding='utf-8') as f:
-    #     json.dump(single_gpu_summary, f, indent=2, ensure_ascii=False)
+    single_gpu_summary = {
+        "timestamp": datetime.now().isoformat(),
+        "model_config": {
+            "base_model": args.base_model,
+            "ea_model": args.ea_model,
+            "use_eagle3": args.use_eagle3,
+            "device": args.base_device,
+            "max_new_tokens": args.max_new_tokens,
+            "num_runs": args.num_runs
+        },
+        "performance": performance_results,
+        "prompt": args.prompt,
+        "output": single_gpu_output,
+        "output_length_chars": len(single_gpu_output)
+    }
     
-    # print(f"Single-GPU results saved to: {output_file}")
+    output_file = f"single_gpu_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(single_gpu_summary, f, indent=2, ensure_ascii=False)
     
-    # # Clean up single-GPU model to free memory
-    # print("\nCleaning up single-GPU model...")
-    # del single_gpu_model
-    # torch.cuda.empty_cache()
+    print(f"Single-GPU results saved to: {output_file}")
     
-    # Load multi-GPU model
-    # Load multi-GPU model
+    # Clean up single-GPU model to free memory
+    print("\nCleaning up single-GPU model...")
+    del single_gpu_model
+    torch.cuda.empty_cache()
+    
     # Load multi-GPU model
     print("\n" + "="*60)
     print("PHASE 2: MULTI-GPU MODEL SETUP")
@@ -207,7 +229,6 @@ def main():
     print("Multi-GPU model loaded successfully!")
     print_memory_usage("after model loading")
     
-    # Warm-up run for multi-GPU model
     # Warm-up run for multi-GPU model
     print("\n" + "="*60)
     print("PHASE 3: WARM-UP RUN")
@@ -244,68 +265,50 @@ def main():
     print("Performance measurement completed!")
     print_memory_usage("after performance measurement")
     
-    # Generate text with multi-GPU for comparison
-    print("\n" + "="*60)
-    print("PHASE 5: FINAL TEXT GENERATION")
-    print("="*60)
-    print_memory_usage("before final generation")
-    print(f"Generating final output ({args.max_new_tokens} tokens)...")
-    
-    # Force garbage collection before final generation
-    gc.collect()
-    
-    with torch.no_grad():
-        multi_gpu_output_ids = multi_gpu_model.eagenerate(
-            input_ids=input_ids,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            top_k=args.top_k,
-            max_new_tokens=args.max_new_tokens,
-            is_llama3=args.is_llama3
-        )
-    multi_gpu_output = tokenizer.decode(multi_gpu_output_ids[0], skip_special_tokens=True)
+    # Use the output from the last measurement run (no need to generate again)
+    multi_gpu_output = tokenizer.decode(multi_gpu_results["last_output_ids"][0], skip_special_tokens=True)
     print("Final text generation completed!")
     print_memory_usage("after final generation")
     
     # Print results
-    # print("\n===== PERFORMANCE COMPARISON =====")
-    # print(f"Single-GPU ({args.base_device}):")
-    # print(f"  Mean time: {single_gpu_results['mean_time']:.4f}s ± {single_gpu_results['std_time']:.4f}s")
-    # print(f"  Mean tokens: {single_gpu_results['mean_tokens']:.1f}")
-    # print(f"  Tokens per second: {single_gpu_results['tokens_per_second']:.2f}")
+    print("\n===== PERFORMANCE COMPARISON =====")
+    print(f"Single-GPU ({args.base_device}):")
+    print(f"  Mean time: {single_gpu_results['mean_time']:.4f}s ± {single_gpu_results['std_time']:.4f}s")
+    print(f"  Mean tokens: {single_gpu_results['mean_tokens']:.1f}")
+    print(f"  Tokens per second: {single_gpu_results['tokens_per_second']:.2f}")
     
     print(f"\nMulti-GPU (Base: {args.base_device}, Draft: {args.draft_device}):")
     print(f"  Mean time: {multi_gpu_results['mean_time']:.4f}s ± {multi_gpu_results['std_time']:.4f}s")
     print(f"  Mean tokens: {multi_gpu_results['mean_tokens']:.1f}")
     print(f"  Tokens per second: {multi_gpu_results['tokens_per_second']:.2f}")
     
-    # speedup = single_gpu_results['mean_time'] / multi_gpu_results['mean_time']
-    # print(f"\nSpeedup: {speedup:.2f}x")
+    speedup = single_gpu_results['mean_time'] / multi_gpu_results['mean_time']
+    print(f"\nSpeedup: {speedup:.2f}x")
     
-    # # Check if outputs match
-    # outputs_match = single_gpu_output == multi_gpu_output
-    # print(f"\nOutputs match: {outputs_match}")
+    # Check if outputs match
+    outputs_match = single_gpu_output == multi_gpu_output
+    print(f"\nOutputs match: {outputs_match}")
     
-    # # Print outputs
-    # print("\n===== SINGLE-GPU OUTPUT =====")
-    # print(single_gpu_output)
+    # Print outputs
+    print("\n===== SINGLE-GPU OUTPUT =====")
+    print(single_gpu_output)
     
     print("\n===== MULTI-GPU OUTPUT =====")
     print(multi_gpu_output)
     
     # If outputs don't match, show where they differ
-    # if not outputs_match:
-    #     print("\n===== DIFFERENCES =====")
-    #     min_len = min(len(single_gpu_output), len(multi_gpu_output))
-    #     for i in range(min_len):
-    #         if single_gpu_output[i] != multi_gpu_output[i]:
-    #             start = max(0, i - 10)
-    #             end_single = min(len(single_gpu_output), i + 10)
-    #             end_multi = min(len(multi_gpu_output), i + 10)
-    #             print(f"First difference at position {i}:")
-    #             print(f"Single-GPU: ...{single_gpu_output[start:end_single]}...")
-    #             print(f"Multi-GPU:  ...{multi_gpu_output[start:end_multi]}...")
-    #             break
+    if not outputs_match:
+        print("\n===== DIFFERENCES =====")
+        min_len = min(len(single_gpu_output), len(multi_gpu_output))
+        for i in range(min_len):
+            if single_gpu_output[i] != multi_gpu_output[i]:
+                start = max(0, i - 10)
+                end_single = min(len(single_gpu_output), i + 10)
+                end_multi = min(len(multi_gpu_output), i + 10)
+                print(f"First difference at position {i}:")
+                print(f"Single-GPU: ...{single_gpu_output[start:end_single]}...")
+                print(f"Multi-GPU:  ...{multi_gpu_output[start:end_multi]}...")
+                break
 
 if __name__ == "__main__":
     main()

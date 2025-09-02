@@ -483,7 +483,6 @@ def load_model_multi_gpu(
     Type = AutoConfig.from_pretrained(base_model_path).architectures[0]
     
     # Load base model on specified device
-    # Load base model on specified device
     # Extract parameters that should not be passed to the model constructor
     depth = kwargs.pop("depth", 7)
     total_token = kwargs.pop("total_token", 60)
@@ -524,8 +523,8 @@ def load_model_multi_gpu(
         if not os.path.exists(load_model_path):
             print("  - Downloading pytorch_model.bin from HuggingFace Hub...")
             load_model_path = hf_hub_download(ea_model_path, "pytorch_model.bin")
-        print("  - Loading pytorch_model.bin...")
-        ea_layer_state_dict = torch.load(load_model_path, map_location="cpu")
+        print(f"  - Loading pytorch_model.bin to device {base_device}...")
+        ea_layer_state_dict = torch.load(load_model_path, map_location=base_device)
         print("  - PyTorch model weights loaded successfully")
     except:
         print("  - PyTorch model not found, trying SafeTensors...")
@@ -534,8 +533,8 @@ def load_model_multi_gpu(
         if not os.path.exists(load_model_path):
             print("  - Downloading model.safetensors from HuggingFace Hub...")
             load_model_path = hf_hub_download(ea_model_path, "model.safetensors")
-        print("  - Loading model.safetensors...")
-        ea_layer_state_dict = load_file(load_model_path)
+        print(f"  - Loading model.safetensors to device {base_device}...")
+        ea_layer_state_dict = load_file(load_model_path, device=base_device)
         print("  - SafeTensors model weights loaded successfully")
     
     # Model parameters already extracted above

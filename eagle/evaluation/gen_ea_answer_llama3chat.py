@@ -198,16 +198,20 @@ def get_model_answers(
                     output = output.replace(special_token, "")
             output = output.strip()
 
-
-
             turns.append(output)
             idxs.append(int(idx))
             new_tokens.append(int(new_token))
             wall_time.append(total_time)
+            
+            # Display performance metrics
+            tokens_per_second = int(new_token) / total_time if total_time > 0 else 0
+            print(f"  Turn {j+1}: Generated {int(new_token)} tokens in {total_time:.2f}s ({tokens_per_second:.2f} tokens/sec)")
+            
             messages.append({
                 "role": "assistant",
                 "content": output
             })
+            
     print('Warmup done')
 
     # questions=questions[6:]
@@ -284,10 +288,22 @@ def get_model_answers(
                 idxs.append(int(idx))
                 new_tokens.append(int(new_token))
                 wall_time.append(total_time)
+                
+                # Display performance metrics for each turn
+                tokens_per_second = int(new_token) / total_time if total_time > 0 else 0
+                print(f"  Turn {j+1}: Generated {int(new_token)} tokens in {total_time:.2f}s ({tokens_per_second:.2f} tokens/sec)")
+                
                 messages.append({
                     "role": "assistant",
                     "content": output
                 })
+            
+            # Display overall performance for this choice
+            total_tokens = sum(new_tokens)
+            total_time_all_turns = sum(wall_time)
+            overall_tokens_per_second = total_tokens / total_time_all_turns if total_time_all_turns > 0 else 0
+            print(f"Choice {i+1} Summary: {total_tokens} total tokens in {total_time_all_turns:.2f}s ({overall_tokens_per_second:.2f} tokens/sec)")
+            
             # torch.cuda.empty_cache()
             choices.append({"index": i, "turns": turns, "idxs": idxs, "new_tokens": new_tokens, "wall_time": wall_time})
 
