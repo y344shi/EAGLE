@@ -26,8 +26,8 @@ This separation can improve performance by:
 from eagle.model.multi_gpu_inference import load_model_multi_gpu
 
 model = load_model_multi_gpu(
-    base_model_path="path/to/base/model",
-    ea_model_path="path/to/eagle/model",
+    base_model_path="meta-llama/Llama-3.1-8B-Instruct",
+    ea_model_path="yuhuili/EAGLE3-LLaMA3.1-Instruct-8B",
     use_eagle3=True,  # Set to False for EAGLE2
     use_multi_gpu=True,  # Enable multi-GPU mode
     base_device="cuda:0",  # Device for the base model
@@ -41,8 +41,8 @@ We provide a script to compare the performance between single-GPU and multi-GPU 
 
 ```bash
 bash eagle/evaluation/run_multi_gpu_comparison.sh \
-    --base-model path/to/base/model \
-    --ea-model path/to/eagle/model \
+    --base-model meta-llama/Llama-3.1-8B-Instruct \
+    --ea-model yuhuili/EAGLE3-LLaMA3.1-Instruct-8B \
     --use-eagle3 \
     --base-device cuda:0 \
     --draft-device cuda:1 \

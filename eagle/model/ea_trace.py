@@ -22,18 +22,7 @@ disable_ea_trace()                      # restore originals when done
 import importlib
 import builtins
 
-# We'll patch symbols on the module where ea_generate resolves them from.
-# In your repo, ea_model.py does: `from .utils import *`
-# so calls like initialize_tree(...) resolve on the `ea_model` module namespace.
-#
-# Thus we patch on `ea_model` (NOT on `utils`), so that ea_generate() picks them up.
-#
-# If your package name is different, adjust the import below.
-try:
-    em = importlib.import_module("ea_model")        # local module name variant
-except Exception:
-    # If package-style import (e.g., project.ea_model) is needed, let users modify here.
-    em = importlib.import_module(".ea_model")       # may fail; user can edit as needed
+from . import ea_model as em
 
 
 _ORIG = {}

@@ -25,12 +25,16 @@ class Timer:
     def __init__(self,name):
         self.name = name
     def __enter__(self):
-        torch.cuda.synchronize()
+        # Only synchronize CUDA if CUDA is available and being used
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         self.start = time.perf_counter()
 
 
     def __exit__(self, exc_type, exc_value, traceback):
-        torch.cuda.synchronize()
+        # Only synchronize CUDA if CUDA is available and being used
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         elapsed = time.perf_counter() - self.start
         print(f'{self.name} took {elapsed} seconds')
 
@@ -246,11 +250,23 @@ def initialize_tree(input_ids, model, past_key_values, logits_processor):
 
     # Clone the output hidden states
     if model.use_eagle3:
-        ea_device = model.ea_layer.lm_head.weight.device
+        # Check if this is a multi-GPU model with cross-device setup
+        if hasattr(model, 'cross_device') and model.cross_device:
+            ea_device = model.draft_device
+        else:
+            ea_device = model.ea_layer.lm_head.weight.device
+        
         if outputs["hidden_states"][0].device != ea_device:
             outputs["hidden_states"] = [x.to(ea_device) for x in outputs["hidden_states"]]
         hidden_states=torch.cat(outputs["hidden_states"],dim=-1)
-    draft_tokens, retrieve_indices,tree_mask,tree_position_ids = model.ea_layer.topK_genrate(hidden_states, input_ids, model.base_model.lm_head,logits_processor)
+    
+    # Use appropriate lm_head for multi-GPU setup
+    if hasattr(model, 'cross_device') and model.cross_device:
+        head_to_use = model.draft_lm_head
+    else:
+        head_to_use = model.base_model.lm_head
+    
+    draft_tokens, retrieve_indices,tree_mask,tree_position_ids = model.ea_layer.topK_genrate(hidden_states, input_ids, head_to_use, logits_processor)
     return draft_tokens, retrieve_indices,tree_mask,tree_position_ids, orig, hidden_states, token
 
 
@@ -322,7 +338,12 @@ def tree_decoding(
     )
 
     if model.use_eagle3:
-        ea_device = model.ea_layer.lm_head.weight.device
+        # Check if this is a multi-GPU model with cross-device setup
+        if hasattr(model, 'cross_device') and model.cross_device:
+            ea_device = model.draft_device
+        else:
+            ea_device = model.ea_layer.lm_head.weight.device
+        
         if outputs["hidden_states"][0].device != ea_device:
             outputs["hidden_states"] = [x.to(ea_device) for x in outputs["hidden_states"]]
         hidden_state = torch.cat(outputs["hidden_states"], dim=-1)
@@ -463,9 +484,15 @@ def update_inference_inputs(
         token = torch.argmax(prob)
         token = token[None, None]
     # hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
+    # Use appropriate lm_head for multi-GPU setup
+    if hasattr(model, 'cross_device') and model.cross_device:
+        head_to_use = model.draft_lm_head
+    else:
+        head_to_use = model.base_model.lm_head
+    
     draft_tokens, retrieve_indices,tree_mask,tree_position_ids = model.ea_layer.topK_genrate(accept_hidden_state_new,
                                               input_ids=torch.cat((input_ids, token.to(input_ids.device)), dim=1),
-                                              head=model.base_model.lm_head,logits_processor=logits_processor)
+                                              head=head_to_use,logits_processor=logits_processor)
 
 
     new_token += accept_length + 1

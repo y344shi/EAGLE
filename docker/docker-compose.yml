@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  eagle-inference:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        CUDA_VERSION: "11.8"
+        PYTHON_VERSION: "3.10"
+    image: eagle-inference:latest
+    container_name: eagle-inference
+    
+    # GPU configuration
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    
+    # Environment variables
+    environment:
+      - CUDA_VISIBLE_DEVICES=0,1
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - HF_HOME=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+      - HF_DATASETS_CACHE=/root/.cache/huggingface/datasets
+    
+    # Volume mounts
+    volumes:
+      - ../:/workspace
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ./results:/workspace/results
+      - /tmp:/tmp
+    
+    # Resource limits
+    mem_limit: 32g
+    shm_size: 8g
+    
+    # Network configuration
+    network_mode: host
+    
+    # Keep container running
+    stdin_open: true
+    tty: true
+    
+    # Working directory
+    working_dir: /workspace
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import torch; assert torch.cuda.is_available()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Restart policy
+    restart: unless-stopped
+
+  # Optional: Jupyter notebook service for development
+  eagle-jupyter:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: eagle-inference:latest
+    container_name: eagle-jupyter
+    
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    
+    environment:
+      - CUDA_VISIBLE_DEVICES=0,1
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - HF_HOME=/root/.cache/huggingface
+    
+    volumes:
+      - ../:/workspace
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ./results:/workspace/results
+    
+    ports:
+      - "8888:8888"
+    
+    command: >
+      bash -c "
+        pip install jupyter jupyterlab &&
+        jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
+      "
+    
+    mem_limit: 16g
+    shm_size: 4g
+    
+    profiles:
+      - jupyter
+    
+    restart: unless-stopped
+
+networks:
+  default:
+    driver: bridge

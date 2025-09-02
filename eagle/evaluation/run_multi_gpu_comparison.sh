@@ -65,7 +65,7 @@ if [ -z "$BASE_MODEL_PATH" ] || [ -z "$EA_MODEL_PATH" ]; then
 fi
 
 # Prepare command
-CMD="python -m eagle.evaluation.compare_multi_gpu"
+CMD="/home/y344shi/miniconda3/envs/eagle/bin/python -m eagle.evaluation.compare_multi_gpu"
 CMD="$CMD --base-model $BASE_MODEL_PATH"
 CMD="$CMD --ea-model $EA_MODEL_PATH"
 CMD="$CMD --base-device $BASE_DEVICE"

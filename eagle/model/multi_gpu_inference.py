@@ -8,6 +8,11 @@ from transformers import AutoTokenizer
 from eagle.model.ea_model import EaModel
 from eagle.model.utils import prepare_logits_processor
 
+from eagle.model.kv_cache import initialize_past_key_values
+from eagle.model.utils import *
+
+from huggingface_hub import hf_hub_download
+
 class MultiGpuEaModel(EaModel):
     """
     Extension of EaModel that supports placing the draft model on a separate GPU.
@@ -40,20 +45,38 @@ class MultiGpuEaModel(EaModel):
         
         # Set up draft model device
         self.base_device = base_model.model.layers[-1].self_attn.q_proj.weight.device
-        self.draft_device = draft_device if draft_device is not None else self.base_device
+        self.draft_device = torch.device(draft_device) if draft_device is not None else self.base_device
         self.cross_device = (self.draft_device != self.base_device)
         
         # Move draft model to specified device
         if self.cross_device:
             print(f"Moving draft model from {self.base_device} to {self.draft_device}")
+            print("  - Moving EA layer to draft device...")
             self.ea_layer.to(self.draft_device)
+            print("  - EA layer moved successfully")
             
             # Set up cross-device communication flags
+            print("  - Setting up cross-device communication flags...")
             self.ea_layer.diff_device = True
             if hasattr(self.ea_layer, "headweight"):
+                print("  - Cloning headweight to draft device...")
                 self.ea_layer.headweight = self.base_model.lm_head.weight.clone().to(self.draft_device)
+                print("  - Headweight cloned successfully")
             else:
                 self.ea_layer.layer_device = self.draft_device
+            
+            # Keep a copy of lm_head on draft device for draft model use
+            print("  - Creating draft LM head copy...")
+            self.draft_lm_head = torch.nn.Linear(
+                self.base_model.lm_head.in_features,
+                self.base_model.lm_head.out_features,
+                bias=self.base_model.lm_head.bias is not None
+            ).to(self.draft_device)
+            print("  - Copying LM head weights...")
+            self.draft_lm_head.weight.data = self.base_model.lm_head.weight.data.clone().to(self.draft_device)
+            if self.base_model.lm_head.bias is not None:
+                self.draft_lm_head.bias.data = self.base_model.lm_head.bias.data.clone().to(self.draft_device)
+            print("  - Draft LM head setup complete")
     
     def forward(
             self,
@@ -72,7 +95,13 @@ class MultiGpuEaModel(EaModel):
                 position_ids=position_ids,
             )
             if output_orig:
-                orig = self.base_model.lm_head(outputs[0])
+                # Ensure lm_head computation happens on the same device as hidden states
+                hidden_states_for_lm_head = outputs[0]
+                if self.cross_device:
+                    # Use the original lm_head on base device for consistency
+                    orig = self.base_model.lm_head(hidden_states_for_lm_head)
+                else:
+                    orig = self.base_model.lm_head(hidden_states_for_lm_head)
             hidden_states = outputs[0]
 
         # Handle cross-device communication if needed
@@ -109,7 +138,7 @@ class MultiGpuEaModel(EaModel):
             logits_processor = None
             
         # Create CUDA streams for overlapping operations if using multiple GPUs
-        if self.cross_device:
+        if self.cross_device and self.draft_device.type == 'cuda':
             base_stream = torch.cuda.Stream(device=self.base_device)
             draft_stream = torch.cuda.Stream(device=self.draft_device)
         
@@ -140,7 +169,12 @@ class MultiGpuEaModel(EaModel):
         
         # Prefill
         if self.cross_device:
-            with torch.cuda.stream(base_stream):
+            if self.draft_device.type == 'cuda':
+                with torch.cuda.stream(base_stream):
+                    draft_tokens, retrieve_indices, tree_mask, tree_position_ids, logits, hidden_state, sample_token = self._initialize_tree_multi_gpu(
+                        input_ids, past_key_values, logits_processor
+                    )
+            else:
                 draft_tokens, retrieve_indices, tree_mask, tree_position_ids, logits, hidden_state, sample_token = self._initialize_tree_multi_gpu(
                     input_ids, past_key_values, logits_processor
                 )
@@ -152,14 +186,30 @@ class MultiGpuEaModel(EaModel):
         new_token = 0
         max_length = max_length - self.ea_layer.total_tokens - 10
         
+        print(f"Starting generation loop (max {max_length} iterations)...")
         for idx in range(max_length):
+            # Progress indicator every 10 iterations
+            if idx % 10 == 0:
+                print(f"  Generation step {idx}/{max_length} - Generated {new_token} tokens so far")
+                # Force garbage collection every 10 steps to reduce memory pressure
+                import gc
+                gc.collect()
+                if self.cross_device and self.draft_device.type == 'cpu':
+                    # Give CPU a brief moment to catch up
+                    import time
+                    time.sleep(0.0001)
+            
             self.base_model.model.tree_mask = tree_mask
 
             if self.cross_device:
                 # Move draft tokens to base model device
+                if idx % 50 == 0:  # Reduce logging frequency to reduce CPU load
+                    print(f"    Step {idx}: Moving draft tokens to base device...")
                 draft_tokens_base = draft_tokens.to(self.base_device)
                 
                 # Target model forward, get logits
+                if idx % 50 == 0:
+                    print(f"    Step {idx}: Running tree decoding on base model...")
                 logits, hidden_state_new, outputs = self._tree_decoding_multi_gpu(
                     draft_tokens_base,
                     past_key_values,
@@ -183,12 +233,16 @@ class MultiGpuEaModel(EaModel):
             candidates = draft_tokens_padded[0, retrieve_indices.to(self.base_device)]
             
             # Verification
+            if idx % 50 == 0:
+                print(f"    Step {idx}: Evaluating posterior probabilities...")
             best_candidate, accept_length, sample_p = evaluate_posterior(
                 logits, candidates, logits_processor
             )
         
             # Adjusting the input sequence, draft model forward
             if self.cross_device:
+                if idx % 50 == 0:
+                    print(f"    Step {idx}: Updating inference inputs (accepted {accept_length} tokens)...")
                 input_ids, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token, hidden_state, sample_token = self._update_inference_inputs_multi_gpu(
                     input_ids,
                     candidates,
@@ -220,19 +274,26 @@ class MultiGpuEaModel(EaModel):
 
             if is_llama3:
                 if stop_token_id in input_ids[0, input_len:].tolist():
+                    print(f"  Generation stopped at step {idx}: Found stop token")
                     break
 
             if self.tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
+                print(f"  Generation stopped at step {idx}: Found EOS token")
                 break
             if new_token > max_new_tokens:
+                print(f"  Generation stopped at step {idx}: Reached max tokens ({new_token}/{max_new_tokens})")
                 break
             if input_ids.shape[1] > max_length:
+                print(f"  Generation stopped at step {idx}: Reached max length")
                 break
+        
+        print(f"Generation loop completed after {idx+1} steps, generated {new_token} tokens")
                 
         # Synchronize streams before returning if using multiple GPUs
         if self.cross_device:
             torch.cuda.synchronize(self.base_device)
-            torch.cuda.synchronize(self.draft_device)
+            if self.draft_device.type == 'cuda':
+                torch.cuda.synchronize(self.draft_device)
             
         if not log:
             return input_ids
@@ -266,10 +327,11 @@ class MultiGpuEaModel(EaModel):
                 hidden_states = torch.cat(outputs["hidden_states"], dim=-1)
         
         # Generate draft tokens on the draft model device
+        head_to_use = self.draft_lm_head if self.cross_device else self.base_model.lm_head
         draft_tokens, retrieve_indices, tree_mask, tree_position_ids = self.ea_layer.topK_genrate(
             hidden_states, 
             input_ids.to(self.draft_device), 
-            self.base_model.lm_head.to(self.draft_device) if self.cross_device else self.base_model.lm_head,
+            head_to_use,
             logits_processor
         )
         
@@ -369,10 +431,11 @@ class MultiGpuEaModel(EaModel):
         token = token.to(input_ids.device)
         
         # Generate new draft tokens
+        head_to_use = self.draft_lm_head if self.cross_device else self.base_model.lm_head
         draft_tokens, retrieve_indices, tree_mask, tree_position_ids = self.ea_layer.topK_genrate(
             accept_hidden_state_new,
             input_ids=torch.cat((input_ids, token), dim=1).to(self.draft_device),
-            head=self.base_model.lm_head.to(self.draft_device) if self.cross_device else self.base_model.lm_head,
+            head=head_to_use,
             logits_processor=logits_processor
         )
 
@@ -420,45 +483,68 @@ def load_model_multi_gpu(
     Type = AutoConfig.from_pretrained(base_model_path).architectures[0]
     
     # Load base model on specified device
+    # Load base model on specified device
+    # Extract parameters that should not be passed to the model constructor
+    depth = kwargs.pop("depth", 7)
+    total_token = kwargs.pop("total_token", 60)
+    top_k = kwargs.pop("top_k", 10)
+    threshold = kwargs.pop("threshold", 1.0)
+    
+    print(f"Loading base model ({Type}) on device {base_device}...")
     if Type == 'LlamaForCausalLM':
+        print("  - Loading LLaMA model...")
         base_model = KVLlamaForCausalLM.from_pretrained(
             base_model_path, device_map=base_device, **kwargs
         )
     elif Type == 'Qwen2ForCausalLM':
+        print("  - Loading Qwen2 model...")
         base_model = KVQwen2ForCausalLM.from_pretrained(
             base_model_path, device_map=base_device, **kwargs
         )
     else:
+        print("  - Loading Mixtral model...")
         base_model = KVMixtralForCausalLM.from_pretrained(
             base_model_path, device_map=base_device, **kwargs
         )
+    print("  - Base model loaded successfully")
     
     # Load draft model configuration
+    # Load draft model configuration
+    print("Loading draft model configuration...")
     configpath = os.path.join(ea_model_path, "config.json")
     if not os.path.exists(configpath):
+        print("  - Downloading config from HuggingFace Hub...")
         configpath = hf_hub_download(ea_model_path, "config.json")
+    print("  - Config loaded successfully")
     
     # Load draft model weights
+    print("Loading draft model weights...")
     try:
         load_model_path = os.path.join(ea_model_path, "pytorch_model.bin")
         if not os.path.exists(load_model_path):
+            print("  - Downloading pytorch_model.bin from HuggingFace Hub...")
             load_model_path = hf_hub_download(ea_model_path, "pytorch_model.bin")
+        print("  - Loading pytorch_model.bin...")
         ea_layer_state_dict = torch.load(load_model_path, map_location="cpu")
+        print("  - PyTorch model weights loaded successfully")
     except:
+        print("  - PyTorch model not found, trying SafeTensors...")
         from safetensors.torch import load_file
         load_model_path = os.path.join(ea_model_path, "model.safetensors")
         if not os.path.exists(load_model_path):
+            print("  - Downloading model.safetensors from HuggingFace Hub...")
             load_model_path = hf_hub_download(ea_model_path, "model.safetensors")
+        print("  - Loading model.safetensors...")
         ea_layer_state_dict = load_file(load_model_path)
+        print("  - SafeTensors model weights loaded successfully")
     
-    # Extract model parameters from kwargs
-    total_token = kwargs.pop("total_token", 60)
-    depth = kwargs.pop("depth", 7)
-    top_k = kwargs.pop("top_k", 10)
-    threshold = kwargs.pop("threshold", 1.0)
+    # Model parameters already extracted above
     
     # Create model with specified device placement
+    # Create model with specified device placement
+    print("Creating EAGLE model...")
     if use_multi_gpu:
+        print(f"  - Creating MultiGpuEaModel (base: {base_device}, draft: {draft_device})...")
         model = MultiGpuEaModel(
             use_eagle3,
             base_model,
@@ -471,7 +557,9 @@ def load_model_multi_gpu(
             ea_layer_state_dict,
             draft_device=draft_device
         )
+        print("  - MultiGpuEaModel created successfully")
     else:
+        print("  - Creating single-GPU EaModel...")
         model = EaModel(
             use_eagle3,
             base_model,
@@ -483,5 +571,6 @@ def load_model_multi_gpu(
             threshold,
             ea_layer_state_dict
         )
+        print("  - Single-GPU EaModel created successfully")
     
     return model
