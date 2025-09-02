@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# sed -i 's/\r$//' run_multi_gpu_comparison.sh
 # Default values
 BASE_MODEL_PATH=""
 EA_MODEL_PATH=""
@@ -95,3 +95,4 @@ echo "Running: $CMD"
 
 # Execute the command
 eval $CMD
+
