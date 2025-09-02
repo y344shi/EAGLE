@@ -491,7 +491,7 @@ def load_model_multi_gpu(
     threshold = kwargs.pop("threshold", 1.0)
     
     # Handle tensor parallelism for base model loading
-    if use_tensor_parallel and base_device == "auto":
+    if use_tensor_parallel:
         print(f"Loading base model ({Type}) with tensor parallelism across cuda:0 and cuda:1...")
         
         # Get model config to determine number of layers

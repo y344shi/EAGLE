@@ -241,7 +241,7 @@ def main():
             args.ea_model,
             use_eagle3=args.use_eagle3,
             use_multi_gpu=True,
-            base_device="auto",  # This will use device_map="auto" for tensor parallelism
+            base_device="cuda:0",  # Will be used as reference for tensor parallel split
             draft_device="cuda:2",
             total_token=args.total_token,
             depth=args.depth,
