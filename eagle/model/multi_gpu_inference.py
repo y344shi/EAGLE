@@ -126,7 +126,7 @@ class MultiGpuEaModel(EaModel):
             top_k=0.0,
             max_new_tokens=512,
             max_length=2048,
-            log=False,
+            log=True,
             is_llama3=False,
     ):
         if is_llama3:
@@ -492,8 +492,12 @@ def load_model_multi_gpu(
     print(f"Loading base model ({Type}) on device {base_device}...")
     if Type == 'LlamaForCausalLM':
         print("  - Loading LLaMA model...")
+        base_model_device_map = base_device
+        if base_device == "auto":
+            print("  - Using device_map='auto' for base model tensor parallelism.")
+            base_model_device_map = "auto"
         base_model = KVLlamaForCausalLM.from_pretrained(
-            base_model_path, device_map=base_device, **kwargs
+            base_model_path, device_map=base_model_device_map, **kwargs
         )
     elif Type == 'Qwen2ForCausalLM':
         print("  - Loading Qwen2 model...")

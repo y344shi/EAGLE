@@ -56,6 +56,7 @@ def parse_args():
     parser.add_argument("--depth", type=int, default=7, help="Depth for EAGLE")
     parser.add_argument("--threshold", type=float, default=1.0, help="Threshold for EAGLE")
     parser.add_argument("--is-llama3", action="store_true", help="Whether the model is LLaMA-3")
+    parser.add_argument("--use-tensor-parallel", action="store_true", help="Use 'device_map=auto' to split the base model across GPUs, with the draft on a 3rd GPU.")
     return parser.parse_args()
 
 def measure_generation_time(model, input_ids, args, num_runs=5):
@@ -69,15 +70,16 @@ def measure_generation_time(model, input_ids, args, num_runs=5):
     for warmup_idx in range(3):
         print(f"    Warmup {warmup_idx + 1}/3...")
         torch.cuda.synchronize()
-        _, _, _ = model.eagenerate(
-            input_ids=input_ids,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            top_k=args.top_k,
-            max_new_tokens=min(10, args.max_new_tokens),  # Short warmup
-            is_llama3=args.is_llama3,
-            log=True
-        )
+        with torch.no_grad():
+            _, _, _ = model.eagenerate(
+                input_ids=input_ids,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                max_new_tokens=min(10, args.max_new_tokens),  # Short warmup
+                is_llama3=args.is_llama3,
+                log=True
+            )
         torch.cuda.synchronize()
     print(f"  Warmup completed!")
     
@@ -87,15 +89,16 @@ def measure_generation_time(model, input_ids, args, num_runs=5):
         torch.cuda.synchronize()
         start_time = time.time()
         
-        output_ids, new_tokens, _ = model.eagenerate(
-            input_ids=input_ids,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            top_k=args.top_k,
-            max_new_tokens=args.max_new_tokens,
-            is_llama3=args.is_llama3,
-            log=True
-        )
+        with torch.no_grad():
+            output_ids, new_tokens, _ = model.eagenerate(
+                input_ids=input_ids,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                max_new_tokens=args.max_new_tokens,
+                is_llama3=args.is_llama3,
+                log=True
+            )
         
         torch.cuda.synchronize()
         end_time = time.time()
@@ -113,14 +116,19 @@ def measure_generation_time(model, input_ids, args, num_runs=5):
         # Store the output from the last run
         last_output_ids = output_ids
         
-        print(f"    Run {run_idx + 1}/{num_runs}: Completed in {run_time:.2f}s, generated {run_tokens} tokens ({run_tokens/run_time:.2f} tokens/sec)")
+        # Avoid division by zero
+        tps = (run_tokens / run_time) if run_time > 0 else float('inf')
+        print(f"    Run {run_idx + 1}/{num_runs}: Completed in {run_time:.4f}s, generated {run_tokens} tokens ({tps:.2f} tokens/sec)")
     
     print(f"  All {num_runs} runs completed!")
+    mean_time = np.mean(times)
+    mean_tokens = np.mean(tokens)
+    
     return {
-        "mean_time": np.mean(times),
+        "mean_time": mean_time,
         "std_time": np.std(times),
-        "mean_tokens": np.mean(tokens),
-        "tokens_per_second": np.mean(tokens) / np.mean(times),
+        "mean_tokens": mean_tokens,
+        "tokens_per_second": mean_tokens / mean_time if mean_time > 0 else float('inf'),
         "last_output_ids": last_output_ids
     }
 
@@ -129,11 +137,23 @@ def main():
     
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
+    # Set pad token for Llama-3 models to ensure optimal performance
+    if "Llama-3" in args.base_model:
+        tokenizer.pad_token = tokenizer.eos_token
     
-    # Prepare input
-    input_ids = tokenizer(args.prompt, return_tensors="pt").input_ids.to(args.base_device)
+    # Prepare input using the chat template for optimal performance
+    messages = [
+        {"role": "system", "content": "You are a helpful, respectful and honest assistant."},
+        {"role": "user", "content": args.prompt}
+    ]
+    prompt = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    input_ids = tokenizer([prompt], return_tensors="pt").input_ids.to(args.base_device)
     
-    print(f"Prompt: {args.prompt}")
+    print(f"Formatted Prompt: {prompt}")
     print(f"Input length: {input_ids.shape[1]} tokens")
     
     # Load single-GPU model
@@ -210,7 +230,19 @@ def main():
     print("PHASE 2: MULTI-GPU MODEL SETUP")
     print("="*60)
     print_memory_usage("before model loading")
-    print("Loading multi-GPU model...")
+
+    base_device_arg = args.base_device
+    draft_device_arg = args.draft_device
+
+    if args.use_tensor_parallel:
+        print("Tensor Parallel mode enabled. Using device_map='auto' for the base model.")
+        print("The draft model will be placed on the next available device (e.g., cuda:2 if TP uses cuda:0,1).")
+        base_device_arg = "auto"
+        # This assumes TP will use cuda:0 and cuda:1, so we set draft to cuda:2.
+        # This is a reasonable assumption for a 3-GPU setup.
+        draft_device_arg = "cuda:2" 
+    
+    print(f"Loading multi-GPU model (Base: {base_device_arg}, Draft: {draft_device_arg})...")
     
     # Force garbage collection before loading
     gc.collect()
@@ -220,8 +252,8 @@ def main():
         args.ea_model,
         use_eagle3=args.use_eagle3,
         use_multi_gpu=True,
-        base_device=args.base_device,
-        draft_device=args.draft_device,
+        base_device=base_device_arg,
+        draft_device=draft_device_arg,
         total_token=args.total_token,
         depth=args.depth,
         threshold=args.threshold
