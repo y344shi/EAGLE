@@ -143,6 +143,7 @@ class MultiGpuEaModel(EaModel):
             draft_stream = torch.cuda.Stream(device=self.draft_device)
         
         # Avoid modifying the input_ids in-place
+        # Create padding tensor on the same device as input_ids to avoid device mismatches
         padding = (torch.zeros(1, 1, dtype=torch.long) - 1).to(input_ids.device)
         input_ids = input_ids.clone()
         self.ea_layer.reset_kv()
@@ -228,8 +229,10 @@ class MultiGpuEaModel(EaModel):
                     retrieve_indices,
                 )
             
-            # Prepare candidates
-            draft_tokens_padded = torch.cat((draft_tokens.to(self.base_device), padding), dim=1)
+            # Prepare candidates - ensure all tensors are on the same device
+            padding = padding.to(self.base_device)  # Move padding to base device
+            draft_tokens_base = draft_tokens.to(self.base_device)  # Move draft tokens to base device
+            draft_tokens_padded = torch.cat((draft_tokens_base, padding), dim=1)
             candidates = draft_tokens_padded[0, retrieve_indices.to(self.base_device)]
             
             # Verification
@@ -243,6 +246,11 @@ class MultiGpuEaModel(EaModel):
             if self.cross_device:
                 if idx % 50 == 0:
                     print(f"    Step {idx}: Updating inference inputs (accepted {accept_length} tokens)...")
+                # Ensure all tensors are on the correct device before passing to update function
+                candidates = candidates.to(self.base_device)
+                best_candidate = best_candidate.to(self.base_device)
+                retrieve_indices = retrieve_indices.to(self.base_device)
+                
                 input_ids, draft_tokens, retrieve_indices, tree_mask, tree_position_ids, new_token, hidden_state, sample_token = self._update_inference_inputs_multi_gpu(
                     input_ids,
                     candidates,
@@ -302,6 +310,9 @@ class MultiGpuEaModel(EaModel):
     
     def _initialize_tree_multi_gpu(self, input_ids, past_key_values, logits_processor):
         """Multi-GPU version of initialize_tree function"""
+        # Ensure input_ids is on the base device
+        input_ids = input_ids.to(self.base_device)
+        
         outputs, orig, hidden_states = self(
             input_ids, past_key_values=past_key_values, output_orig=True
         )
@@ -315,7 +326,9 @@ class MultiGpuEaModel(EaModel):
             token = torch.argmax(orig[:, -1])
             token = token[None, None]
         
-        input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
+        # Ensure token is on the same device as input_ids
+        token = token.to(input_ids.device)
+        input_ids = torch.cat((input_ids, token), dim=1)
 
         # Handle cross-device operations for EAGLE3
         if self.use_eagle3:
@@ -328,9 +341,13 @@ class MultiGpuEaModel(EaModel):
         
         # Generate draft tokens on the draft model device
         head_to_use = self.draft_lm_head if self.cross_device else self.base_model.lm_head
+        
+        # Ensure input_ids is on the draft device for the draft model
+        draft_input_ids = input_ids.to(self.draft_device)
+        
         draft_tokens, retrieve_indices, tree_mask, tree_position_ids = self.ea_layer.topK_genrate(
             hidden_states, 
-            input_ids.to(self.draft_device), 
+            draft_input_ids, 
             head_to_use,
             logits_processor
         )
@@ -352,6 +369,10 @@ class MultiGpuEaModel(EaModel):
             retrieve_indices,
     ):
         """Multi-GPU version of tree_decoding function"""
+        # Ensure all input tensors are on the correct device
+        tree_candidates = tree_candidates.to(self.base_device)
+        tree_position_ids = tree_position_ids.to(self.base_device)
+        
         position_ids = tree_position_ids + input_ids.shape[1]
         if position_ids is not None and position_ids.dim() == 1:
             position_ids = position_ids.unsqueeze(0)
@@ -372,6 +393,7 @@ class MultiGpuEaModel(EaModel):
                 hidden_state = torch.cat(outputs["hidden_states"], dim=-1)
 
         # Get logits for the retrieve indices
+        retrieve_indices = retrieve_indices.to(tree_logits.device)
         logits = tree_logits[0, retrieve_indices]
         
         return logits, hidden_state, outputs
@@ -391,6 +413,12 @@ class MultiGpuEaModel(EaModel):
             sample_p
     ):
         """Multi-GPU version of update_inference_inputs function"""
+        # Ensure all tensors are on the correct device
+        input_ids_device = input_ids.device
+        candidates = candidates.to(input_ids_device)
+        best_candidate = best_candidate.to(input_ids_device)
+        retrieve_indices = retrieve_indices.to(input_ids_device)
+        
         prev_input_len = input_ids.shape[1]
         # Map the best candidate indices to the original indices in the sequence
         select_indices = (
@@ -398,7 +426,7 @@ class MultiGpuEaModel(EaModel):
         )
         # Append the tokens from the best candidate to the input sequence
         input_ids = torch.cat(
-            [input_ids, candidates[None, best_candidate, : accept_length + 1].to(input_ids.device)], dim=-1
+            [input_ids, candidates[None, best_candidate, : accept_length + 1]], dim=-1
         )
         
         # Update the past key values based on the selected tokens
