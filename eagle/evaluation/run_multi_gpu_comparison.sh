@@ -10,6 +10,7 @@ MAX_NEW_TOKENS=256
 NUM_RUNS=5
 PROMPT="Write a short story about a robot who learns to feel emotions."
 IS_LLAMA3=false
+USE_TENSOR_PARALLEL=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -50,6 +51,10 @@ while [[ $# -gt 0 ]]; do
       IS_LLAMA3=true
       shift
       ;;
+    --use-tensor-parallel)
+      USE_TENSOR_PARALLEL=true
+      shift
+      ;;
     *)
       echo "Unknown argument: $1"
       exit 1
@@ -81,6 +86,10 @@ fi
 
 if [ "$IS_LLAMA3" = true ]; then
   CMD="$CMD --is-llama3"
+fi
+
+if [ "$USE_TENSOR_PARALLEL" = true ]; then
+    CMD="$CMD --use-tensor-parallel"
 fi
 
 # Print the command
