@@ -457,6 +457,7 @@ def load_model_multi_gpu(
     use_multi_gpu=False,
     base_device="cuda:0",
     draft_device="cuda:1",
+    use_tensor_parallel=False,
     **kwargs
 ):
     """
@@ -489,27 +490,62 @@ def load_model_multi_gpu(
     top_k = kwargs.pop("top_k", 10)
     threshold = kwargs.pop("threshold", 1.0)
     
-    print(f"Loading base model ({Type}) on device {base_device}...")
+    # Handle tensor parallelism for base model loading
+    if use_tensor_parallel and base_device == "auto":
+        print(f"Loading base model ({Type}) with tensor parallelism across cuda:0 and cuda:1...")
+        
+        # Get model config to determine number of layers
+        from transformers import AutoConfig
+        config = AutoConfig.from_pretrained(base_model_path)
+        num_layers = config.num_hidden_layers
+        
+        # Create explicit device mapping
+        device_map = {}
+        
+        # Put embedding on first GPU
+        device_map["model.embed_tokens"] = "cuda:0"
+        
+        # Split layers evenly between cuda:0 and cuda:1
+        layers_per_gpu = num_layers // 2
+        
+        for i in range(num_layers):
+            if i < layers_per_gpu:
+                device_map[f"model.layers.{i}"] = "cuda:0"
+            else:
+                device_map[f"model.layers.{i}"] = "cuda:1"
+        
+        # Put final norm and lm_head on second GPU
+        device_map["model.norm"] = "cuda:1"
+        device_map["lm_head"] = "cuda:1"
+        
+        print(f"  - Layers 0-{layers_per_gpu-1} on cuda:0")
+        print(f"  - Layers {layers_per_gpu}-{num_layers-1} on cuda:1")
+        print(f"  - Embedding on cuda:0, norm and lm_head on cuda:1")
+        
+    else:
+        print(f"Loading base model ({Type}) on device {base_device}...")
+        device_map = base_device
+    
     if Type == 'LlamaForCausalLM':
         print("  - Loading LLaMA model...")
-        base_model_device_map = base_device
-        if base_device == "auto":
-            print("  - Using device_map='auto' for base model tensor parallelism.")
-            base_model_device_map = "auto"
         base_model = KVLlamaForCausalLM.from_pretrained(
-            base_model_path, device_map=base_model_device_map, **kwargs
+            base_model_path, device_map=device_map, **kwargs
         )
     elif Type == 'Qwen2ForCausalLM':
         print("  - Loading Qwen2 model...")
         base_model = KVQwen2ForCausalLM.from_pretrained(
-            base_model_path, device_map=base_device, **kwargs
+            base_model_path, device_map=device_map, **kwargs
         )
     else:
         print("  - Loading Mixtral model...")
         base_model = KVMixtralForCausalLM.from_pretrained(
-            base_model_path, device_map=base_device, **kwargs
+            base_model_path, device_map=device_map, **kwargs
         )
-    print("  - Base model loaded successfully")
+    
+    if use_tensor_parallel:
+        print("  - Base model loaded with tensor parallelism across multiple GPUs")
+    else:
+        print("  - Base model loaded successfully")
     
     # Load draft model configuration
     # Load draft model configuration

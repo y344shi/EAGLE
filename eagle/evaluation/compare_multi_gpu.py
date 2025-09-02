@@ -56,7 +56,7 @@ def parse_args():
     parser.add_argument("--depth", type=int, default=7, help="Depth for EAGLE")
     parser.add_argument("--threshold", type=float, default=1.0, help="Threshold for EAGLE")
     parser.add_argument("--is-llama3", action="store_true", help="Whether the model is LLaMA-3")
-    parser.add_argument("--use-tensor-parallel", action="store_true", help="Use 'device_map=auto' to split the base model across GPUs, with the draft on a 3rd GPU.")
+    parser.add_argument("--use-tensor-parallel", action="store_true", help="Use tensor parallelism to split base model across 2 GPUs, with draft model on 3rd GPU")
     return parser.parse_args()
 
 def measure_generation_time(model, input_ids, args, num_runs=5):
@@ -230,34 +230,37 @@ def main():
     print("PHASE 2: MULTI-GPU MODEL SETUP")
     print("="*60)
     print_memory_usage("before model loading")
-
-    base_device_arg = args.base_device
-    draft_device_arg = args.draft_device
-
-    if args.use_tensor_parallel:
-        print("Tensor Parallel mode enabled. Using device_map='auto' for the base model.")
-        print("The draft model will be placed on the next available device (e.g., cuda:2 if TP uses cuda:0,1).")
-        base_device_arg = "auto"
-        # This assumes TP will use cuda:0 and cuda:1, so we set draft to cuda:2.
-        # This is a reasonable assumption for a 3-GPU setup.
-        draft_device_arg = "cuda:2" 
-    
-    print(f"Loading multi-GPU model (Base: {base_device_arg}, Draft: {draft_device_arg})...")
     
     # Force garbage collection before loading
     gc.collect()
     
-    multi_gpu_model = load_model_multi_gpu(
-        args.base_model,
-        args.ea_model,
-        use_eagle3=args.use_eagle3,
-        use_multi_gpu=True,
-        base_device=base_device_arg,
-        draft_device=draft_device_arg,
-        total_token=args.total_token,
-        depth=args.depth,
-        threshold=args.threshold
-    )
+    if args.use_tensor_parallel:
+        print("Using tensor parallelism: Base model split across cuda:0 and cuda:1, draft model on cuda:2")
+        multi_gpu_model = load_model_multi_gpu(
+            args.base_model,
+            args.ea_model,
+            use_eagle3=args.use_eagle3,
+            use_multi_gpu=True,
+            base_device="auto",  # This will use device_map="auto" for tensor parallelism
+            draft_device="cuda:2",
+            total_token=args.total_token,
+            depth=args.depth,
+            threshold=args.threshold,
+            use_tensor_parallel=True
+        )
+    else:
+        print("Using pipeline parallelism: Base model on one GPU, draft model on another")
+        multi_gpu_model = load_model_multi_gpu(
+            args.base_model,
+            args.ea_model,
+            use_eagle3=args.use_eagle3,
+            use_multi_gpu=True,
+            base_device=args.base_device,
+            draft_device=args.draft_device,
+            total_token=args.total_token,
+            depth=args.depth,
+            threshold=args.threshold
+        )
     print("Multi-GPU model loaded successfully!")
     print_memory_usage("after model loading")
     
