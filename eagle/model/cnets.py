@@ -756,10 +756,10 @@ class Model(nn.Module):
                 input_ids = input_ids + self.d2t[input_ids]
                 ss_token.append(topk_index+self.d2t[topk_index])
             scores_list.append(cu_scores)
-    # Ensure all tensors are on the same device before concatenation
-    out_ids = out_ids.to(tree_mask.device)
-    tree_mask_init = self.tree_mask_init.to(tree_mask.device)
-    tree_mask = torch.cat((tree_mask[:, :, out_ids], tree_mask_init), dim=3)
+        # Ensure all tensors are on the same device before concatenation
+        out_ids = out_ids.to(tree_mask.device)
+        tree_mask_init = self.tree_mask_init.to(tree_mask.device)
+        tree_mask = torch.cat((tree_mask[:, :, out_ids], tree_mask_init), dim=3)
 
 
         scores_list = torch.cat(scores_list, dim=0).view(-1)
