@@ -72,6 +72,7 @@ void lm_head_8way_top(
     // Streams for Broadcasting
     hidden_stream_t s_h[NUM_ENGINES];
     #pragma HLS STREAM variable=s_h depth=128
+    #pragma HLS ARRAY_PARTITION variable=s_h complete dim=1
 
     // PIPO buffer for results (No 'static' to allow dataflow)
     TokenOutput partial_results[NUM_ENGINES];
@@ -81,14 +82,14 @@ void lm_head_8way_top(
     broadcast_hidden(hidden_in, s_h[0], s_h[1], s_h[2], s_h[3], s_h[4], s_h[5], s_h[6], s_h[7]);
 
     // 2. Parallel Engines
-    lm_head_engine_stream(weights_0, s_h[0], partial_results[0], VOCAB_SLICE);
-    lm_head_engine_stream(weights_1, s_h[1], partial_results[1], VOCAB_SLICE);
-    lm_head_engine_stream(weights_2, s_h[2], partial_results[2], VOCAB_SLICE);
-    lm_head_engine_stream(weights_3, s_h[3], partial_results[3], VOCAB_SLICE);
-    lm_head_engine_stream(weights_4, s_h[4], partial_results[4], VOCAB_SLICE);
-    lm_head_engine_stream(weights_5, s_h[5], partial_results[5], VOCAB_SLICE);
-    lm_head_engine_stream(weights_6, s_h[6], partial_results[6], VOCAB_SLICE);
-    lm_head_engine_stream(weights_7, s_h[7], partial_results[7], VOCAB_SLICE);
+    lm_head_engine_stream(weights_0, s_h[0], partial_results[0], VOCAB_SLICE, 0);
+    lm_head_engine_stream(weights_1, s_h[1], partial_results[1], VOCAB_SLICE, 1);
+    lm_head_engine_stream(weights_2, s_h[2], partial_results[2], VOCAB_SLICE, 2);
+    lm_head_engine_stream(weights_3, s_h[3], partial_results[3], VOCAB_SLICE, 3);
+    lm_head_engine_stream(weights_4, s_h[4], partial_results[4], VOCAB_SLICE, 4);
+    lm_head_engine_stream(weights_5, s_h[5], partial_results[5], VOCAB_SLICE, 5);
+    lm_head_engine_stream(weights_6, s_h[6], partial_results[6], VOCAB_SLICE, 6);
+    lm_head_engine_stream(weights_7, s_h[7], partial_results[7], VOCAB_SLICE, 7);
 
     // 3. Reduction
     global_reduce(partial_results, final_output);

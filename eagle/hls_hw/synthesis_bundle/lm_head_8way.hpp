@@ -32,8 +32,11 @@ typedef hls::stream<dtype_in> hidden_stream_t;
 
 // Engine Constants
 #define NUM_ENGINES 8
-#define TOTAL_VOCAB 73448
+#define TOTAL_VOCAB 73448 / 2
 #define VOCAB_SLICE ((TOTAL_VOCAB + NUM_ENGINES - 1) / NUM_ENGINES) 
+#define V_PRELOAD_TOTAL 8192
+#define V_PRELOAD_PER_ENGINE (V_PRELOAD_TOTAL / NUM_ENGINES)
+#define V_PRELOAD_TILES ((V_PRELOAD_PER_ENGINE + R_ROWS - 1) / R_ROWS)
 
 // ============================================================================
 // FUNCTION PROTOTYPES
@@ -44,7 +47,8 @@ void lm_head_engine_stream(
     const wide_vec_t* weights_in, 
     hidden_stream_t& hidden_stream,    
     TokenOutput& output,
-    int vocab_size_slice
+    int vocab_size_slice,
+    int engine_id
 );
 
 // The Top Level
