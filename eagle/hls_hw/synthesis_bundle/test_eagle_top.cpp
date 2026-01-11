@@ -110,13 +110,11 @@ void fill_rope_cfg(RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& cfg, const std
 
 int main(int argc, char** argv) {
     // Adjust paths relative to the working directory when running the harness.
-    // We keep weights in ./packed_all/ (produced by pack_all_4bit.py).
-    const std::string base_tensors = "./eagle_verified_pipeline_4bit/cpmcu_tensors/";
-    // Packed weights are emitted under the project tree; point to the actual location.
-    const std::string base_weights = "./hls/export_tilert_gemm/deep_pipeline_lutmac/packed_all/";
-    const std::string base_norms =
-        "/mnt/c/Users/yuxua/Desktop/T-Mac/hls/export_tilert_gemm/deep_pipeline_lutmac/"
-        "eagle_verified_pipeline_4bit/hls_4bit/weights_all_4bit/";
+    // We keep weights in ../packed_all/ (produced by pack_all_4bit.py).
+    // Paths relative to this repo root (deep_pipeline_lutmac).
+    const std::string base_tensors = "../eagle_verified_pipeline_4bit/cpmcu_tensors/";
+    const std::string base_weights = "../packed_all/";
+    const std::string base_norms = "../eagle_verified_pipeline_4bit/hls_4bit/weights_all_4bit/";
 
     std::cout << "EAGLE tier1 end-to-end harness\n";
 

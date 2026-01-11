@@ -12,6 +12,7 @@ using tmac::hls::VEC_W;
 using tmac::hls::dense_projection_production;
 using tmac::hls::dense_projection_production_scaled;
 using tmac::hls::dense_projection_production_scaled_raw;
+using tmac::hls::hls_stream;
 using tmac::hls::pack512;
 using tmac::hls::vec_t;
 
@@ -68,6 +69,7 @@ static void cpu_matvec_tile(const std::vector<uint32_t>& qw,
     }
 }
 
+#if defined(TMAC_ENABLE_FC1_COMPARE_TB)
 int main(int argc, char** argv) {
     // Default paths expect repo layout: .../T-Mac/eagle_verified_pipeline_4bit/hls_4bit/weights_all_4bit/...
     std::string qweight_path = "../../../eagle_verified_pipeline_4bit/hls_4bit/weights_all_4bit/fc1_qweight.bin";
@@ -221,3 +223,4 @@ int main(int argc, char** argv) {
     std::printf("[compare tile %d] FAIL with %d mismatches (with scales)\n", tile_idx, errors);
     return 1;
 }
+#endif

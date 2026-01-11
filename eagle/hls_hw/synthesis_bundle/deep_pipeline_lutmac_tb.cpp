@@ -218,6 +218,7 @@ int run_fc1_tile(const std::string& weight_path, int tile_idx) {
     return 1;
 }
 
+#if defined(TMAC_ENABLE_LUTMAC_TB)
 int main(int argc, char** argv) {
     std::string weight_path = "weights_swizzled.bin";
     int tile_idx = 0;
@@ -244,3 +245,4 @@ int main(int argc, char** argv) {
     }
     return status;
 }
+#endif
