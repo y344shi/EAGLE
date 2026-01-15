@@ -374,56 +374,60 @@ class TestTritonKernels(unittest.TestCase):
         print("\n=== Testing Posterior Probability Evaluation ===")
         
         # Create random inputs
-        seq_len = 5
+        seq_len = 5  # number of logits positions
         num_candidates = 3
         logits = torch.randn(self.batch_size, seq_len, self.vocab_size, device=self.device)
-        
-        # Create candidates with some matching the max logits
-        candidates = torch.zeros((self.batch_size, num_candidates, seq_len), 
+
+        # Candidate sequences include an initial context token followed by the
+        # drafted tokens.  Hence, the candidate length is ``seq_len + 1``.
+        cand_len = seq_len + 1
+        candidates = torch.zeros((self.batch_size, num_candidates, cand_len),
                                 dtype=torch.int32, device=self.device)
-        
-        # For testing, make some candidates match the max logits
+
+        # For testing, make some candidates match the max logits.  We populate
+        # candidate positions starting from index 1 since index 0 is the
+        # context token and is ignored during evaluation.
         for b in range(self.batch_size):
             for s in range(seq_len):
                 max_idx = torch.argmax(logits[b, s]).item()
                 # First candidate: all tokens match
-                candidates[b, 0, s] = max_idx
+                candidates[b, 0, s + 1] = max_idx
                 # Second candidate: first half match
-                candidates[b, 1, s] = max_idx if s < seq_len // 2 else (max_idx + 1) % self.vocab_size
+                candidates[b, 1, s + 1] = max_idx if s < seq_len // 2 else (max_idx + 1) % self.vocab_size
                 # Third candidate: only first token matches
-                candidates[b, 2, s] = max_idx if s == 0 else (max_idx + 2) % self.vocab_size
+                candidates[b, 2, s + 1] = max_idx if s == 0 else (max_idx + 2) % self.vocab_size
         
         # PyTorch implementation
         def pytorch_evaluate_posterior(logits, candidates):
-            batch_size, seq_len, vocab_size = logits.shape
-            _, num_candidates, _ = candidates.shape
-            
+            batch_size, _, _ = logits.shape
+            _, num_candidates, cand_len = candidates.shape
+
             best_candidate = torch.zeros(batch_size, dtype=torch.int32, device=logits.device)
             accept_length = torch.zeros(batch_size, dtype=torch.int32, device=logits.device)
-            
+
             for b in range(batch_size):
                 max_accept_len = 0
                 max_candidate_idx = 0
-                
+
                 for c in range(num_candidates):
                     accept_len = 0
-                    
-                    for s in range(seq_len):
+
+                    for s in range(1, cand_len):
                         candidate_token = candidates[b, c, s].item()
-                        max_logit_idx = torch.argmax(logits[b, s]).item()
-                        
+                        max_logit_idx = torch.argmax(logits[b, s - 1]).item()
+
                         if max_logit_idx == candidate_token:
                             accept_len += 1
                         else:
                             break
-                    
+
                     if accept_len > max_accept_len:
                         max_accept_len = accept_len
                         max_candidate_idx = c
-                
+
                 best_candidate[b] = max_candidate_idx
                 accept_length[b] = max_accept_len
-            
+
             return best_candidate, accept_length
         
         # Run PyTorch implementation
