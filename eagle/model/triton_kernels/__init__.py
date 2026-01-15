@@ -11,8 +11,9 @@ from .tree_decoding import (
     triton_compute_topk,
     triton_compute_tree_mask,
     triton_evaluate_posterior,
-    triton_update_inputs
+    triton_update_inputs,
 )
+from .fused_kernels import fused_attention_kv_tree
 
 # Import integration utilities
 from .integration import (
@@ -35,6 +36,7 @@ __all__ = [
     'triton_compute_tree_mask',
     'triton_evaluate_posterior',
     'triton_update_inputs',
+    'fused_attention_kv_tree',
     
     # Integration utilities
     'triton_attention_with_fallback',
