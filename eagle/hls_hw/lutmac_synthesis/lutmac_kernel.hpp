@@ -31,15 +31,18 @@ void stream_activations_for_tile(
     const ap_uint<DEFAULT_ABITS>* A_dram,
     hls_stream<vec_t<VEC_W>>& a_stream,
     int row_idx) {
+    
+    int offset = row_idx * INPUT_DIM;
 
     // stream ith chunk of the current tile
 stream_activations:
     for (int i = 0; i < INPUT_DIM / VEC_W; ++i) {
         vec_t<VEC_W> a_chunk{};
+        offset += i * VEC_W;
         for (int j = 0; j < VEC_W; ++j) {
 // #pragma HLS LOOP_FLATTEN
-#pragma HLS PIPELINE II=1
-            a_chunk[j] = static_cast<float>(A_dram[row_idx * INPUT_DIM + i * VEC_W + j]);
+#pragma HLS PIPELINE II=2
+            a_chunk[j] = static_cast<float>(A_dram[offset + j]);
         }
         a_stream.write(a_chunk);
     }
@@ -89,6 +92,7 @@ void lutmac_fc1(
     constexpr int TILES = HIDDEN_DIM / DEFAULT_OUT_W;
     const pack512* w_dram_packed = reinterpret_cast<const pack512*>(W_dram);
     pack512 w_bram_buffer[HIDDEN_DIM];
+#pragma HLS BIND_STORAGE variable=w_bram_buffer type=RAM_T2P impl=BRAM
 
 tile_loop:
     for (int t = 0; t < TILES; ++t) {
