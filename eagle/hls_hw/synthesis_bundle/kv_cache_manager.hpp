@@ -90,7 +90,7 @@ void kv_cache_manager(hls_stream<vec_t<VEC_W>>& k_in_stream,   // new token K (p
         // Cold tier: HBM burst
         if (cold_count > 0) {
         read_cold:
-            for (int t = MAX_URAM_TOKENS; t < current_length; ++t) {
+            for (int t = MAX_URAM_TOKENS; t < total_len; ++t) {
 #pragma HLS LOOP_TRIPCOUNT min = 0 max = 1024
                 const int base_off = t * VECS_PER_TOKEN;
                 for (int i = 0; i < VECS_PER_TOKEN; ++i) {
