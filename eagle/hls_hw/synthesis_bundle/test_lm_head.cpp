@@ -6,7 +6,7 @@
 
 half float_to_half(float f) { return (half)f; }
 
-int main() {
+int lm_head_main() {
     std::cout << ">>> Starting 8-Way LM Head Testbench (Stream Version)" << std::endl;
 
     const int num_row_tiles = VOCAB_SLICE / R_ROWS;

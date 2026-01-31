@@ -66,6 +66,7 @@ void attention_solver(hls_stream<vec_t<VEC_W>>& q_stream,     // one head query
     // Process history tokens
     token_loop:
     for (int t = 0; t < total_len; ++t) {
+#pragma HLS LOOP_TRIPCOUNT min=1 avg=1024 max=2048
         float partial_scores[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         float v_local[HEAD_DIM];
 #pragma HLS ARRAY_PARTITION variable = v_local cyclic factor = VEC_W
@@ -73,7 +74,7 @@ void attention_solver(hls_stream<vec_t<VEC_W>>& q_stream,     // one head query
         if (t < seq_len) {
             // Dot(Q, K_t) while latching V_t
             for (int i = 0; i < HEAD_DIM / VEC_W; ++i) {
-#pragma HLS PIPELINE II = 1
+#pragma HLS PIPELINE II = 2
                 vec_t<VEC_W> k_chunk = k_hist.read();
                 vec_t<VEC_W> v_chunk = v_hist.read();
                 for (int j = 0; j < VEC_W; ++j) {

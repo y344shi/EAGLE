@@ -1,19 +1,82 @@
 #include "eagle_tier1_top.hpp"
 
-// Include implementation headers here
-#include "attention_solver.hpp"
-#include "deep_pipeline_lutmac.hpp"
-#include "kv_cache_manager.hpp"
-#include "rms_norm_stream.hpp"
-
 namespace tmac {
 namespace hls {
 
 // Internal constants
-constexpr float RESIDUAL_SCALE = 1.4f / 5.7445626465380286f; // sqrt(33)
-constexpr int MAX_CTX = 2048; 
+constexpr int VECS_PER_Q = HEAD_DIM / VEC_W;                       
+constexpr int VECS_PER_KV_TOKEN = (NUM_KV_HEADS * HEAD_DIM) / VEC_W; 
+constexpr int HEADS_PER_KV = NUM_HEADS / NUM_KV_HEADS;  
 
-inline int ceil_div(int a, int b) { return (a + b - 1) / b; }
+void broadcast_q_heads(hls_stream<vec_t<VEC_W>>& s_q_rot, hls_stream<vec_t<VEC_W>> q_head_streams[NUM_HEADS]) {
+#pragma HLS INLINE off // Ensure this is synthesized as a separate hardware module
+    for (int i = 0; i < HIDDEN / VEC_W; ++i) {
+#pragma HLS DATAFLOW
+//#pragma HLS PIPELINE II = 1
+        vec_t<VEC_W> v = s_q_rot.read();
+        for (int j = 0; j < 32; ++j) {
+#pragma HLS DATAFLOW
+#pragma HLS UNROLL
+            q_head_streams[j].write(v);
+        }
+    }
+}
+
+void broadcast_kv_heads(
+    hls_stream<vec_t<VEC_W>>& s_k_hist_raw,
+    hls_stream<vec_t<VEC_W>>& s_v_hist_raw,
+    hls_stream<vec_t<VEC_W>> k_head_streams[NUM_HEADS],
+    hls_stream<vec_t<VEC_W>> v_head_streams[NUM_HEADS],
+    int hist_len
+){
+#pragma HLS INLINE off
+    for (int t = 0; t < hist_len; ++t) {
+#pragma HLS DATAFLOW
+#pragma HLS LOOP_TRIPCOUNT min=1 avg=MAX_CTX/2 max=MAX_CTX
+        for (int v = 0; v < VECS_PER_KV_TOKEN; ++v) {
+#pragma HLS DATAFLOW
+//#pragma HLS PIPELINE II = 1
+            int kvh = v / VECS_PER_Q; // 0 or 1
+            vec_t<VEC_W> ek = s_k_hist_raw.read();
+            vec_t<VEC_W> ev = s_v_hist_raw.read();
+            
+            for (int h = 0; h < HEADS_PER_KV; h++) {
+#pragma HLS DATAFLOW
+#pragma HLS UNROLL
+                k_head_streams[kvh * HEADS_PER_KV + h].write(ek);
+                v_head_streams[kvh * HEADS_PER_KV + h].write(ev);
+            }
+        }
+    }
+}
+
+void grouped_query_attention(
+    hls_stream<vec_t<VEC_W>> q_head_streams[NUM_HEADS],
+    hls_stream<vec_t<VEC_W>> k_head_streams[NUM_HEADS],
+    hls_stream<vec_t<VEC_W>> v_head_streams[NUM_HEADS],
+    hls_stream<vec_t<VEC_W>> ctx_head_streams[NUM_HEADS],
+    int hist_len,
+    int padded_len
+) {
+#pragma HLS INLINE off
+    for (int h = 0; h < NUM_HEADS; ++h) {
+#pragma HLS UNROLL
+#pragma HLS LOOP_TRIPCOUNT max = NUM_HEADS
+        attention_solver<HEAD_DIM>(q_head_streams[h], k_head_streams[h], v_head_streams[h], ctx_head_streams[h], hist_len, padded_len);
+    }
+}
+
+void collect_ctx(hls_stream<vec_t<VEC_W>>& s_context, hls_stream<vec_t<VEC_W>> ctx_head_streams[NUM_HEADS]) {
+#pragma HLS INLINE off
+    for (int i = 0; i < NUM_HEADS; i++) {
+#pragma HLS DATAFLOW
+        for (int j = 0; j < VECS_PER_Q; ++j) {
+//#pragma HLS DATAFLOW
+#pragma HLS PIPELINE II = 1
+            s_context.write(ctx_head_streams[i].read());
+        }
+    }
+}
 
 // FUNCTION IMPLEMENTATION
 void eagle_tier1_top(
@@ -58,11 +121,7 @@ void eagle_tier1_top(
 #pragma HLS INTERFACE s_axilite port=current_length bundle=control
 #pragma HLS INTERFACE s_axilite port=return bundle=control
 
-#pragma HLS DATAFLOW
-
-    constexpr int VECS_PER_Q = HEAD_DIM / VEC_W;                       
-    constexpr int VECS_PER_KV_TOKEN = (NUM_KV_HEADS * HEAD_DIM) / VEC_W; 
-    constexpr int HEADS_PER_KV = NUM_HEADS / NUM_KV_HEADS;             
+#pragma HLS DATAFLOW          
 
     // Streams
     static hls_stream<vec_t<VEC_W>> s_in_attn("s_in_attn");
@@ -77,6 +136,11 @@ void eagle_tier1_top(
     static hls_stream<vec_t<VEC_W>> s_res1("s_res1"), s_res1_norm_in("s_res1_norm_in"), s_res1_skip("s_res1_skip");
     static hls_stream<vec_t<VEC_W>> s_ffn_norm("s_ffn_norm"), s_gate_in("s_gate_in"), s_up_in("s_up_in");
     static hls_stream<vec_t<VEC_W>> s_gate_vec("s_gate_vec"), s_up_vec("s_up_vec"), s_swiglu("s_swiglu"), s_down("s_down");
+
+    static hls_stream<vec_t<VEC_W>> q_head_streams[32];
+    static hls_stream<vec_t<VEC_W>> k_head_streams[32];
+    static hls_stream<vec_t<VEC_W>> v_head_streams[32];
+    static hls_stream<vec_t<VEC_W>> ctx_head_streams[32];
 
     // Stage 0: split raw input for residual and norm path
     stream_dup<VEC_W>(in_stream, s_in_attn, s_in_resid, HIDDEN / VEC_W);
@@ -99,83 +163,13 @@ void eagle_tier1_top(
     kv_cache_manager<HEAD_DIM, NUM_KV_HEADS>(s_k_rot, s_v_proj, s_k_hist_raw, s_v_hist_raw, hbm_k, hbm_v,
                                              current_length, true, true);
 
-    // Stage 7: Buffer Q for all heads (post-RoPE)
-    float q_buf[NUM_HEADS][HEAD_DIM];
-#pragma HLS ARRAY_PARTITION variable = q_buf complete dim = 2
-    for (int h = 0; h < NUM_HEADS; ++h) {
-        for (int i = 0; i < VECS_PER_Q; ++i) {
-#pragma HLS PIPELINE II = 1
-            vec_t<VEC_W> chunk = s_q_rot.read();
-            for (int j = 0; j < VEC_W; ++j) {
-#pragma HLS UNROLL
-                q_buf[h][i * VEC_W + j] = chunk[j];
-            }
-        }
-    }
-
-    // Stage 8: Buffer KV history once into URAM then replay for each head.
     const int hist_len = current_length + 1; // includes the newly appended token
-    static vec_t<VEC_W> k_hist_buf[MAX_CTX][VECS_PER_KV_TOKEN];
-    static vec_t<VEC_W> v_hist_buf[MAX_CTX][VECS_PER_KV_TOKEN];
-#pragma HLS BIND_STORAGE variable = k_hist_buf type = ram_2p impl = uram
-#pragma HLS BIND_STORAGE variable = v_hist_buf type = ram_2p impl = uram
-#pragma HLS ARRAY_PARTITION variable = k_hist_buf cyclic factor = 2 dim = 2
-#pragma HLS ARRAY_PARTITION variable = v_hist_buf cyclic factor = 2 dim = 2
+    const int padded_len = ((hist_len + 127) / 128) * 128;
 
-    buffer_hist_loop:
-    for (int t = 0; t < hist_len; ++t) {
-        for (int v = 0; v < VECS_PER_KV_TOKEN; ++v) {
-#pragma HLS PIPELINE II = 1
-            k_hist_buf[t][v] = s_k_hist_raw.read();
-            v_hist_buf[t][v] = s_v_hist_raw.read();
-        }
-    }
-
-    // Multi-head attention, replaying buffered history
-head_loop:
-    for (int h = 0; h < NUM_HEADS; ++h) {
-#pragma HLS LOOP_TRIPCOUNT max = NUM_HEADS
-        const int kv_idx = h / HEADS_PER_KV; // 0 or 1
-
-        hls_stream<vec_t<VEC_W>> q_head_stream("q_head_stream");
-        hls_stream<vec_t<VEC_W>> k_head_stream("k_head_stream");
-        hls_stream<vec_t<VEC_W>> v_head_stream("v_head_stream");
-        hls_stream<vec_t<VEC_W>> ctx_head_stream("ctx_head_stream");
-
-        // Stream Q for this head
-        for (int i = 0; i < VECS_PER_Q; ++i) {
-#pragma HLS PIPELINE II = 1
-            vec_t<VEC_W> chunk;
-            for (int j = 0; j < VEC_W; ++j) {
-#pragma HLS UNROLL
-                chunk[j] = q_buf[h][i * VEC_W + j];
-            }
-            q_head_stream.write(chunk);
-        }
-
-        // Replay buffered K/V for this head (filter KV head block)
-    replay_hist:
-        for (int t = 0; t < hist_len; ++t) {
-            for (int v = 0; v < VECS_PER_KV_TOKEN; ++v) {
-#pragma HLS PIPELINE II = 1
-                const int block = v / VECS_PER_Q; // which KV head
-                if (block == kv_idx) {
-                    k_head_stream.write(k_hist_buf[t][v]);
-                    v_head_stream.write(v_hist_buf[t][v]);
-                }
-            }
-        }
-
-        // Run attention for this head
-        const int padded_len = ((hist_len + 127) / 128) * 128;
-        attention_solver<HEAD_DIM>(q_head_stream, k_head_stream, v_head_stream, ctx_head_stream, hist_len, padded_len);
-
-        // Append context
-        for (int i = 0; i < VECS_PER_Q; ++i) {
-#pragma HLS PIPELINE II = 1
-            s_context.write(ctx_head_stream.read());
-        }
-    }
+    broadcast_q_heads(s_q_rot, q_head_streams);
+    broadcast_kv_heads(s_k_hist_raw, s_v_hist_raw, k_head_streams, v_head_streams, hist_len);
+    grouped_query_attention(q_head_streams, k_head_streams, v_head_streams, ctx_head_streams, hist_len, padded_len);
+    collect_ctx(s_context, ctx_head_streams);
 
     // Stage 9: Output projection (use TMAC kernel for quantized weights)
     dense_projection_production_scaled<0, HIDDEN, HIDDEN, 128, false>(s_context, s_o_proj, w_o, s_o);

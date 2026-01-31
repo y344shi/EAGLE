@@ -29,7 +29,7 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
     // Load and accumulate sum of squares
     float sum_sq = 0.0f;
     for (int i = 0; i < HIDDEN_DIM / VEC_W; ++i) {
-#pragma HLS PIPELINE II = 1
+#pragma HLS PIPELINE II = 2
         vec_t<VEC_W> v = in_stream.read();
         for (int j = 0; j < VEC_W; ++j) {
 #pragma HLS UNROLL

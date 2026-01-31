@@ -13,12 +13,13 @@ void lm_head_engine_stream(
     #pragma HLS INTERFACE ap_fifo port=hidden_stream
 
     // Shared weight cache (preloaded once per engine instance)
-    static dtype_in weight_cache[NUM_ENGINES][R_ROWS][V_PRELOAD_TILES * H_DIM];
+    static dtype_in weight_cache[NUM_ENGINES][V_PRELOAD_TILES * H_DIM][R_ROWS];
     static bool weight_cache_valid[NUM_ENGINES];
     #pragma HLS BIND_STORAGE variable=weight_cache type=ram_2p impl=uram
-    #pragma HLS ARRAY_PARTITION variable=weight_cache complete dim=1
-    #pragma HLS ARRAY_PARTITION variable=weight_cache complete dim=2
-    #pragma HLS ARRAY_PARTITION variable=weight_cache_valid complete dim=1
+    // #pragma HLS ARRAY_RESHAPE variable=weight_cache complete dim=1
+    // #pragma HLS ARRAY_RESHAPE variable=weight_cache complete dim=2
+    #pragma HLS ARRAY_RESHAPE variable=weight_cache complete dim=3
+    #pragma HLS ARRAY_RESHAPE variable=weight_cache_valid complete dim=1
 
     // Local URAM Buffer (per-instance)
     dtype_in hidden_buf[H_DIM][T_BATCH];
@@ -27,14 +28,16 @@ void lm_head_engine_stream(
 
     // 0. PRELOAD WEIGHT CACHE (one-time per engine instance)
     if (!weight_cache_valid[engine_id]) {
-        preload_rtile: for (int r_tile = 0; r_tile < V_PRELOAD_TILES; r_tile++) {
+    preload_rtile:
+        for (int r_tile = 0; r_tile < V_PRELOAD_TILES; r_tile++) {
             #pragma HLS LOOP_TRIPCOUNT min=32 max=32
             preload_k: for (int k = 0; k < H_DIM; k++) {
                 #pragma HLS PIPELINE II=1
-                wide_vec_t w_vec = weights_in[r_tile * H_DIM + k];
+                int idx = r_tile * H_DIM + k;
+                wide_vec_t w_vec = weights_in[idx];
                 for (int r = 0; r < R_ROWS; r++) {
                     #pragma HLS UNROLL
-                    weight_cache[engine_id][r][r_tile * H_DIM + k] = w_vec.data[r];
+                    weight_cache[engine_id][idx][r] = w_vec.data[r];
                 }
             }
         }
@@ -74,7 +77,8 @@ void lm_head_engine_stream(
         #pragma HLS LOOP_TRIPCOUNT min=100 max=2300
 
         dtype_acc acc[R_ROWS][T_BATCH];
-        #pragma HLS ARRAY_PARTITION variable=acc complete dim=0
+        #pragma HLS ARRAY_PARTITION variable=acc complete dim=1
+        #pragma HLS ARRAY_PARTITION variable=acc complete dim=2
 
         reset_acc: for(int r=0; r<R_ROWS; r++) {
             #pragma HLS UNROLL
@@ -84,9 +88,9 @@ void lm_head_engine_stream(
             }
         }
 
-        dtype_in weight_tile[2][R_ROWS][K_TILE];
+        dtype_in weight_tile[2][K_TILE][R_ROWS];
         #pragma HLS BIND_STORAGE variable=weight_tile type=ram_2p impl=bram
-        #pragma HLS ARRAY_PARTITION variable=weight_tile complete dim=2
+        #pragma HLS ARRAY_PARTITION variable=weight_tile complete dim=3
 
         if (num_k_tiles > 0) {
             load_w_init: for (int k = 0; k < K_TILE; k++) {
@@ -95,13 +99,13 @@ void lm_head_engine_stream(
                 if (r_tile < V_PRELOAD_TILES) {
                     for (int r = 0; r < R_ROWS; r++) {
                         #pragma HLS UNROLL
-                        weight_tile[0][r][k] = weight_cache[engine_id][r][r_tile * H_DIM + k_global];
+                        weight_tile[0][k][r] = weight_cache[engine_id][r_tile * H_DIM + k_global][r];
                     }
                 } else {
                     wide_vec_t w_vec = weights_in[r_tile * H_DIM + k_global];
                     for (int r = 0; r < R_ROWS; r++) {
                         #pragma HLS UNROLL
-                        weight_tile[0][r][k] = w_vec.data[r];
+                        weight_tile[0][k][r] = w_vec.data[r];
                     }
                 }
             }
@@ -119,13 +123,13 @@ void lm_head_engine_stream(
                     if (r_tile < V_PRELOAD_TILES) {
                         for (int r = 0; r < R_ROWS; r++) {
                             #pragma HLS UNROLL
-                            weight_tile[next][r][k] = weight_cache[engine_id][r][r_tile * H_DIM + k_global];
+                            weight_tile[next][k][r] = weight_cache[engine_id][r_tile * H_DIM + k_global][r];
                         }
                     } else {
                         wide_vec_t w_vec = weights_in[r_tile * H_DIM + k_global];
                         for (int r = 0; r < R_ROWS; r++) {
                             #pragma HLS UNROLL
-                            weight_tile[next][r][k] = w_vec.data[r];
+                            weight_tile[next][k][r] = w_vec.data[r];
                         }
                     }
                 }
@@ -135,7 +139,7 @@ void lm_head_engine_stream(
                 #pragma HLS PIPELINE II=1
                 for(int r=0; r<R_ROWS; r++) {
                     #pragma HLS UNROLL
-                    dtype_in w_val = weight_tile[buf][r][k];
+                    dtype_in w_val = weight_tile[buf][k][r];
                     for(int t=0; t<T_BATCH; t++) {
                         #pragma HLS UNROLL
                         dtype_in h_val = hidden_buf[kt * K_TILE + k][t];

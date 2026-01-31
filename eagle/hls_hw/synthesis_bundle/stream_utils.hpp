@@ -63,6 +63,19 @@ void stream_trip(hls_stream<vec_t<W>>& in,
     }
 }
 
+template <int W>
+void stream_head(hls_stream<vec_t<W>>& in, hls_stream<vec_t<W>> outs[32], int elements) {
+#pragma HLS INLINE off
+    for (int i = 0; i < elements; ++i) {
+#pragma HLS PIPELINE II = 1
+        vec_t<W> v = in.read();
+        for (int j = 0; j < 32; ++j) {
+#pragma HLS UNROLL
+            outs[j].write(v);
+        }
+    }
+}
+
 // Elementwise add of two streams.
 template <int W>
 void stream_add(hls_stream<vec_t<W>>& in0,
