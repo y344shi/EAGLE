@@ -100,8 +100,8 @@ void lm_head_8way_top(
     // 2. Parallel Engines
     lm_head_engine_stream(weights_0, s_h[0], partial_results[0], VOCAB_SLICE, 0);
     lm_head_engine_stream(weights_1, s_h[1], partial_results[1], VOCAB_SLICE, 1);
-   // lm_head_engine_stream(weights_2, s_h[2], partial_results[2], VOCAB_SLICE, 2);
-   // lm_head_engine_stream(weights_3, s_h[3], partial_results[3], VOCAB_SLICE, 3);
+    lm_head_engine_stream(weights_2, s_h[2], partial_results[2], VOCAB_SLICE, 2);
+    lm_head_engine_stream(weights_3, s_h[3], partial_results[3], VOCAB_SLICE, 3);
    // lm_head_engine_stream(weights_4, s_h[4], partial_results[4], VOCAB_SLICE, 4);
    // lm_head_engine_stream(weights_5, s_h[5], partial_results[5], VOCAB_SLICE, 5);
    // lm_head_engine_stream(weights_6, s_h[6], partial_results[6], VOCAB_SLICE, 6);

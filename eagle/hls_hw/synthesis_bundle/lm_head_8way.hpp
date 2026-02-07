@@ -32,7 +32,7 @@ struct wide_vec_t {
 typedef hls::stream<dtype_in> hidden_stream_t;
 
 // Engine Constants
-#define NUM_ENGINES 2
+#define NUM_ENGINES 4
 #define TOTAL_VOCAB 73448 / 2
 #define VOCAB_SLICE ((TOTAL_VOCAB + NUM_ENGINES - 1) / NUM_ENGINES) 
 #define V_PRELOAD_TOTAL 8192
