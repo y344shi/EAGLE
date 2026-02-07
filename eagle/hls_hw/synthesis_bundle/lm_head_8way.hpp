@@ -62,7 +62,8 @@ void lm_head_8way_top(
     const wide_vec_t* weights_5,
     const wide_vec_t* weights_6,
     const wide_vec_t* weights_7,
-    const dtype_in* hidden_in,
+    //const dtype_in* hidden_in,
+    hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_in,
     TokenOutput& final_output
 );
 

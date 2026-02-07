@@ -24,7 +24,7 @@ void lm_head_engine_stream(
     // Local URAM Buffer (per-instance)
     dtype_in hidden_buf[H_DIM][T_BATCH];
     #pragma HLS BIND_STORAGE variable=hidden_buf type=ram_2p impl=uram
-    #pragma HLS ARRAY_PARTITION variable=hidden_buf complete dim=2 
+    #pragma HLS ARRAY_RESHAPE variable=hidden_buf complete dim=2 
 
     // 0. PRELOAD WEIGHT CACHE (one-time per engine instance)
     if (!weight_cache_valid[engine_id]) {
@@ -32,7 +32,7 @@ void lm_head_engine_stream(
         for (int r_tile = 0; r_tile < V_PRELOAD_TILES; r_tile++) {
             #pragma HLS LOOP_TRIPCOUNT min=32 max=32
             preload_k: for (int k = 0; k < H_DIM; k++) {
-                #pragma HLS PIPELINE II=1
+                #pragma HLS PIPELINE II=2
                 int idx = r_tile * H_DIM + k;
                 wide_vec_t w_vec = weights_in[idx];
                 for (int r = 0; r < R_ROWS; r++) {
@@ -93,16 +93,18 @@ void lm_head_engine_stream(
         #pragma HLS ARRAY_PARTITION variable=weight_tile complete dim=3
 
         if (num_k_tiles > 0) {
-            load_w_init: for (int k = 0; k < K_TILE; k++) {
-                #pragma HLS PIPELINE II=1
-                int k_global = k;
-                if (r_tile < V_PRELOAD_TILES) {
-                    for (int r = 0; r < R_ROWS; r++) {
+            if (r_tile < V_PRELOAD_TILES) {
+                for (int k = 0; k < K_TILE; k++) {
+                    #pragma HLS PIPELINE II=1
+                     for (int r = 0; r < R_ROWS; r++) {
                         #pragma HLS UNROLL
-                        weight_tile[0][k][r] = weight_cache[engine_id][r_tile * H_DIM + k_global][r];
+                        weight_tile[0][k][r] = weight_cache[engine_id][r_tile * H_DIM + k][r];
                     }
-                } else {
-                    wide_vec_t w_vec = weights_in[r_tile * H_DIM + k_global];
+                }
+            } else {
+                 for (int k = 0; k < K_TILE; k++) {
+                    #pragma HLS PIPELINE II=2
+                    wide_vec_t w_vec = weights_in[r_tile * H_DIM + k];
                     for (int r = 0; r < R_ROWS; r++) {
                         #pragma HLS UNROLL
                         weight_tile[0][k][r] = w_vec.data[r];
@@ -117,15 +119,19 @@ void lm_head_engine_stream(
             int next = buf ^ 1;
 
             if (kt + 1 < num_k_tiles) {
-                load_w_next: for (int k = 0; k < K_TILE; k++) {
+                if (r_tile < V_PRELOAD_TILES) {
+                    for (int k = 0; k < K_TILE; k++) {
                     #pragma HLS PIPELINE II=1
-                    int k_global = (kt + 1) * K_TILE + k;
-                    if (r_tile < V_PRELOAD_TILES) {
+                        int k_global = (kt + 1) * K_TILE + k;
                         for (int r = 0; r < R_ROWS; r++) {
                             #pragma HLS UNROLL
                             weight_tile[next][k][r] = weight_cache[engine_id][r_tile * H_DIM + k_global][r];
                         }
-                    } else {
+                    }
+                } else {
+                    for (int k = 0; k < K_TILE; k++) {
+                    #pragma HLS PIPELINE II=2
+                        int k_global = (kt + 1) * K_TILE + k;
                         wide_vec_t w_vec = weights_in[r_tile * H_DIM + k_global];
                         for (int r = 0; r < R_ROWS; r++) {
                             #pragma HLS UNROLL

@@ -68,26 +68,9 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& in_stre
                     w_gate, gate_scales, w_up, up_scales, w_down, down_scales,
                     norm1_gamma, norm2_gamma, rope_cfg, hbm_k, hbm_v, seq_len, current_length);
 
-    // Collect into LM head buffer (only batch slot 0 valid; rest zeroed)
-    static dtype_in lm_input_buffer[tmac::hls::HIDDEN * T_BATCH];
-#pragma HLS BIND_STORAGE variable=lm_input_buffer type=ram_2p impl=uram
-#pragma HLS ARRAY_PARTITION variable=lm_input_buffer cyclic factor=32
-    for (int i = 0; i < tmac::hls::HIDDEN / tmac::hls::VEC_W; ++i) {
-        auto v = block_out.read();
-        for (int j = 0; j < tmac::hls::VEC_W; ++j) {
-#pragma HLS UNROLL
-            int k = i * tmac::hls::VEC_W + j;
-            lm_input_buffer[k * T_BATCH + 0] = (dtype_in)v[j];
-            for (int t = 1; t < T_BATCH; ++t) {
-#pragma HLS PIPELINE II=1
-                lm_input_buffer[k * T_BATCH + t] = (dtype_in)0.0f;
-            }
-        }
-    }
-
     TokenOutput lm_result{};
     lm_head_8way_top(lm_w0, lm_w1, lm_w2, lm_w3, lm_w4, lm_w5, lm_w6, lm_w7,
-                     lm_input_buffer, lm_result);
+                     block_out, lm_result);
 
     *best_id = lm_result.best_id[0];
     *best_score = lm_result.best_score[0];

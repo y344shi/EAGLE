@@ -2,16 +2,31 @@
 
 // Broadcaster: Reads once, writes to 8 streams
 void broadcast_hidden(
-    const dtype_in* src,
+    //const dtype_in* src,
+    hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& src,
     hidden_stream_t& s0, hidden_stream_t& s1, hidden_stream_t& s2, hidden_stream_t& s3,
     hidden_stream_t& s4, hidden_stream_t& s5, hidden_stream_t& s6, hidden_stream_t& s7
 ) {
     #pragma HLS INLINE off
-    
-    broadcast_loop: for(int i = 0; i < H_DIM * T_BATCH; i++) {
+    hls::vector<float, 16> v;
+
+    broadcast_loop:
+    for(int i = 0; i < H_DIM * T_BATCH; i++) {
         #pragma HLS LOOP_TRIPCOUNT min=163840 max=163840
         #pragma HLS PIPELINE II=1
-        dtype_in val = src[i];
+
+        dtype_in val = (dtype_in)0.0;
+        
+        if (i % T_BATCH == 0) {
+            const int h_idx = i / T_BATCH;
+            const int v_idx = h_idx % tmac::hls::VEC_W;
+            
+            if (v_idx == 0) {
+                v = src.read();
+            }
+
+            val = v[v_idx];
+        }
         
         s0.write(val); s1.write(val); s2.write(val); s3.write(val);
         s4.write(val); s5.write(val); s6.write(val); s7.write(val);
@@ -51,7 +66,8 @@ void lm_head_8way_top(
     const wide_vec_t* weights_5,
     const wide_vec_t* weights_6,
     const wide_vec_t* weights_7,
-    const dtype_in* hidden_in,
+    //const dtype_in* hidden_in,
+    hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_in,
     TokenOutput& final_output
 ) {
     #pragma HLS INTERFACE m_axi port=weights_0 bundle=gmem0 depth=100000 latency=64 num_read_outstanding=32
