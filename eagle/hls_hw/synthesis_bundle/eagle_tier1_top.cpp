@@ -152,9 +152,9 @@ void eagle_tier1_top(
     stream_trip<VEC_W>(s_norm, s_q_in, s_k_in, s_v_in, HIDDEN / VEC_W);
 
     // Stage 4: projections (broadcast-packed weights)
-    dense_projection_production_scaled<0, HIDDEN, HIDDEN>(s_q_in, s_q_proj, w_q, s_q);
-    dense_projection_production_scaled<0, HIDDEN, NUM_KV_HEADS * HEAD_DIM>(s_k_in, s_k_proj, w_k, s_k);
-    dense_projection_production_scaled<0, HIDDEN, NUM_KV_HEADS * HEAD_DIM>(s_v_in, s_v_proj, w_v, s_v);
+    dense_projection_production_scaled<0, HIDDEN, HIDDEN, 128, true>(s_q_in, s_q_proj, w_q, s_q);
+    dense_projection_production_scaled<0, HIDDEN, NUM_KV_HEADS * HEAD_DIM, 128, true>(s_k_in, s_k_proj, w_k, s_k);
+    dense_projection_production_scaled<0, HIDDEN, NUM_KV_HEADS * HEAD_DIM, 128, true>(s_v_in, s_v_proj, w_v, s_v);
 
     // Stage 5: RoPE on Q/K
     rope_apply_stream<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>(s_q_proj, s_q_rot, s_k_proj, s_k_rot, rope_cfg);
@@ -172,7 +172,7 @@ void eagle_tier1_top(
     collect_ctx(s_context, ctx_head_streams);
 
     // Stage 9: Output projection (use TMAC kernel for quantized weights)
-    dense_projection_production_scaled<0, HIDDEN, HIDDEN, 128, false>(s_context, s_o_proj, w_o, s_o);
+    dense_projection_production_scaled<0, HIDDEN, HIDDEN, 128, true>(s_context, s_o_proj, w_o, s_o);
 
     // Stage 10: scale attention output and residual add (skip uses raw input)
     stream_scale<VEC_W>(s_o_proj, s_o_scaled, RESIDUAL_SCALE, HIDDEN / VEC_W);
@@ -186,14 +186,14 @@ void eagle_tier1_top(
 
     // Stage 12: Gate/Up projections
     stream_dup<VEC_W>(s_ffn_norm, s_gate_in, s_up_in, HIDDEN / VEC_W);
-    dense_projection_production_scaled<0, HIDDEN, INTERMEDIATE, 128, false>(s_gate_in, s_gate_vec, w_gate, gate_scales);
-    dense_projection_production_scaled<0, HIDDEN, INTERMEDIATE, 128, false>(s_up_in, s_up_vec, w_up, up_scales);
+    dense_projection_production_scaled<0, HIDDEN, INTERMEDIATE, 128, true>(s_gate_in, s_gate_vec, w_gate, gate_scales);
+    dense_projection_production_scaled<0, HIDDEN, INTERMEDIATE, 128, true>(s_up_in, s_up_vec, w_up, up_scales);
 
     // Stage 13: SiLU * Up
     silu_mul_stream<VEC_W>(s_gate_vec, s_up_vec, s_swiglu, INTERMEDIATE / VEC_W);
 
     // Stage 14: Down projection AND Final Residual Add
-    dense_projection_production_scaled<0, INTERMEDIATE, HIDDEN, 128, false>(s_swiglu, s_down, w_down, down_scales);
+    dense_projection_production_scaled<0, INTERMEDIATE, HIDDEN, 128, true>(s_swiglu, s_down, w_down, down_scales);
     
     // FIX: Combine FFN output (s_down) with the residual skip (s_res1_skip)
     stream_add<VEC_W>(s_down, s_res1_skip, out_stream, HIDDEN / VEC_W);

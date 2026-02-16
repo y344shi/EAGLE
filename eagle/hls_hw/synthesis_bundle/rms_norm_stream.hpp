@@ -20,7 +20,7 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
 #pragma HLS INTERFACE axis port = out_stream
 #pragma HLS INTERFACE s_axilite port = gamma bundle = control
 #pragma HLS INTERFACE s_axilite port = return bundle = control
-#pragma HLS ARRAY_RESHAPE variable=gamma type=cyclic factor=VEC_W dim=1
+#pragma HLS ARRAY_PARTITION variable=gamma type=cyclic factor=VEC_W dim=1
     static_assert(HIDDEN_DIM % VEC_W == 0, "HIDDEN_DIM must be divisible by VEC_W");
 
     float buf[HIDDEN_DIM];
@@ -31,13 +31,18 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
     for (int i = 0; i < HIDDEN_DIM / VEC_W; ++i) {
 #pragma HLS PIPELINE II = 2
         vec_t<VEC_W> v = in_stream.read();
+        float partial = 0.0f;
+
         for (int j = 0; j < VEC_W; ++j) {
 #pragma HLS UNROLL
             float x = v[j];
             buf[i * VEC_W + j] = x;
-            sum_sq += x * x;
+            partial = x * x + partial;
         }
+
+        sum_sq += partial;
     }
+    
     float scale = ::hls::sqrt(sum_sq / HIDDEN_DIM + eps);
     // Normalize and apply gamma
     for (int i = 0; i < HIDDEN_DIM / VEC_W; ++i) {

@@ -191,13 +191,12 @@ void dense_projection_production_scaled(hls_stream<vec_t<VEC_W>>& a_stream,
 #pragma HLS BIND_STORAGE variable=weights_tile_bram type=ram_2p impl=bram
     static float scales_tile_bram[SCALES_PER_TILE];
 #pragma HLS BIND_STORAGE variable=scales_tile_bram type=ram_2p impl=bram
-#pragma HLS ARRAY_PARTITION variable=scales_tile_bram cyclic factor=TILE dim=2
+#pragma HLS ARRAY_PARTITION variable=scales_tile_bram type=cyclic factor=TILE dim=1
 
     // Accumulators for ONE tile. Reset for each tile.
     vec_t<4> acc_banks[TILE];
     //vec_t<TILE> acc_banks[4];
-#pragma HLS ARRAY_RESHAPE variable=acc_banks type=complete dim=2
-#pragma HLS ARRAY_RESHAPE variable=acc_banks type=cyclic factor=TILE dim=1
+#pragma HLS ARRAY_PARTITION variable=acc_banks type=complete dim=0
 
     vec_t<VEC_W> current_input_chunk;
 ingest_a_loop:
@@ -210,13 +209,13 @@ ingest_a_loop:
     }
 
     float lut_pos[9];
-    #pragma HLS ARRAY_PARTITION variable=lut_pos complete
+    #pragma HLS ARRAY_PARTITION variable=lut_pos type=complete dim=0
 
 tile_loop:
     for (int t = 0; t < TILES; ++t) {
     init_acc_loop:
         for (int i = 0; i < TILE; ++i) {
-//#pragma HLS UNROLL
+#pragma HLS UNROLL
             for (int b = 0; b < 4; ++b) {
 #pragma HLS UNROLL
                 acc_banks[i][b] = 0.0f;

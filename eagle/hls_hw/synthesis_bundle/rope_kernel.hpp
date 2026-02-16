@@ -34,6 +34,9 @@ void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
 #pragma HLS INTERFACE s_axilite port = cfg bundle = control
 #pragma HLS INTERFACE s_axilite port = return bundle = control
 
+#pragma HLS ARRAY_PARTITION variable=cfg.cos_vals complete dim = 1
+#pragma HLS ARRAY_PARTITION variable=cfg.sin_vals complete dim = 1
+
     constexpr int HALF_DIM = HEAD_DIM / 2;
     float q_buf[NUM_HEADS][HEAD_DIM];
     float k_buf[NUM_KV_HEADS][HEAD_DIM];
@@ -66,7 +69,7 @@ void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
     // Rotate Q
     for (int h = 0; h < NUM_HEADS; ++h) {
         for (int i = 0; i < HALF_DIM; ++i) {
-#pragma HLS PIPELINE II = 1
+#pragma HLS UNROLL
             const float a = q_buf[h][i];
             const float b = q_buf[h][i + HALF_DIM];
             const float c = cfg.cos_vals[i];
@@ -78,7 +81,7 @@ void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
     // Rotate K
     for (int h = 0; h < NUM_KV_HEADS; ++h) {
         for (int i = 0; i < HALF_DIM; ++i) {
-#pragma HLS PIPELINE II = 1
+#pragma HLS UNROLL
             const float a = k_buf[h][i];
             const float b = k_buf[h][i + HALF_DIM];
             const float c = cfg.cos_vals[i];
