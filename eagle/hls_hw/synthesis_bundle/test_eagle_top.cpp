@@ -7,6 +7,8 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -106,15 +108,241 @@ void fill_rope_cfg(RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& cfg, const std
     }
 }
 
+size_t expected_pack_count(int in_dim, int out_dim) {
+    return (static_cast<size_t>(in_dim) * static_cast<size_t>(out_dim)) / 128;
+}
+
+size_t expected_scale_count(int in_dim, int out_dim) {
+    return (static_cast<size_t>(in_dim / GROUP_SIZE) * static_cast<size_t>(out_dim));
+}
+
+void print_required_golden_files(const std::string& base_tensors,
+                                 const std::string& base_weights,
+                                 const std::string& base_norms) {
+    std::cout << "\nRequired files for full golden check:\n";
+    std::cout << "  [required] " << base_tensors << "tensor_011_EAGLE_combined_ALL.bin\n";
+    std::cout << "  [required] " << base_tensors << "tensor_014_EAGLE_after_residual.bin\n";
+    std::cout << "  [required] " << base_weights << "q_proj_weights_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "q_proj_scales_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "k_proj_weights_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "k_proj_scales_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "v_proj_weights_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "v_proj_scales_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "o_proj_weights_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "o_proj_scales_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "gate_proj_weights_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "gate_proj_scales_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "up_proj_weights_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "up_proj_scales_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "down_proj_weights_swizzled.bin\n";
+    std::cout << "  [required] " << base_weights << "down_proj_scales_swizzled.bin\n";
+    std::cout << "  [required] " << base_norms << "input_layernorm.fp16.bin\n";
+    std::cout << "  [required] " << base_norms << "post_attention_layernorm.fp16.bin\n";
+    std::cout << "  [optional] " << base_tensors << "tensor_006_EAGLE_INPUT_prev_embed_ALL.bin\n";
+    std::cout << "  [optional] " << base_tensors << "tensor_007_EAGLE_INPUT_prev_hidden_ALL.bin\n";
+    std::cout << "  [optional] " << base_tensors << "tensor_005_BASE_Logits.bin\n";
+    std::cout << "  [optional] " << base_norms << "embed_tokens.fp16.bin\n";
+    std::cout << "Run with --smoke for a self-contained check without external golden tensors.\n\n";
+}
+
+bool check_size(const char* name, size_t got, size_t expected) {
+    if (got == expected) return true;
+    std::cout << "[shape-mismatch] " << name << ": got " << got << ", expected " << expected << "\n";
+    return false;
+}
+
+bool all_finite(const std::vector<float>& v) {
+    for (float x : v) {
+        if (!std::isfinite(x)) return false;
+    }
+    return true;
+}
+
+template <int HEAD_DIM>
+void run_attention_selected(hls_stream<vec_t<VEC_W>>& q_stream,
+                            hls_stream<vec_t<VEC_W>>& k_stream,
+                            hls_stream<vec_t<VEC_W>>& v_stream,
+                            hls_stream<vec_t<VEC_W>>& out_stream,
+                            int hist_len) {
+    const int padded_len = ((hist_len + 127) / 128) * 128;
+#if TMAC_ATTN_SOLVER_MODE == 0
+    attention_solver<HEAD_DIM>(q_stream, k_stream, v_stream, out_stream, hist_len, padded_len);
+#elif TMAC_ATTN_SOLVER_MODE == 1
+    fused_online_attention_pwl<HEAD_DIM>(q_stream, k_stream, v_stream, out_stream, hist_len, padded_len);
+#else
+    if (hist_len >= TMAC_ATTN_FUSED_SWITCH_LEN) {
+        fused_online_attention_pwl<HEAD_DIM>(q_stream, k_stream, v_stream, out_stream, hist_len, padded_len);
+    } else {
+        attention_solver<HEAD_DIM>(q_stream, k_stream, v_stream, out_stream, hist_len, padded_len);
+    }
+#endif
+}
+
+void fill_random_pack512(std::vector<pack512>& weights, std::mt19937& rng) {
+    std::uniform_int_distribution<int> dist(0, 255);
+    for (auto& pkt : weights) {
+        for (int i = 0; i < 64; ++i) {
+            pkt.bytes[i] = static_cast<uint8_t>(dist(rng));
+        }
+    }
+}
+
+void fill_random_floats(std::vector<float>& vals, std::mt19937& rng, float lo, float hi) {
+    std::uniform_real_distribution<float> dist(lo, hi);
+    for (float& x : vals) x = dist(rng);
+}
+
+int run_smoke_end_to_end(int seed) {
+    std::cout << "[smoke] Running self-contained Tier1 deterministic check.\n";
+    std::mt19937 rng(seed);
+
+    const size_t w_q_n = expected_pack_count(HIDDEN, HIDDEN);
+    const size_t w_k_n = expected_pack_count(HIDDEN, NUM_KV_HEADS * HEAD_DIM);
+    const size_t w_v_n = expected_pack_count(HIDDEN, NUM_KV_HEADS * HEAD_DIM);
+    const size_t w_o_n = expected_pack_count(HIDDEN, HIDDEN);
+    const size_t w_gate_n = expected_pack_count(HIDDEN, INTERMEDIATE);
+    const size_t w_up_n = expected_pack_count(HIDDEN, INTERMEDIATE);
+    const size_t w_down_n = expected_pack_count(INTERMEDIATE, HIDDEN);
+
+    const size_t s_q_n = expected_scale_count(HIDDEN, HIDDEN);
+    const size_t s_k_n = expected_scale_count(HIDDEN, NUM_KV_HEADS * HEAD_DIM);
+    const size_t s_v_n = expected_scale_count(HIDDEN, NUM_KV_HEADS * HEAD_DIM);
+    const size_t s_o_n = expected_scale_count(HIDDEN, HIDDEN);
+    const size_t s_gate_n = expected_scale_count(HIDDEN, INTERMEDIATE);
+    const size_t s_up_n = expected_scale_count(HIDDEN, INTERMEDIATE);
+    const size_t s_down_n = expected_scale_count(INTERMEDIATE, HIDDEN);
+
+    std::vector<pack512> w_q(w_q_n), w_k(w_k_n), w_v(w_v_n), w_o(w_o_n), w_gate(w_gate_n),
+        w_up(w_up_n), w_down(w_down_n);
+    std::vector<float> s_q(s_q_n), s_k(s_k_n), s_v(s_v_n), s_o(s_o_n), s_gate(s_gate_n),
+        s_up(s_up_n), s_down(s_down_n), norm1(HIDDEN), norm2(HIDDEN);
+
+    fill_random_pack512(w_q, rng);
+    fill_random_pack512(w_k, rng);
+    fill_random_pack512(w_v, rng);
+    fill_random_pack512(w_o, rng);
+    fill_random_pack512(w_gate, rng);
+    fill_random_pack512(w_up, rng);
+    fill_random_pack512(w_down, rng);
+
+    fill_random_floats(s_q, rng, 0.001f, 0.02f);
+    fill_random_floats(s_k, rng, 0.001f, 0.02f);
+    fill_random_floats(s_v, rng, 0.001f, 0.02f);
+    fill_random_floats(s_o, rng, 0.001f, 0.02f);
+    fill_random_floats(s_gate, rng, 0.001f, 0.02f);
+    fill_random_floats(s_up, rng, 0.001f, 0.02f);
+    fill_random_floats(s_down, rng, 0.001f, 0.02f);
+    fill_random_floats(norm1, rng, 0.8f, 1.2f);
+    fill_random_floats(norm2, rng, 0.8f, 1.2f);
+
+    constexpr int TOKENS = 3;
+    std::vector<float> inputs(TOKENS * HIDDEN);
+    fill_random_floats(inputs, rng, -0.5f, 0.5f);
+
+    std::vector<float> inv_freq(HEAD_DIM / 2);
+    for (int i = 0; i < HEAD_DIM / 2; ++i) {
+        inv_freq[i] = 1.0f / std::pow(10000.0f, (2.0f * i) / HEAD_DIM);
+    }
+
+    auto run_once = [&](std::vector<float>* out_final) {
+        std::vector<vec_t<VEC_W>> hbm_k(MAX_SEQ * (NUM_KV_HEADS * HEAD_DIM) / VEC_W);
+        std::vector<vec_t<VEC_W>> hbm_v(MAX_SEQ * (NUM_KV_HEADS * HEAD_DIM) / VEC_W);
+
+        out_final->clear();
+        for (int t = 0; t < TOKENS; ++t) {
+            hls_stream<vec_t<VEC_W>> in_stream, out_stream;
+            for (int i = 0; i < HIDDEN / VEC_W; ++i) {
+                vec_t<VEC_W> chunk;
+                for (int j = 0; j < VEC_W; ++j) {
+                    chunk[j] = inputs[t * HIDDEN + i * VEC_W + j];
+                }
+                in_stream.write(chunk);
+            }
+
+            RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM> rope_cfg{};
+            fill_rope_cfg<HEAD_DIM>(rope_cfg, inv_freq, t);
+
+            eagle_tier1_top(in_stream, out_stream, w_q.data(), s_q.data(), w_k.data(), s_k.data(),
+                            w_v.data(), s_v.data(), w_o.data(), s_o.data(), w_gate.data(), s_gate.data(),
+                            w_up.data(), s_up.data(), w_down.data(), s_down.data(), norm1.data(),
+                            norm2.data(), rope_cfg, hbm_k.data(), hbm_v.data(), t, t);
+
+            if (t == TOKENS - 1) {
+                out_final->reserve(HIDDEN);
+                for (int i = 0; i < HIDDEN / VEC_W; ++i) {
+                    vec_t<VEC_W> chunk = out_stream.read();
+                    for (int j = 0; j < VEC_W; ++j) out_final->push_back(chunk[j]);
+                }
+            } else {
+                for (int i = 0; i < HIDDEN / VEC_W; ++i) {
+                    (void)out_stream.read();
+                }
+            }
+        }
+    };
+
+    std::vector<float> out;
+    run_once(&out);
+
+    if (out.size() != static_cast<size_t>(HIDDEN)) {
+        std::cout << "[smoke] FAIL: unexpected output size (" << out.size() << ")\n";
+        return 1;
+    }
+
+    float max_abs = 0.0f;
+    float l1 = 0.0f;
+    for (float x : out) {
+        const float a = std::fabs(x);
+        if (a > max_abs) max_abs = a;
+        l1 += a;
+    }
+
+    if (!all_finite(out)) {
+        std::cout << "[smoke] FAIL: non-finite output detected.\n";
+        return 1;
+    }
+    if (max_abs <= 1e-9f || l1 <= 1e-6f) {
+        std::cout << "[smoke] FAIL: output appears degenerate (max_abs=" << max_abs
+                  << ", l1=" << l1 << ").\n";
+        return 1;
+    }
+
+    std::cout << "[smoke] PASS (finite, non-degenerate output). max_abs=" << max_abs
+              << ", l1=" << l1 << "\n";
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
+    bool smoke_mode = false;
+    bool list_required_goldens = false;
+    int smoke_seed = 11;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--smoke") {
+            smoke_mode = true;
+        } else if (arg == "--list-required-goldens") {
+            list_required_goldens = true;
+        } else if (arg.rfind("--smoke-seed=", 0) == 0) {
+            smoke_seed = std::atoi(arg.substr(13).c_str());
+        }
+    }
+
     // Adjust paths relative to the working directory when running the harness.
     // We keep weights in ../packed_all/ (produced by pack_all_4bit.py).
     // Paths relative to this repo root (deep_pipeline_lutmac).
     const std::string base_tensors = "../eagle_verified_pipeline_4bit/cpmcu_tensors/";
     const std::string base_weights = "../packed_all/";
     const std::string base_norms = "../eagle_verified_pipeline_4bit/hls_4bit/weights_all_4bit/";
+
+    if (list_required_goldens) {
+        print_required_golden_files(base_tensors, base_weights, base_norms);
+        if (!smoke_mode) return 0;
+    }
+    if (smoke_mode) {
+        return run_smoke_end_to_end(smoke_seed);
+    }
 
     std::cout << "EAGLE tier1 end-to-end harness\n";
 
@@ -125,6 +353,7 @@ int main(int argc, char** argv) {
     auto hidden_all = load_fp16(base_tensors + "tensor_007_EAGLE_INPUT_prev_hidden_ALL.bin");
     if (input_all.size() < HIDDEN) {
         std::cout << "Input tensor missing or too small; got " << input_all.size() << "\n";
+        print_required_golden_files(base_tensors, base_weights, base_norms);
         return 1;
     }
     const int total_tokens = static_cast<int>(input_all.size() / HIDDEN);
@@ -167,6 +396,15 @@ int main(int argc, char** argv) {
     auto norm2 = load_fp16(base_norms + "post_attention_layernorm.fp16.bin");
     auto norm_fc1 = load_fp16(base_norms + "input_norm1.fp16.bin");
     auto norm_fc2 = load_fp16(base_norms + "input_norm2.fp16.bin");
+    // Older/newer capture layouts may omit input_norm{1,2}. Keep harness robust.
+    if (norm_fc1.size() < HIDDEN) {
+        std::cout << "[warn] missing input_norm1.fp16.bin; fallback to input_layernorm.fp16.bin\n";
+        norm_fc1 = norm1;
+    }
+    if (norm_fc2.size() < HIDDEN) {
+        std::cout << "[warn] missing input_norm2.fp16.bin; fallback to post_attention_layernorm.fp16.bin\n";
+        norm_fc2 = norm2;
+    }
     // Row-major qweights/scales for reference matvecs (LM head and block projections)
     auto o_proj_qw_row = load_bin<uint32_t>(base_norms + "o_proj_qweight.bin");
     auto o_proj_sc_row = load_fp16(base_norms + "o_proj_scales.bin");
@@ -200,12 +438,46 @@ int main(int argc, char** argv) {
         inv_freq[i] = base_freq / LONGROPE_FACTOR[i];
     }
 
+    const bool shape_ok =
+        check_size("q_proj_weights_swizzled.bin (pack512)", w_q.size(), expected_pack_count(HIDDEN, HIDDEN)) &&
+        check_size("k_proj_weights_swizzled.bin (pack512)", w_k.size(),
+                   expected_pack_count(HIDDEN, NUM_KV_HEADS * HEAD_DIM)) &&
+        check_size("v_proj_weights_swizzled.bin (pack512)", w_v.size(),
+                   expected_pack_count(HIDDEN, NUM_KV_HEADS * HEAD_DIM)) &&
+        check_size("o_proj_weights_swizzled.bin (pack512)", w_o.size(), expected_pack_count(HIDDEN, HIDDEN)) &&
+        check_size("gate_proj_weights_swizzled.bin (pack512)", w_gate.size(),
+                   expected_pack_count(HIDDEN, INTERMEDIATE)) &&
+        check_size("up_proj_weights_swizzled.bin (pack512)", w_up.size(),
+                   expected_pack_count(HIDDEN, INTERMEDIATE)) &&
+        check_size("down_proj_weights_swizzled.bin (pack512)", w_down.size(),
+                   expected_pack_count(INTERMEDIATE, HIDDEN)) &&
+        check_size("q_proj_scales_swizzled.bin (float)", s_q.size(), expected_scale_count(HIDDEN, HIDDEN)) &&
+        check_size("k_proj_scales_swizzled.bin (float)", s_k.size(),
+                   expected_scale_count(HIDDEN, NUM_KV_HEADS * HEAD_DIM)) &&
+        check_size("v_proj_scales_swizzled.bin (float)", s_v.size(),
+                   expected_scale_count(HIDDEN, NUM_KV_HEADS * HEAD_DIM)) &&
+        check_size("o_proj_scales_swizzled.bin (float)", s_o.size(), expected_scale_count(HIDDEN, HIDDEN)) &&
+        check_size("gate_proj_scales_swizzled.bin (float)", s_gate.size(),
+                   expected_scale_count(HIDDEN, INTERMEDIATE)) &&
+        check_size("up_proj_scales_swizzled.bin (float)", s_up.size(),
+                   expected_scale_count(HIDDEN, INTERMEDIATE)) &&
+        check_size("down_proj_scales_swizzled.bin (float)", s_down.size(),
+                   expected_scale_count(INTERMEDIATE, HIDDEN));
+    if (!shape_ok) {
+        std::cout << "Packed-weight shape contract mismatch.\n";
+        std::cout << "Current build constants: HIDDEN=" << HIDDEN << ", HEAD_DIM=" << HEAD_DIM
+                  << ", NUM_HEADS=" << NUM_HEADS << ", NUM_KV_HEADS=" << NUM_KV_HEADS << "\n";
+        print_required_golden_files(base_tensors, base_weights, base_norms);
+        return 1;
+    }
+
     // Sanity check
     if (w_q.empty() || s_q.empty() || norm1.size() < HIDDEN || norm2.size() < HIDDEN) {
         std::cout << "Missing weights/scales/norms; run pack_all_4bit.py and ensure files exist in "
                   << base_weights << "\n";
         std::cout << "sizes: w_q=" << w_q.size() << " s_q=" << s_q.size()
                   << " norm1=" << norm1.size() << " norm2=" << norm2.size() << "\n";
+        print_required_golden_files(base_tensors, base_weights, base_norms);
         return 1;
     }
 
@@ -378,7 +650,7 @@ int main(int argc, char** argv) {
                 for (int j = 0; j < VEC_W; ++j) c[j] = k_proj_dump[i * VEC_W + j];
                 s_k_proj_re.write(c);
             }
-            rope_apply_stream<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>(s_q_proj_re, s_q_rot_dbg, s_k_proj_re, s_k_rot_dbg, rope_cfg_target);
+            rope_apply_stream<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>(s_q_proj_re, s_q_rot_dbg, s_k_proj_re, s_k_rot_dbg, rope_cfg);
             std::vector<float> q_rot_dump, k_rot_dump;
             for (int i = 0; i < HIDDEN / VEC_W; ++i) {
                 auto c = s_q_rot_dbg.read();
@@ -409,7 +681,7 @@ int main(int argc, char** argv) {
                     v_hist_dbg.write(hbm_v[base + v]);
                 }
             }
-            attention_solver<HEAD_DIM>(q_head_dbg, k_hist_dbg, v_hist_dbg, ctx_dbg, t + 1);
+            run_attention_selected<HEAD_DIM>(q_head_dbg, k_hist_dbg, v_hist_dbg, ctx_dbg, t + 1);
             std::vector<float> ctx_dump;
             for (int i = 0; i < HEAD_DIM / VEC_W; ++i) {
                 auto c = ctx_dbg.read();
@@ -485,7 +757,7 @@ int main(int argc, char** argv) {
                 for (int j = 0; j < VEC_W; ++j) c[j] = k_proj_dump[i * VEC_W + j];
                 s_k_proj_re.write(c);
             }
-            rope_apply_stream<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>(s_q_proj_re, s_q_rot_dbg, s_k_proj_re, s_k_rot_dbg, rope_cfg_target);
+            rope_apply_stream<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>(s_q_proj_re, s_q_rot_dbg, s_k_proj_re, s_k_rot_dbg, rope_cfg);
             std::vector<float> q_rot_dump, k_rot_dump;
             for (int i = 0; i < HIDDEN / VEC_W; ++i) {
                 auto c = s_q_rot_dbg.read();
@@ -518,7 +790,7 @@ int main(int argc, char** argv) {
                     v_hist_dbg.write(cv);
                 }
             }
-            attention_solver<HEAD_DIM>(q_head_dbg, k_hist_dbg, v_hist_dbg, ctx_dbg, 1);
+            run_attention_selected<HEAD_DIM>(q_head_dbg, k_hist_dbg, v_hist_dbg, ctx_dbg, 1);
             std::vector<float> ctx_dump;
             for (int i = 0; i < HEAD_DIM / VEC_W; ++i) {
                 auto c = ctx_dbg.read();
@@ -530,10 +802,8 @@ int main(int argc, char** argv) {
 
     std::cout << "Produced " << out_vec.size() << " floats\n";
     if (have_golden && out_vec.size() == HIDDEN) {
-        std::vector<float> final_out(HIDDEN);
-        for (int i = 0; i < HIDDEN; ++i) {
-            final_out[i] = input_all[target_token * HIDDEN + i] + out_vec[i] * RESIDUAL_SCALE;
-        }
+        // eagle_tier1_top now emits post-residual output directly.
+        std::vector<float> final_out = out_vec;
 
         float max_diff = 0.f;
         int max_idx = 0;
@@ -561,11 +831,9 @@ int main(int argc, char** argv) {
         for (int i = start; i <= end; ++i) {
             std::cout << "    " << i << ": " << final_out[i] << " / " << golden[i] << "\n";
         }
-        // Also compare transformer_out vs inferred golden transformer_out in the window
-        std::cout << "  window transformer_out vs inferred_golden (no residual):\n";
+        std::cout << "  window final_out vs golden:\n";
         for (int i = start; i <= end; ++i) {
-            float inferred_golden = (golden[i] - input_all[target_token * HIDDEN + i]) / RESIDUAL_SCALE;
-            std::cout << "    " << i << ": " << out_vec[i] << " / " << inferred_golden << "\n";
+            std::cout << "    " << i << ": " << final_out[i] << " / " << golden[i] << "\n";
         }
         // Compute attention-only debug for head 25 to see if divergence arises before FFN
         if (max_idx >= HEAD_DIM * 25 && max_idx < HEAD_DIM * 26) {
@@ -638,7 +906,7 @@ int main(int argc, char** argv) {
                     v_hist_dbg.write(hbm_v[base + v]);
                 }
             }
-            attention_solver<HEAD_DIM>(q_head_dbg, k_hist_dbg, v_hist_dbg, ctx_dbg, target_token + 1);
+            run_attention_selected<HEAD_DIM>(q_head_dbg, k_hist_dbg, v_hist_dbg, ctx_dbg, target_token + 1);
             std::vector<float> ctx_dump;
             for (int i = 0; i < vecs_per_head; ++i) {
                 auto c = ctx_dbg.read();
@@ -772,7 +1040,7 @@ int main(int argc, char** argv) {
                         v_hs.write(hbm_v[base + v]);
                     }
                 }
-                attention_solver<HEAD_DIM>(q_hs, k_hs, v_hs, c_hs, hist_len);
+                run_attention_selected<HEAD_DIM>(q_hs, k_hs, v_hs, c_hs, hist_len);
                 for (int i = 0; i < vecs_per_head; ++i) {
                     auto c = c_hs.read();
                     for (int j = 0; j < VEC_W; ++j) ctx_all[h * HEAD_DIM + i * VEC_W + j] = c[j];
@@ -812,24 +1080,28 @@ int main(int argc, char** argv) {
             dense_projection_production_scaled<0, INTERMEDIATE, HIDDEN>(s_swiglu, s_down_out, w_down.data(), s_down.data());
             auto cpu_block = stream_to_vec(s_down_out, HIDDEN / VEC_W);
 
-            // Compare CPU recompute vs HLS out_vec
+            // Compare CPU recompute (including final residual add) vs HLS out_vec
+            std::vector<float> cpu_final(HIDDEN);
+            for (int i = 0; i < HIDDEN; ++i) {
+                cpu_final[i] = cpu_block[i] + res1_cpu[i];
+            }
             float max_diff_cpu = 0.f;
             int max_idx_cpu = 0;
             for (int i = 0; i < HIDDEN; ++i) {
-                float d = std::fabs(cpu_block[i] - out_vec[i]);
+                float d = std::fabs(cpu_final[i] - out_vec[i]);
                 if (d > max_diff_cpu) {
                     max_diff_cpu = d;
                     max_idx_cpu = i;
                 }
             }
             std::cout << "  [cpu_full] max diff vs HLS: " << max_diff_cpu << " at idx " << max_idx_cpu
-                      << " cpu=" << cpu_block[max_idx_cpu] << " hls=" << out_vec[max_idx_cpu] << "\n";
+                      << " cpu=" << cpu_final[max_idx_cpu] << " hls=" << out_vec[max_idx_cpu] << "\n";
             const int w = 4;
             int st = std::max(0, max_idx_cpu - w);
             int ed = std::min(HIDDEN - 1, max_idx_cpu + w);
             std::cout << "  [cpu_full] window [" << st << "," << ed << "] cpu / hls:\n";
             for (int i = st; i <= ed; ++i) {
-                std::cout << "    " << i << ": " << cpu_block[i] << " / " << out_vec[i] << "\n";
+                std::cout << "    " << i << ": " << cpu_final[i] << " / " << out_vec[i] << "\n";
             }
 
             // Row-major vs packed projection check (o_proj/gate/up/down)
