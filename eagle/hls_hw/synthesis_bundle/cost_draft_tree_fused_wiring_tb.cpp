@@ -139,6 +139,7 @@ struct FusedExpectedOutputs {
 struct CliOptions {
     std::string case_file;
     bool dry_run = false;
+    int multi_depth_steps = 1;
 };
 
 static float max_abs_diff(const std::vector<float>& a, const std::vector<float>& b) {
@@ -438,9 +439,25 @@ static bool parse_cli(int argc, char** argv, CliOptions* opts, std::string* err_
             opts->case_file = argv[++i];
         } else if (arg == "--dry-run") {
             opts->dry_run = true;
+        } else if (arg == "--multi-depth-steps") {
+            if (i + 1 >= argc) {
+                *err_msg = "--multi-depth-steps requires an integer";
+                return false;
+            }
+            try {
+                opts->multi_depth_steps = std::stoi(argv[++i]);
+            } catch (...) {
+                *err_msg = "invalid integer for --multi-depth-steps";
+                return false;
+            }
+            if (opts->multi_depth_steps <= 0) {
+                *err_msg = "--multi-depth-steps must be > 0";
+                return false;
+            }
         } else if (arg == "--help" || arg == "-h") {
             std::cout
-                << "Usage: cost_draft_tree_fused_wiring_tb [--case-file <path>] [--dry-run]\n";
+                << "Usage: cost_draft_tree_fused_wiring_tb [--case-file <path>] [--dry-run]"
+                << " [--multi-depth-steps <N>]\n";
             return false;
         } else {
             *err_msg = "unknown argument: " + arg;
@@ -1078,6 +1095,311 @@ static bool run_fused_test(const TestCfg& cfg,
     return true;
 }
 
+// Multi-depth bench:
+// Repeatedly applies fused step with chained state/frontier and checks candidate outputs
+// against a sequential reference pipeline at each depth.
+static bool run_fused_multidepth_candidate_test(const TestCfg& base_cfg,
+                                                const FusedTestInputs& seed_in,
+                                                const LegacyState& legacy_init,
+                                                const ControllerState& ctrl_init,
+                                                int steps) {
+    if (steps <= 0) {
+        std::cerr << "[FAIL] multi-depth steps must be > 0.\n";
+        return false;
+    }
+
+    const int total_topk = base_cfg.tree_width * base_cfg.node_top_k;
+    const size_t hidden_n =
+        static_cast<size_t>(base_cfg.batch_size) * base_cfg.tree_width * base_cfg.hidden_size;
+    const size_t score_n = static_cast<size_t>(base_cfg.batch_size) * base_cfg.tree_width;
+    const size_t tree_n = static_cast<size_t>(base_cfg.batch_size) * base_cfg.tree_width;
+    const size_t selected_cache_n =
+        static_cast<size_t>(base_cfg.batch_size) * base_cfg.node_top_k;
+    const size_t in_mask_n = static_cast<size_t>(base_cfg.batch_size) * base_cfg.tree_width *
+                             static_cast<size_t>(base_cfg.input_count - 1);
+
+    LegacyState ref_legacy = legacy_init;
+    LegacyState fused_legacy = legacy_init;
+    ControllerState ref_ctrl = ctrl_init;
+    ControllerState fused_ctrl = ctrl_init;
+
+    std::vector<float> step_topk_probas = seed_in.topk_probas;
+    std::vector<int64_t> step_topk_tokens = seed_in.topk_tokens;
+    std::vector<float> step_last_layer_scores = seed_in.last_layer_scores;
+    std::vector<float> step_input_hidden_states = seed_in.input_hidden_states;
+    std::vector<int64_t> step_topk_indexs_prev = seed_in.topk_indexs_prev;
+    BoolBuffer step_input_tree_mask = seed_in.input_tree_mask;
+    std::vector<int32_t> step_selected_cache_locs = seed_in.selected_cache_locs;
+
+    std::vector<float> prev_fused_output_hidden(
+        static_cast<size_t>(base_cfg.batch_size) * base_cfg.node_top_k * base_cfg.hidden_size,
+        0.0f);
+    std::vector<int32_t> prev_fused_frontier_cache_locs(
+        static_cast<size_t>(base_cfg.batch_size) * base_cfg.max_tree_width, -1);
+
+    for (int depth = 0; depth < steps; ++depth) {
+        TestCfg cfg = base_cfg;
+        cfg.curr_depth = base_cfg.curr_depth + depth;
+
+        // For depth>0, chain inputs from prior fused outputs to emulate repeated drafting.
+        if (depth > 0) {
+            // 1) next input hidden features from previous step output hidden
+            if (base_cfg.tree_width == base_cfg.node_top_k) {
+                step_input_hidden_states = prev_fused_output_hidden;
+            } else {
+                for (int b = 0; b < base_cfg.batch_size; ++b) {
+                    for (int t = 0; t < base_cfg.tree_width; ++t) {
+                        const int src_t = (base_cfg.node_top_k > 0) ? (t % base_cfg.node_top_k) : 0;
+                        for (int h = 0; h < base_cfg.hidden_size; ++h) {
+                            const size_t src = (static_cast<size_t>(b) * base_cfg.node_top_k + src_t) *
+                                                   base_cfg.hidden_size +
+                                               h;
+                            const size_t dst = (static_cast<size_t>(b) * base_cfg.tree_width + t) *
+                                                   base_cfg.hidden_size +
+                                               h;
+                            step_input_hidden_states[dst] = prev_fused_output_hidden[src];
+                        }
+                    }
+                }
+            }
+
+            // 2) next parent scores from previous selected output scores
+            for (int b = 0; b < base_cfg.batch_size; ++b) {
+                for (int t = 0; t < base_cfg.tree_width; ++t) {
+                    const int src_t = (base_cfg.node_top_k > 0) ? (t % base_cfg.node_top_k) : 0;
+                    const float s = fused_legacy.output_scores[b * base_cfg.node_top_k + src_t];
+                    step_last_layer_scores[static_cast<size_t>(b) * base_cfg.tree_width + t] =
+                        std::fabs(s) + 1e-3f;
+                }
+            }
+
+            // 3) deterministic candidate proposals for this depth
+            for (int b = 0; b < base_cfg.batch_size; ++b) {
+                for (int p = 0; p < base_cfg.tree_width; ++p) {
+                    for (int k = 0; k < base_cfg.node_top_k; ++k) {
+                        const int flat = b * total_topk + p * base_cfg.node_top_k + k;
+                        step_topk_probas[static_cast<size_t>(flat)] =
+                            0.2f + 0.03f * static_cast<float>((depth + b + p + k) % 7);
+                        const int vocab = std::max(1, base_cfg.hot_vocab_size);
+                        step_topk_tokens[static_cast<size_t>(flat)] =
+                            static_cast<int64_t>((depth * 131 + b * 29 + p * base_cfg.node_top_k + k) %
+                                                 vocab);
+                    }
+                }
+            }
+
+            // 4) previous top-k node ids from current frontier
+            for (int b = 0; b < base_cfg.batch_size; ++b) {
+                for (int t = 0; t < base_cfg.tree_width; ++t) {
+                    const int slot = (base_cfg.max_tree_width > 0) ? (t % base_cfg.max_tree_width) : 0;
+                    int64_t nid = fused_ctrl.frontier[b * base_cfg.max_tree_width + slot];
+                    if (nid < 0) nid = 0;
+                    step_topk_indexs_prev[static_cast<size_t>(b) * base_cfg.tree_width + t] = nid;
+                }
+            }
+
+            // 5) cache locs for new children from previous frontier cache outputs
+            for (int b = 0; b < base_cfg.batch_size; ++b) {
+                for (int i = 0; i < base_cfg.node_top_k; ++i) {
+                    const int slot = (base_cfg.max_tree_width > 0) ? (i % base_cfg.max_tree_width) : 0;
+                    int32_t loc =
+                        prev_fused_frontier_cache_locs[static_cast<size_t>(b) * base_cfg.max_tree_width +
+                                                       slot];
+                    if (loc < 0) {
+                        loc = static_cast<int32_t>(7000 + depth * 100 + b * 10 + i);
+                    }
+                    step_selected_cache_locs[static_cast<size_t>(b) * base_cfg.node_top_k + i] = loc;
+                }
+            }
+
+            // 6) tree-mask chaining from previous output mask prefix
+            for (int b = 0; b < base_cfg.batch_size; ++b) {
+                for (int t = 0; t < base_cfg.tree_width; ++t) {
+                    const int src_t = (base_cfg.node_top_k > 0) ? (t % base_cfg.node_top_k) : 0;
+                    for (int j = 0; j < base_cfg.input_count - 1; ++j) {
+                        const size_t dst = (static_cast<size_t>(b) * base_cfg.tree_width + t) *
+                                               static_cast<size_t>(base_cfg.input_count - 1) +
+                                           j;
+                        const size_t src = (static_cast<size_t>(b) * base_cfg.node_top_k + src_t) *
+                                               static_cast<size_t>(base_cfg.max_input_size + 1) +
+                                           j;
+                        step_input_tree_mask[dst] = (src < fused_legacy.output_tree_mask.size())
+                                                        ? fused_legacy.output_tree_mask[src]
+                                                        : false;
+                    }
+                }
+            }
+        }
+
+        // Per-step outputs for reference and fused paths.
+        std::vector<float> ref_output_hidden(
+            static_cast<size_t>(cfg.batch_size) * cfg.node_top_k * cfg.hidden_size, 0.0f);
+        std::vector<float> fused_output_hidden(
+            static_cast<size_t>(cfg.batch_size) * cfg.node_top_k * cfg.hidden_size, 0.0f);
+        std::vector<int64_t> ref_cache_topk(cfg.batch_size * cfg.node_top_k, -1);
+        std::vector<int64_t> fused_cache_topk(cfg.batch_size * cfg.node_top_k, -1);
+        std::vector<int64_t> ref_frontier_out(cfg.batch_size * cfg.max_tree_width, -1);
+        std::vector<int64_t> fused_frontier_out(cfg.batch_size * cfg.max_tree_width, -1);
+        std::vector<int32_t> ref_kv_indices(cfg.batch_size * cfg.max_tree_width * cfg.max_input_size,
+                                            -1);
+        std::vector<int32_t> fused_kv_indices = ref_kv_indices;
+        BoolBuffer ref_kv_mask(ref_kv_indices.size());
+        BoolBuffer fused_kv_mask(ref_kv_indices.size());
+        std::vector<int> ref_kv_lens(cfg.batch_size * cfg.max_tree_width, 0);
+        std::vector<int> fused_kv_lens = ref_kv_lens;
+        std::vector<int64_t> ref_frontier_tokens(cfg.batch_size * cfg.max_tree_width, -1);
+        std::vector<int64_t> fused_frontier_tokens = ref_frontier_tokens;
+        std::vector<int64_t> ref_frontier_parent_ids(cfg.batch_size * cfg.max_tree_width, -1);
+        std::vector<int64_t> fused_frontier_parent_ids = ref_frontier_parent_ids;
+        std::vector<int64_t> ref_frontier_depths(cfg.batch_size * cfg.max_tree_width, -1);
+        std::vector<int64_t> fused_frontier_depths = ref_frontier_depths;
+        std::vector<int32_t> ref_frontier_cache_locs(cfg.batch_size * cfg.max_tree_width, -1);
+        std::vector<int32_t> fused_frontier_cache_locs = ref_frontier_cache_locs;
+        std::vector<float> ref_dbg_curr(cfg.batch_size * total_topk, 0.0f);
+        std::vector<float> fused_dbg_curr(cfg.batch_size * total_topk, 0.0f);
+        std::vector<float> ref_dbg_sort(cfg.batch_size * total_topk, 0.0f);
+        std::vector<float> fused_dbg_sort(cfg.batch_size * total_topk, 0.0f);
+        std::vector<int64_t> ref_dbg_sort_idx(cfg.batch_size * total_topk, -1);
+        std::vector<int64_t> fused_dbg_sort_idx(cfg.batch_size * total_topk, -1);
+        std::vector<int64_t> ref_dbg_parent(cfg.batch_size * cfg.node_top_k, -1);
+        std::vector<int64_t> fused_dbg_parent(cfg.batch_size * cfg.node_top_k, -1);
+        std::vector<int64_t> ref_dbg_remap(cfg.batch_size * total_topk, -1);
+        std::vector<int64_t> fused_dbg_remap(cfg.batch_size * total_topk, -1);
+
+        run_reference_pipeline(
+            cfg,
+            step_topk_probas,
+            step_topk_tokens,
+            step_last_layer_scores,
+            step_input_hidden_states,
+            seed_in.hot_token_id,
+            step_topk_indexs_prev,
+            step_input_tree_mask,
+            seed_in.prefix_kv,
+            seed_in.prefix_lens,
+            step_selected_cache_locs,
+            &ref_legacy,
+            &ref_ctrl,
+            &ref_output_hidden,
+            &ref_cache_topk,
+            &ref_frontier_out,
+            &ref_kv_indices,
+            &ref_kv_mask,
+            &ref_kv_lens,
+            &ref_frontier_tokens,
+            &ref_frontier_parent_ids,
+            &ref_frontier_depths,
+            &ref_frontier_cache_locs,
+            &ref_dbg_curr,
+            &ref_dbg_sort,
+            &ref_dbg_sort_idx,
+            &ref_dbg_parent,
+            &ref_dbg_remap);
+
+        tmac::hls::cost_draft_tree_fused_step_hls(
+            step_topk_probas.data(),
+            step_topk_tokens.data(),
+            step_last_layer_scores.data(),
+            step_input_hidden_states.data(),
+            seed_in.hot_token_id.data(),
+            static_cast<int64_t>(seed_in.hot_token_id.size()),
+            cfg.use_hot_token_id,
+            step_topk_indexs_prev.data(),
+            step_input_tree_mask.data(),
+            fused_ctrl.frontier.data(),
+            seed_in.prefix_kv.data(),
+            seed_in.prefix_lens.data(),
+            step_selected_cache_locs.data(),
+            cfg.batch_size,
+            cfg.node_top_k,
+            cfg.tree_width,
+            cfg.hidden_size,
+            cfg.cumu_count,
+            cfg.input_count,
+            cfg.verify_num,
+            cfg.curr_depth,
+            cfg.max_input_size,
+            cfg.max_node_count,
+            cfg.max_verify_num,
+            cfg.max_tree_width,
+            cfg.max_prefix_len,
+            cfg.parent_width,
+            cfg.next_tree_width,
+            fused_legacy.cumu_tokens.data(),
+            fused_legacy.cumu_scores.data(),
+            fused_legacy.cumu_deltas.data(),
+            fused_legacy.prev_indexs.data(),
+            fused_legacy.next_indexs.data(),
+            fused_legacy.side_indexs.data(),
+            fused_legacy.output_scores.data(),
+            fused_legacy.output_tokens.data(),
+            fused_legacy.work_scores.data(),
+            fused_legacy.sort_scores.data(),
+            fused_legacy.output_tree_mask.data(),
+            fused_ctrl.node_count.data(),
+            fused_ctrl.node_token.data(),
+            fused_ctrl.node_parent.data(),
+            fused_ctrl.node_first_child.data(),
+            fused_ctrl.node_last_child.data(),
+            fused_ctrl.node_next_sibling.data(),
+            fused_ctrl.node_depth.data(),
+            fused_ctrl.node_cache_loc.data(),
+            fused_output_hidden.data(),
+            fused_cache_topk.data(),
+            fused_frontier_out.data(),
+            fused_kv_indices.data(),
+            fused_kv_mask.data(),
+            fused_kv_lens.data(),
+            fused_frontier_tokens.data(),
+            fused_frontier_parent_ids.data(),
+            fused_frontier_depths.data(),
+            fused_frontier_cache_locs.data(),
+            fused_dbg_curr.data(),
+            fused_dbg_sort.data(),
+            fused_dbg_sort_idx.data(),
+            fused_dbg_parent.data(),
+            fused_dbg_remap.data());
+
+        const size_t mm_out_tokens = mismatch_i64(fused_legacy.output_tokens, ref_legacy.output_tokens);
+        const size_t mm_frontier_tokens = mismatch_i64(fused_frontier_tokens, ref_frontier_tokens);
+        const size_t mm_frontier_out = mismatch_i64(fused_frontier_out, ref_frontier_out);
+        const size_t mm_cache_topk = mismatch_i64(fused_cache_topk, ref_cache_topk);
+        const size_t mm_ctrl_count = mismatch_int(fused_ctrl.node_count, ref_ctrl.node_count);
+        const size_t mm_kv_lens = mismatch_int(fused_kv_lens, ref_kv_lens);
+        const float err_hidden = max_abs_diff(fused_output_hidden, ref_output_hidden);
+
+        std::cout << "[depth " << depth << "] candidate mism(output/frontier/cache/count/kv_lens)= "
+                  << mm_out_tokens << "/" << mm_frontier_tokens << "/" << mm_cache_topk << "/"
+                  << mm_ctrl_count << "/" << mm_kv_lens << "  hidden_max_diff=" << err_hidden
+                  << "\n";
+
+        if (mm_out_tokens != 0 || mm_frontier_tokens != 0 || mm_frontier_out != 0 ||
+            mm_cache_topk != 0 || mm_ctrl_count != 0 || mm_kv_lens != 0 || err_hidden > 1e-6f) {
+            std::cerr << "[FAIL] multi-depth fused mismatch at depth " << depth << ".\n";
+            return false;
+        }
+
+        // Chain frontier and cache-locs for next depth.
+        ref_ctrl.frontier = ref_frontier_out;
+        fused_ctrl.frontier = fused_frontier_out;
+        prev_fused_output_hidden = fused_output_hidden;
+        prev_fused_frontier_cache_locs = fused_frontier_cache_locs;
+    }
+
+    std::cout << "[PASS] multi-depth fused-step candidate bench matched reference for " << steps
+              << " steps.\n";
+    if (!fused_legacy.output_tokens.empty()) {
+        std::cout << "[final] output_tokens (batch0): ";
+        const int n = std::min(base_cfg.node_top_k, static_cast<int>(fused_legacy.output_tokens.size()));
+        for (int i = 0; i < n; ++i) {
+            if (i) std::cout << " ";
+            std::cout << fused_legacy.output_tokens[i];
+        }
+        std::cout << "\n";
+    }
+    return true;
+}
+
 int main(int argc, char** argv) {
     CliOptions opts;
     std::string err_msg;
@@ -1116,8 +1438,19 @@ int main(int argc, char** argv) {
         make_synthetic_fixture(&cfg, &in, &legacy_init, &ctrl_init);
     }
 
-    const FusedExpectedOutputs* expected_ptr =
-        opts.case_file.empty() ? nullptr : &file_expected;
+    if (opts.multi_depth_steps > 1) {
+        if (!opts.case_file.empty() && file_expected.has_expected) {
+            std::cout << "[info] --multi-depth-steps enabled; file expected tensors are used only"
+                      << " as initial seed inputs, per-step compare uses generated reference.\n";
+        }
+        if (!run_fused_multidepth_candidate_test(
+                cfg, in, legacy_init, ctrl_init, opts.multi_depth_steps)) {
+            return 1;
+        }
+        return 0;
+    }
+
+    const FusedExpectedOutputs* expected_ptr = opts.case_file.empty() ? nullptr : &file_expected;
     if (!run_fused_test(cfg, in, legacy_init, ctrl_init, expected_ptr)) {
         return 1;
     }

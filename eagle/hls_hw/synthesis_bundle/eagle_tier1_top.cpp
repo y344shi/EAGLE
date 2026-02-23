@@ -196,6 +196,7 @@ void eagle_tier1_top(
     stream_trip<VEC_W>(s_norm, s_q_in, s_k_in, s_v_in, HIDDEN / VEC_W);
 
     // Stage 4: projections (broadcast-packed weights)
+    // HIDDEN = 32 * HEAD_DIM
     dense_projection_production_scaled<0, HIDDEN, HIDDEN, 128, TMAC_USE_TMAC_QKV>(s_q_in, s_q_proj, w_q, s_q);
     dense_projection_production_scaled<0, HIDDEN, NUM_KV_HEADS * HEAD_DIM, 128, TMAC_USE_TMAC_QKV>(s_k_in, s_k_proj, w_k, s_k);
     dense_projection_production_scaled<0, HIDDEN, NUM_KV_HEADS * HEAD_DIM, 128, TMAC_USE_TMAC_QKV>(s_v_in, s_v_proj, w_v, s_v);
