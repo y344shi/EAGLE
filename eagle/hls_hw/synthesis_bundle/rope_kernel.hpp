@@ -21,7 +21,7 @@ struct RopeConfig {
     float sin_vals[HEAD_DIM / 2];
 };
 
-template <int NUM_HEADS, int NUM_KV_HEADS, int HEAD_DIM>
+template <int NUM_HEADS, int NUM_KV_HEADS, int HEAD_DIM, int TREE_WIDTH>
 void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
                        hls_stream<vec_t<VEC_W>>& q_out,
                        hls_stream<vec_t<VEC_W>>& k_in,
@@ -40,6 +40,7 @@ void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
 #pragma HLS ARRAY_PARTITION variable = q_buf complete dim = 2
 #pragma HLS ARRAY_PARTITION variable = k_buf complete dim = 2
 
+for (int t = 0; t < TREE_WIDTH; t++) {
     // Load Q
     for (int h = 0; h < NUM_HEADS; ++h) {
         for (int i = 0; i < HEAD_DIM / VEC_W; ++i) {
@@ -112,6 +113,7 @@ void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
             k_out.write(chunk);
         }
     }
+}
 }
 
 } // namespace hls

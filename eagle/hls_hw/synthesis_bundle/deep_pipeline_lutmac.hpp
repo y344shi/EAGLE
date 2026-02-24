@@ -319,6 +319,171 @@ tile_loop:
     } // End of tile_loop
 }
 
+
+template <int SCALE_EXP, int BATCH_SIZE = 1, int INPUT_DIM, int OUT_DIM = 128, int GROUP_SIZE = 128, bool ENABLE_TMAC = false>
+void dense_projection_production_scaled_batched(hls_stream<vec_t<VEC_W>>& a_stream,
+                                        hls_stream<vec_t<VEC_W>>& c_stream,
+                                        const pack512* weights,
+                                        const float* scales) {
+#pragma HLS INTERFACE axis port = a_stream
+#pragma HLS INTERFACE axis port = c_stream
+#pragma HLS INTERFACE m_axi port = weights offset = slave bundle = gmem0 depth = 1024
+#pragma HLS INTERFACE m_axi port = scales offset = slave bundle = gmem1 depth = 1024
+#pragma HLS INTERFACE s_axilite port = weights bundle = control
+#pragma HLS INTERFACE s_axilite port = scales bundle = control
+#pragma HLS INTERFACE s_axilite port = return bundle = control
+
+    static_assert(INPUT_DIM % VEC_W == 0, "INPUT_DIM must be multiple of VEC_W");
+    static_assert(GROUP_SIZE % VEC_W == 0, "GROUP_SIZE must be multiple of VEC_W");
+    static_assert(OUT_DIM % 128 == 0, "OUT_W must be multiple of tile size 128");
+
+    constexpr int TILE = 128;
+    constexpr int TILES = OUT_DIM / TILE;
+    constexpr int NUM_GROUPS = INPUT_DIM / GROUP_SIZE;
+    constexpr int SCALES_PER_TILE = NUM_GROUPS * TILE;
+    constexpr int NUM_BANKS = 8;
+
+    static float a_buffer[BATCH_SIZE][INPUT_DIM];
+#pragma HLS BIND_STORAGE variable=a_buffer type=ram_2p impl=bram
+
+    // Output buffer: store tile results here, emit batch-contiguous at the end.
+    static float out_buffer[BATCH_SIZE][OUT_DIM];
+#pragma HLS BIND_STORAGE variable=out_buffer type=ram_2p impl=bram
+
+    // buffers to hold weights for one tile
+    static pack512 weights_tile_bram[INPUT_DIM];
+#pragma HLS BIND_STORAGE variable=weights_tile_bram type=ram_2p impl=bram
+    static float scales_tile_bram[SCALES_PER_TILE];
+#pragma HLS BIND_STORAGE variable=scales_tile_bram type=ram_2p impl=bram
+#pragma HLS ARRAY_PARTITION variable=scales_tile_bram type=cyclic factor=TILE dim=1
+
+    // Accumulators for ONE tile. Reset for each tile.
+    vec_t<8> acc_banks[TILE];
+    //vec_t<TILE> acc_banks[4];
+#pragma HLS ARRAY_PARTITION variable=acc_banks type=complete dim=0
+
+    vec_t<VEC_W> current_input_chunk;
+ingest_a_loop:
+    for (int b = 0; b < BATCH_SIZE; b++) {
+        for (int k = 0; k < INPUT_DIM; k += VEC_W) {
+            current_input_chunk = a_stream.read();
+            for (int j = 0; j < VEC_W; ++j) {
+    #pragma HLS PIPELINE II=1
+                a_buffer[b][k + j] = current_input_chunk[j];
+            }
+        }
+    }
+
+    float lut_pos[9];
+    #pragma HLS ARRAY_PARTITION variable=lut_pos type=complete dim=0
+
+tile_loop:
+for (int t = 0; t < TILES; ++t) {
+
+load_weights_loop:
+    for (int k = 0; k < INPUT_DIM; ++k) {
+#pragma HLS PIPELINE II=1
+        weights_tile_bram[k] = weights[t * INPUT_DIM + k];
+    }
+
+    load_scales_loop:
+    for (int g = 0; g < NUM_GROUPS; ++g) {
+//#pragma HLS PIPELINE II=1
+        for (int l = 0; l < TILE; ++l) {
+//#pragma HLS UNROLL
+            // HBM address: scales are grouped, then tiled, then by lane
+            int hbm_addr = (g * TILES + t) * TILE + l;
+            // BRAM address: simplified layout for on-chip access
+            int bram_addr = g * TILE + l;
+            scales_tile_bram[bram_addr] = scales[hbm_addr];
+        }
+    }
+
+        // --- B: COMPUTE for the current tile using on-chip data ---
+compute_b_loop:
+    for (int b = 0; b < BATCH_SIZE; b++) {
+    // Reset accumulators for each (tile, batch) pair so that batch b=1 does not
+    // inherit residual values from batch b=0.
+    init_acc_loop_b:
+        for (int i = 0; i < TILE; ++i) {
+#pragma HLS UNROLL
+            for (int bi = 0; bi < NUM_BANKS; ++bi) {
+#pragma HLS UNROLL
+                acc_banks[i][bi] = 0.0f;
+            }
+        }
+    compute_k_loop:
+        for (int k = 0; k < INPUT_DIM; ++k) {
+#pragma HLS PIPELINE II=1
+            const float a_scalar = a_buffer[b][k]; // Read from on-chip buffer
+            const int group = k / GROUP_SIZE;
+
+            // Fetch weights and scales for this 'k' from their respective BRAMs
+            const pack512 w_pkt = weights_tile_bram[k];
+            const int scale_bram_base_idx = group * TILE;
+
+            // Pre-calculate LUT for TMAC if enabled
+            if (ENABLE_TMAC) {
+                const float a_scaled_pow2 = (1.0f / static_cast<float>(1 << SCALE_EXP));
+                const float a_scaled = a_scalar * a_scaled_pow2;
+
+                lut_pos[0] = 0.0f; lut_pos[1] = a_scaled; lut_pos[2] = a_scaled * 2.0f;
+                lut_pos[4] = a_scaled * 4.0f; lut_pos[3] = lut_pos[1] + lut_pos[2];
+                lut_pos[5] = lut_pos[1] + lut_pos[4]; lut_pos[6] = lut_pos[2] + lut_pos[4];
+                lut_pos[7] = lut_pos[3] + lut_pos[4]; lut_pos[8] = lut_pos[4] + lut_pos[4];
+            }
+
+        compute_lane_loop: // This loop is fully unrolled into parallel hardware
+            for (int lane = 0; lane < TILE; ++lane) {
+#pragma HLS UNROLL
+                const uint8_t w_raw = get_w4_raw(w_pkt, lane);
+                const int8_t w = decode_w4(w_raw);
+                const float scale_val = scales_tile_bram[scale_bram_base_idx + lane];
+                const int bank = lane & (NUM_BANKS - 1);
+
+                float prod;
+                if (ENABLE_TMAC) {
+                    const uint8_t mag = static_cast<uint8_t>(w < 0 ? -w : w);
+                    prod = lut_pos[mag];
+                    if (w < 0) prod = -prod;
+                    prod *= scale_val;
+                } else {
+                    const float a_scaled_pow2 = (1.0f / static_cast<float>(1 << SCALE_EXP));
+                    prod = a_scalar * a_scaled_pow2 * static_cast<float>(w) * scale_val;
+                }
+                acc_banks[lane][bank] += prod;
+            }
+        }
+
+    store_to_buffer_loop:
+        for (int lane = 0; lane < TILE; ++lane) {
+#pragma HLS UNROLL
+            float sum = acc_banks[lane][0] + acc_banks[lane][1] + acc_banks[lane][2] +
+                        acc_banks[lane][3] + acc_banks[lane][4] + acc_banks[lane][5] +
+                        acc_banks[lane][6] + acc_banks[lane][7];
+            out_buffer[b][t * TILE + lane] = sum;
+        }
+    } // end compute_b_loop
+} // end tile_loop
+
+    // Emit output in batch-contiguous order: all of batch 0, then batch 1, etc.
+emit_batch_loop:
+    for (int b = 0; b < BATCH_SIZE; b++) {
+    emit_out_loop:
+        for (int oc = 0; oc < OUT_DIM / VEC_W; ++oc) {
+#pragma HLS PIPELINE II=1
+            vec_t<VEC_W> out_vec;
+        emit_j_loop:
+            for (int j = 0; j < VEC_W; ++j) {
+#pragma HLS UNROLL
+                out_vec[j] = out_buffer[b][oc * VEC_W + j];
+            }
+            c_stream.write(out_vec);
+        }
+    }
+}
+
+
 // Variant that reads scales in the original CPU layout: scales[group * OUT_DIM_TOTAL + out_idx].
 template <int SCALE_EXP, int INPUT_DIM, int OUT_W = 128, int GROUP_SIZE = 128, int OUT_DIM_TOTAL = 4096>
 void dense_projection_production_scaled_raw(hls_stream<vec_t<VEC_W>>& a_stream,
