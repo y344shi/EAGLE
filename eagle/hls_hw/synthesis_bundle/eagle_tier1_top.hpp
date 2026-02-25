@@ -56,6 +56,9 @@ constexpr float RMS_EPS = 1e-5f;
 constexpr float RESIDUAL_SCALE = 1.4f / 5.7445626465380286f; // sqrt(33)
 constexpr int MAX_CTX = 2048; // maximum sequence length buffered locally
 
+constexpr int TREE_WIDTH = 4; // TEMPORARY, COULD BE 1,2,4,8
+constexpr int NUM_CHUNKS = (TREE_WIDTH * HIDDEN) / VEC_W;
+
 using tmac::hls::vec_t;
 using tmac::hls::hls_stream;
 using tmac::hls::VEC_W;

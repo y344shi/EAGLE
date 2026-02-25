@@ -11,9 +11,6 @@ constexpr int HEADS_PER_KV = NUM_HEADS / NUM_KV_HEADS;
 static_assert(NUM_HEADS % NUM_KV_HEADS == 0, "NUM_HEADS must be divisible by NUM_KV_HEADS");
 static_assert(HIDDEN == NUM_HEADS * HEAD_DIM, "HIDDEN must equal NUM_HEADS * HEAD_DIM");
 
-constexpr int TREE_WIDTH = 4; // TEMPORARY, COULD BE 1,2,4,8
-constexpr int NUM_CHUNKS = (TREE_WIDTH * HIDDEN) / VEC_W;
-
 // q_rot stream order is token major then head-major (h0 vecs, h1 vecs, ...). Route each chunk to its head.
 void distribute_q_heads(hls_stream<vec_t<VEC_W>>& s_q_rot, hls_stream<vec_t<VEC_W>> q_head_streams[TREE_WIDTH][NUM_HEADS]) {
 #pragma HLS INLINE off

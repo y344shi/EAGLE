@@ -7,30 +7,33 @@ namespace {
 void sink_reasoning_stream(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& reasoning_stream,
                            float* reasoning_state_out) {
 #pragma HLS INLINE off
-    for (int i = 0; i < tmac::hls::HIDDEN / tmac::hls::VEC_W; ++i) {
+    for (int t = 0; t < tmac::hls::TREE_WIDTH; ++t) {
+        for (int i = 0; i < tmac::hls::HIDDEN / tmac::hls::VEC_W; ++i) {
 #pragma HLS PIPELINE II=1
-        auto v = reasoning_stream.read();
-        for (int j = 0; j < tmac::hls::VEC_W; ++j) {
+            auto v = reasoning_stream.read();
+            for (int j = 0; j < tmac::hls::VEC_W; ++j) {
 #pragma HLS UNROLL
-            reasoning_state_out[i * tmac::hls::VEC_W + j] = v[j];
+                reasoning_state_out[t * tmac::hls::HIDDEN + i * tmac::hls::VEC_W + j] = v[j];
+            }
         }
     }
 }
 
 void collect_logits_stream(
     hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& logits_stream,
-    float* logits_hidden) {
+    float logits_hidden[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax]) {
 #pragma HLS INLINE off
-    for (int i = 0; i < tmac::hls::HIDDEN / tmac::hls::VEC_W; ++i) {
-#pragma HLS PIPELINE II=1
-        auto v = logits_stream.read();
-        for (int j = 0; j < tmac::hls::VEC_W; ++j) {
-#pragma HLS UNROLL
-            logits_hidden[i * tmac::hls::VEC_W + j] = v[j];
+    for (int t = 0; t < tmac::hls::TREE_WIDTH; t++) {
+        for (int i = 0; i < tmac::hls::HIDDEN / tmac::hls::VEC_W; ++i) {
+    #pragma HLS PIPELINE II=1
+            auto v = logits_stream.read();
+            for (int j = 0; j < tmac::hls::VEC_W; ++j) {
+    #pragma HLS UNROLL
+                logits_hidden[t][i * tmac::hls::VEC_W + j] = v[j];
+            }
         }
     }
 }
-
 } // namespace
 
 void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_in_stream,
@@ -238,9 +241,9 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
 #pragma HLS INTERFACE m_axi port=efficient_lm_head_qzeros bundle=gmem14 depth=50000
 #pragma HLS INTERFACE m_axi port=efficient_lm_head_g_idx bundle=gmem14 depth=1024
 #pragma HLS INTERFACE m_axi port=lm_head_weight bundle=gmem15 depth=530000000
-#pragma HLS INTERFACE m_axi port=reasoning_state_out bundle=gmem10 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=candidate_indices_out bundle=gmem16 depth=1024
-#pragma HLS INTERFACE m_axi port=gathered_logits_out bundle=gmem17 depth=1024
+#pragma HLS INTERFACE m_axi port=reasoning_state_out bundle=gmem10 depth=16384
+#pragma HLS INTERFACE m_axi port=candidate_indices_out bundle=gmem16 depth=4096
+#pragma HLS INTERFACE m_axi port=gathered_logits_out bundle=gmem17 depth=4096
 #pragma HLS INTERFACE s_axilite port=efficient_lm_rank bundle=control
 #pragma HLS INTERFACE s_axilite port=efficient_lm_vocab_size bundle=control
 #pragma HLS INTERFACE s_axilite port=efficient_lm_num_candidates bundle=control
@@ -275,13 +278,15 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
 
     sink_reasoning_stream(reasoning_out, reasoning_state_out);
 
-    float logits_hidden[tmac::hls::kEagle4LmHiddenMax];
-    float low_rank[tmac::hls::kEagle4LmRankMax];
-    int candidate_indices[tmac::hls::kEagle4LmTopKMax];
-    float candidate_scores[tmac::hls::kEagle4LmTopKMax];
-    float gathered_logits[tmac::hls::kEagle4LmTopKMax];
-#pragma HLS ARRAY_PARTITION variable=logits_hidden cyclic factor=16 dim=1
-#pragma HLS ARRAY_PARTITION variable=low_rank cyclic factor=16 dim=1
+    float logits_hidden[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax];
+    float low_rank[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmRankMax];
+    int candidate_indices[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];
+    float candidate_scores[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];
+    float gathered_logits[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];
+    int topk_tokens[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];
+    float topk_probas[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];
+#pragma HLS ARRAY_PARTITION variable=logits_hidden cyclic factor=16 dim=2
+#pragma HLS ARRAY_PARTITION variable=low_rank cyclic factor=16 dim=2
 
     collect_logits_stream(logits_out, logits_hidden);
 
@@ -314,23 +319,30 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
         tmac::hls::HIDDEN,
         topk);
 
-    tmac::hls::eagle4_lm_best_of_candidates(
+    tmac::hls::eagle4_lm_softmax_topk(
         candidate_indices,
         gathered_logits,
         topk,
+        topk_tokens,
+        topk_probas,
         best_id,
         best_score);
 
+    // Output: TREE_WIDTH * topk entries, laid out [t0_c0, t0_c1, ..., t1_c0, t1_c1, ...]
     if (candidate_indices_out != nullptr) {
-        for (int i = 0; i < topk; ++i) {
+        for (int t = 0; t < tmac::hls::TREE_WIDTH; ++t) {
+            for (int i = 0; i < topk; ++i) {
 #pragma HLS PIPELINE II=1
-            candidate_indices_out[i] = candidate_indices[i];
+                candidate_indices_out[t * topk + i] = topk_tokens[t][i];
+            }
         }
     }
     if (gathered_logits_out != nullptr) {
-        for (int i = 0; i < topk; ++i) {
+        for (int t = 0; t < tmac::hls::TREE_WIDTH; ++t) {
+            for (int i = 0; i < topk; ++i) {
 #pragma HLS PIPELINE II=1
-            gathered_logits_out[i] = gathered_logits[i];
+                gathered_logits_out[t * topk + i] = topk_probas[t][i];
+            }
         }
     }
 }

@@ -67,9 +67,11 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
                         int current_length = 0);
 
 // EAGLE4 parity wrapper with efficient LM-head path:
-//   1) hidden -> low-rank projection
-//   2) candidate scoring (GPTQ row-major)
-//   3) gather-dot over lm_head.weight for selected candidates
+//   1) SLM forward (TREE_WIDTH tokens)
+//   2) hidden -> low-rank projection (per token)
+//   3) candidate scoring via GPTQ row-major (per token)
+//   4) gather-dot over lm_head.weight for selected candidates (per token)
+//   5) softmax over gathered logits -> topk probabilities (per token)
 void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_in_stream,
                                hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& embed_in_stream,
                                int* best_id,
@@ -97,9 +99,9 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
                                int efficient_lm_rank,
                                int efficient_lm_vocab_size,
                                int efficient_lm_num_candidates,
-                               float* reasoning_state_out,
-                               int* candidate_indices_out,      // optional [num_candidates]
-                               float* gathered_logits_out,      // optional [num_candidates]
+                               float* reasoning_state_out,                          // [TREE_WIDTH * HIDDEN]
+                               int* candidate_indices_out,      // [TREE_WIDTH * num_candidates] token IDs
+                               float* gathered_logits_out,      // [TREE_WIDTH * num_candidates] softmax probabilities
                                int seq_len,
                                int current_length);
 
