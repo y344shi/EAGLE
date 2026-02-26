@@ -63,8 +63,9 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
                         int efficient_lm_num_candidates = 0,
                         int* candidate_indices_out = nullptr,                           // optional [num_candidates]
                         float* gathered_logits_out = nullptr,                           // optional [num_candidates]
-                        int seq_len = 0,
-                        int current_length = 0);
+                        int prefix_len = 0,
+                        int current_depth = 0,
+                        const int* parent_indices_per_layer = nullptr);
 
 // EAGLE4 parity wrapper with efficient LM-head path:
 //   1) SLM forward (TREE_WIDTH tokens)
@@ -102,7 +103,8 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
                                float* reasoning_state_out,                          // [TREE_WIDTH * HIDDEN]
                                int* candidate_indices_out,      // [TREE_WIDTH * num_candidates] token IDs
                                float* gathered_logits_out,      // [TREE_WIDTH * num_candidates] softmax probabilities
-                               int seq_len,
-                               int current_length);
+                               int prefix_len,
+                               int current_depth,
+                               const int* parent_indices_per_layer);
 
 #endif // TMAC_EAGLE_TIER1_LM_TOP_HPP

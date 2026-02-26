@@ -74,8 +74,9 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
                         int efficient_lm_num_candidates,
                         int* candidate_indices_out,
                         float* gathered_logits_out,
-                        int seq_len,
-                        int current_length) {
+                        int prefix_len,
+                        int current_depth,
+                        const int* parent_indices_per_layer) {
 #pragma HLS INTERFACE axis port=hidden_in_stream
 #pragma HLS INTERFACE axis port=embed_in_stream
 #pragma HLS INTERFACE m_axi port=w_q offset=slave bundle=gmem0 depth=TMAC_W_Q_DEPTH
@@ -107,8 +108,8 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
 #pragma HLS INTERFACE m_axi port=lm_w6 bundle=gmem_lm6 depth=1200000
 #pragma HLS INTERFACE m_axi port=lm_w7 bundle=gmem_lm7 depth=1200000
 #pragma HLS INTERFACE m_axi port=reasoning_state_out bundle=gmem10 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE s_axilite port=seq_len bundle=control
-#pragma HLS INTERFACE s_axilite port=current_length bundle=control
+#pragma HLS INTERFACE s_axilite port=prefix_len bundle=control
+#pragma HLS INTERFACE s_axilite port=current_depth bundle=control
 #pragma HLS INTERFACE s_axilite port=best_id bundle=control
 #pragma HLS INTERFACE s_axilite port=best_score bundle=control
 #pragma HLS INTERFACE s_axilite port=reasoning_state_out bundle=control
@@ -145,8 +146,9 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
             reasoning_state_out,
             candidate_indices_out,
             gathered_logits_out,
-            seq_len,
-            current_length);
+            prefix_len,
+            current_depth,
+            parent_indices_per_layer);
         return;
     }
 
@@ -162,7 +164,8 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
     eagle_tier1_top_eagle4_l0(hidden_in_stream, embed_in_stream, reasoning_out, logits_out,
                               w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales,
                               w_up, up_scales, w_down, down_scales, hidden_norm_gamma, embed_norm_gamma,
-                              post_attn_norm_gamma, final_norm_gamma, rope_cfg, hbm_k, hbm_v, seq_len, current_length);
+                              post_attn_norm_gamma, final_norm_gamma, rope_cfg, hbm_k, hbm_v,
+                              prefix_len, current_depth, parent_indices_per_layer);
 
     TokenOutput lm_result{};
     lm_head_8way_top(lm_w0, lm_w1, lm_w2, lm_w3, lm_w4, lm_w5, lm_w6, lm_w7,
@@ -211,8 +214,9 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
                                float* reasoning_state_out,
                                int* candidate_indices_out,
                                float* gathered_logits_out,
-                               int seq_len,
-                               int current_length) {
+                               int prefix_len,
+                               int current_depth,
+                               const int* parent_indices_per_layer) {
 #pragma HLS INTERFACE axis port=hidden_in_stream
 #pragma HLS INTERFACE axis port=embed_in_stream
 #pragma HLS INTERFACE m_axi port=w_q offset=slave bundle=gmem0 depth=TMAC_W_Q_DEPTH
@@ -247,8 +251,9 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
 #pragma HLS INTERFACE s_axilite port=efficient_lm_rank bundle=control
 #pragma HLS INTERFACE s_axilite port=efficient_lm_vocab_size bundle=control
 #pragma HLS INTERFACE s_axilite port=efficient_lm_num_candidates bundle=control
-#pragma HLS INTERFACE s_axilite port=seq_len bundle=control
-#pragma HLS INTERFACE s_axilite port=current_length bundle=control
+#pragma HLS INTERFACE s_axilite port=prefix_len bundle=control
+#pragma HLS INTERFACE s_axilite port=current_depth bundle=control
+#pragma HLS INTERFACE m_axi port=parent_indices_per_layer bundle=gmem18 depth=64
 #pragma HLS INTERFACE s_axilite port=best_id bundle=control
 #pragma HLS INTERFACE s_axilite port=best_score bundle=control
 #pragma HLS INTERFACE s_axilite port=reasoning_state_out bundle=control
@@ -274,7 +279,8 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
     eagle_tier1_top_eagle4_l0(hidden_in_stream, embed_in_stream, reasoning_out, logits_out,
                               w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales,
                               w_up, up_scales, w_down, down_scales, hidden_norm_gamma, embed_norm_gamma,
-                              post_attn_norm_gamma, final_norm_gamma, rope_cfg, hbm_k, hbm_v, seq_len, current_length);
+                              post_attn_norm_gamma, final_norm_gamma, rope_cfg, hbm_k, hbm_v,
+                              prefix_len, current_depth, parent_indices_per_layer);
 
     sink_reasoning_stream(reasoning_out, reasoning_state_out);
 

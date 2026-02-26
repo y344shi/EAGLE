@@ -160,8 +160,9 @@ void eagle_tier1_top_eagle4_l0(
     const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& rope_cfg,
     vec_t<VEC_W>* hbm_k,
     vec_t<VEC_W>* hbm_v,
-    int seq_len,
-    int current_length
+    int prefix_len,
+    int current_depth,
+    const int* parent_indices_per_layer
 ) {
 #pragma HLS INTERFACE axis port=hidden_in_stream
 #pragma HLS INTERFACE axis port=embed_in_stream
@@ -187,8 +188,9 @@ void eagle_tier1_top_eagle4_l0(
 #pragma HLS INTERFACE m_axi port=final_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
 #pragma HLS INTERFACE m_axi port=hbm_k offset=slave bundle=gmem8 depth=TMAC_KV_CACHE_DEPTH
 #pragma HLS INTERFACE m_axi port=hbm_v offset=slave bundle=gmem9 depth=TMAC_KV_CACHE_DEPTH
-#pragma HLS INTERFACE s_axilite port=seq_len bundle=control
-#pragma HLS INTERFACE s_axilite port=current_length bundle=control
+#pragma HLS INTERFACE m_axi port=parent_indices_per_layer offset=slave bundle=gmem10 depth=64
+#pragma HLS INTERFACE s_axilite port=prefix_len bundle=control
+#pragma HLS INTERFACE s_axilite port=current_depth bundle=control
 #pragma HLS INTERFACE s_axilite port=return bundle=control
 
 #pragma HLS DATAFLOW
@@ -241,11 +243,13 @@ void eagle_tier1_top_eagle4_l0(
     // Stage 5: RoPE on Q/K
     rope_apply_stream<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM, TREE_WIDTH>(s_q_proj, s_q_rot, s_k_proj, s_k_rot, rope_cfg);
 
-    // Stage 6: KV cache append + history stream
-    kv_cache_manager<HEAD_DIM, NUM_KV_HEADS>(s_k_rot, s_v_proj, s_k_hist_raw, s_v_hist_raw, hbm_k, hbm_v,
-                                             current_length, true, true);
+    // Stage 6: Write new KV to contiguous HBM, then gather prefix + ancestors + self.
+    contiguous_kv_write_and_gather<HEAD_DIM, NUM_KV_HEADS, kMaxDraftDepth>(
+        s_k_rot, s_v_proj, hbm_k, hbm_v,
+        prefix_len, current_depth, TREE_WIDTH, parent_indices_per_layer,
+        s_k_hist_raw, s_v_hist_raw);
 
-    const int hist_len = current_length + 1;
+    const int hist_len = prefix_len + current_depth + 1;
     const int padded_len = ((hist_len + 127) / 128) * 128;
 
     // Stage 7: grouped query attention

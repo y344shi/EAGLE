@@ -9,7 +9,7 @@
 #include "attention_solver.hpp"
 #include "fused_online_attention_pwl.hpp"
 #include "deep_pipeline_lutmac.hpp"
-#include "kv_cache_manager.hpp"
+#include "contiguous_kv_hls.hpp"
 #include "rms_norm_stream.hpp"
 #include "rope_kernel.hpp"
 #include "stream_utils.hpp"
@@ -103,8 +103,9 @@ void eagle_tier1_top_eagle4_l0(hls_stream<vec_t<VEC_W>>& hidden_in_stream,
                                const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& rope_cfg,
                                vec_t<VEC_W>* hbm_k,
                                vec_t<VEC_W>* hbm_v,
-                               int seq_len,
-                               int current_length);
+                               int prefix_len,
+                               int current_depth,
+                               const int* parent_indices_per_layer);
 
 } // namespace hls
 } // namespace tmac
