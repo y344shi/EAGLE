@@ -1,7 +1,9 @@
 #ifndef TMAC_COST_DRAFT_TREE_FUSED_WIRING_HLS_HPP
 #define TMAC_COST_DRAFT_TREE_FUSED_WIRING_HLS_HPP
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 
 #include "cost_draft_tree_controller_hls.hpp"
 #include "cost_draft_tree_score_hls.hpp"
@@ -214,6 +216,111 @@ struct CdtFixedWidthPolicyHls {
         }
     }
 };
+
+// Select top-k from logits and output softmax probabilities for those winners.
+// If candidate_indices is provided, winner indices are remapped to real vocab token IDs.
+inline void cdt_softmax_topk_from_logits_hls(
+    const float* logits,                 // [batch, logits_width]
+    const int64_t* candidate_indices,    // [batch, logits_width] optional
+    int batch_size,
+    int logits_width,
+    int node_top_k,
+    float* topk_probas_out,              // [batch, node_top_k]
+    int64_t* topk_tokens_out             // [batch, node_top_k]
+) {
+#pragma HLS INLINE off
+    if (logits == nullptr || topk_probas_out == nullptr || topk_tokens_out == nullptr) {
+        return;
+    }
+    if (batch_size <= 0 || batch_size > kCdtFusedMaxBatch || logits_width <= 0 ||
+        node_top_k <= 0 || node_top_k > kCdtFusedMaxNodeTopK) {
+        return;
+    }
+
+topk_batch_loop:
+    for (int b = 0; b < batch_size; ++b) {
+        float best_logits[kCdtFusedMaxNodeTopK];
+        int best_indices[kCdtFusedMaxNodeTopK];
+#pragma HLS ARRAY_PARTITION variable = best_logits complete
+#pragma HLS ARRAY_PARTITION variable = best_indices complete
+
+    topk_init_loop:
+        for (int k = 0; k < node_top_k; ++k) {
+            best_logits[k] = -std::numeric_limits<float>::infinity();
+            best_indices[k] = -1;
+        }
+
+        float max_logit = -std::numeric_limits<float>::infinity();
+    topk_scan_loop:
+        for (int i = 0; i < logits_width; ++i) {
+#pragma HLS PIPELINE II = 1
+            const float v = logits[b * logits_width + i];
+            if (v > max_logit) {
+                max_logit = v;
+            }
+
+            int min_pos = 0;
+            float min_val = best_logits[0];
+        topk_find_min_loop:
+            for (int k = 1; k < node_top_k; ++k) {
+                if (best_logits[k] < min_val) {
+                    min_val = best_logits[k];
+                    min_pos = k;
+                }
+            }
+            if (v > min_val) {
+                best_logits[min_pos] = v;
+                best_indices[min_pos] = i;
+            }
+        }
+
+    topk_sort_loop_i:
+        for (int i = 0; i < node_top_k; ++i) {
+            int best_pos = i;
+            float best_val = best_logits[i];
+        topk_sort_loop_j:
+            for (int j = i + 1; j < node_top_k; ++j) {
+                if (best_logits[j] > best_val) {
+                    best_val = best_logits[j];
+                    best_pos = j;
+                }
+            }
+            if (best_pos != i) {
+                const float tmp_v = best_logits[i];
+                best_logits[i] = best_logits[best_pos];
+                best_logits[best_pos] = tmp_v;
+                const int tmp_i = best_indices[i];
+                best_indices[i] = best_indices[best_pos];
+                best_indices[best_pos] = tmp_i;
+            }
+        }
+
+        float sum_exp = 0.0f;
+    topk_sumexp_loop:
+        for (int i = 0; i < logits_width; ++i) {
+#pragma HLS PIPELINE II = 1
+            sum_exp += std::exp(logits[b * logits_width + i] - max_logit);
+        }
+        const float inv_sum = (sum_exp > 0.0f) ? (1.0f / sum_exp) : 0.0f;
+
+    topk_write_loop:
+        for (int k = 0; k < node_top_k; ++k) {
+#pragma HLS PIPELINE II = 1
+            int idx = best_indices[k];
+            if (idx < 0 || idx >= logits_width) {
+                idx = 0;
+            }
+            topk_probas_out[b * node_top_k + k] =
+                std::exp(best_logits[k] - max_logit) * inv_sum;
+
+            int64_t tok = idx;
+            if (candidate_indices != nullptr) {
+                tok = candidate_indices[b * logits_width + idx];
+            }
+            topk_tokens_out[b * node_top_k + k] = tok;
+        }
+    }
+}
 
 inline void cdt_copy_frontier_for_next_depth_hls(
     const int64_t* frontier_src,  // [batch, max_tree_width]
@@ -451,7 +558,11 @@ slm_batch_loop:
 }
 
 // Multi-layer orchestrator:
-//   per depth:
+//   optional InitialLoop (PyTorch draft_InitialLoop parity):
+//     0) from previous-verify logits -> softmax+top-k (or caller-provided initial top-k),
+//     1) run one fused tree step with tree_width=1,
+//     2) call width policy for depth-0 and seed the first recurrent frontier.
+//   recurrent loop per depth:
 //     1) run EAGLE4 SLM forward + LM-head top-k (`eagle_tier1_lm_top_eagle4`),
 //     2) run one fused tree step (score + update),
 //     3) wire fused outputs into next-layer inputs (hidden recurrence + index carry),
@@ -549,7 +660,20 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
 
     // Optional loop outputs
     int* executed_depths,
-    bool* stopped_early
+    bool* stopped_early,
+
+    // Optional InitialLoop (disabled by default).
+    // If enabled:
+    //   - use caller-provided initial_topk_* if present,
+    //   - otherwise compute initial_topk_* from initial_logits (+ optional candidate remap).
+    // initial_hidden_states must be [batch, hidden] from previous verify output.
+    bool enable_initial_loop = false,
+    const float* initial_logits = nullptr,             // [batch, initial_logits_width]
+    const int64_t* initial_candidate_indices = nullptr,// [batch, initial_logits_width] optional
+    int initial_logits_width = 0,
+    const float* initial_topk_probas = nullptr,        // [batch, node_top_k] optional
+    const int64_t* initial_topk_tokens = nullptr,      // [batch, node_top_k] optional
+    const float* initial_hidden_states = nullptr       // [batch, hidden]
 ) {
 #pragma HLS INLINE off
     if (tree_depth <= 0 || batch_size <= 0 || node_top_k <= 0 || hidden_size <= 0) {
@@ -581,6 +705,15 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
         return;
     }
 
+    const bool has_initial_topk =
+        (initial_topk_probas != nullptr && initial_topk_tokens != nullptr);
+    const bool has_initial_logits = (initial_logits != nullptr && initial_logits_width > 0);
+    const bool run_initial_loop = enable_initial_loop && (has_initial_topk || has_initial_logits);
+
+    if (enable_initial_loop && (!run_initial_loop || initial_hidden_states == nullptr)) {
+        return;
+    }
+
     int curr_tree_width = cdt_clamp_int(*io_tree_width, 0, max_tree_width);
     curr_tree_width = cdt_clamp_int(curr_tree_width, 0, node_top_k);
     int curr_verify_num = cdt_clamp_int(*io_verify_num, 1, max_verify_num);
@@ -604,22 +737,117 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
     // even when the caller does not supply a debug output pointer.
     int64_t s_parent_scratch[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
 #pragma HLS BIND_STORAGE variable = s_parent_scratch type = ram_2p impl = bram
+    float s_initial_topk_probas[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
+    int64_t s_initial_topk_tokens[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
+#pragma HLS BIND_STORAGE variable = s_initial_topk_probas type = ram_2p impl = bram
+#pragma HLS BIND_STORAGE variable = s_initial_topk_tokens type = ram_2p impl = bram
 
-orchestrator_depth_loop:
-    for (int d = 0; d < tree_depth; ++d) {
-        if (curr_tree_width <= 0) {
-            stopped = true;
-            break;
+    int loop_start_depth = 0;
+
+    if (run_initial_loop) {
+        const float* initial_topk_probas_ptr = initial_topk_probas;
+        const int64_t* initial_topk_tokens_ptr = initial_topk_tokens;
+        if (!has_initial_topk) {
+            cdt_softmax_topk_from_logits_hls(
+                initial_logits,
+                initial_candidate_indices,
+                batch_size,
+                initial_logits_width,
+                node_top_k,
+                s_initial_topk_probas,
+                s_initial_topk_tokens);
+            initial_topk_probas_ptr = s_initial_topk_probas;
+            initial_topk_tokens_ptr = s_initial_topk_tokens;
         }
 
+        float initial_last_layer_scores[kCdtFusedMaxBatch];
+        int64_t initial_topk_indexs_prev[kCdtFusedMaxBatch];
+#pragma HLS ARRAY_PARTITION variable = initial_last_layer_scores complete
+#pragma HLS ARRAY_PARTITION variable = initial_topk_indexs_prev complete
+    init_seed_loop:
+        for (int b = 0; b < batch_size; ++b) {
+#pragma HLS PIPELINE II = 1
+            initial_last_layer_scores[b] = 1.0f;
+            initial_topk_indexs_prev[b] = 0;  // root global index
+        }
+
+        // InitialLoop Stage-0 parity:
+        // topk from previous-verify logits updates cumulative state with tree_width=1.
+        cost_draft_tree_fused_step_hls(
+            initial_topk_probas_ptr,
+            initial_topk_tokens_ptr,
+            initial_last_layer_scores,
+            initial_hidden_states,
+            hot_token_id,
+            hot_token_vocab_size,
+            use_hot_token_id,
+            initial_topk_indexs_prev,
+            batch_size,
+            node_top_k,
+            1,  // initial tree_width is fixed to root expansion
+            hidden_size,
+            curr_cumu_count,
+            curr_verify_num,
+            curr_depth_start + 1,  // align with Python depth labeling for first generated layer
+            max_node_count,
+            max_verify_num,
+            cumu_tokens,
+            cumu_scores,
+            cumu_deltas,
+            prev_indexs,
+            next_indexs,
+            side_indexs,
+            output_scores,
+            output_tokens,
+            work_scores,
+            sort_scores,
+            output_hidden_states,
+            cache_topk_indices,
+            dbg_curr_layer_scores,
+            dbg_sort_layer_scores,
+            dbg_sort_layer_indices,
+            s_parent_scratch,
+            dbg_remapped_topk_tokens);
+
+        // Record root-parent mapping for first recurrent SLM call.
+        if (curr_depth_start >= 0 && curr_depth_start < kCdtControllerMaxDepth) {
+        init_parent_accum_loop:
+            for (int t = 0; t < TREE_WIDTH; ++t) {
+#pragma HLS PIPELINE II = 1
+                int parent_slot = 0;
+                if (t < node_top_k) {
+                    const int64_t v = s_parent_scratch[t];
+                    parent_slot = (v >= 0 && v < max_tree_width) ? static_cast<int>(v) : 0;
+                }
+                parent_indices_accum[curr_depth_start * TREE_WIDTH + t] = parent_slot;
+            }
+        }
+        if (dbg_parent_indices_in_layer != nullptr) {
+        init_dbg_parent_fwd_loop_b:
+            for (int b = 0; b < batch_size; ++b) {
+            init_dbg_parent_fwd_loop_i:
+                for (int i = 0; i < node_top_k; ++i) {
+#pragma HLS PIPELINE II = 1
+                    dbg_parent_indices_in_layer[b * node_top_k + i] =
+                        s_parent_scratch[b * node_top_k + i];
+                }
+            }
+        }
+
+        curr_cumu_count += node_top_k;
+        if (curr_cumu_count > max_node_count) {
+            curr_cumu_count = max_node_count;
+        }
+        ++depth_done;
+
+        // Python parity: depth-0 width policy is evaluated after the initial cumulative update.
         int next_tree_width = curr_tree_width;
         int next_verify_num = curr_verify_num;
         bool stop_signal = false;
-
         width_policy(
-            d,
+            0,
             batch_size,
-            curr_tree_width,
+            1,
             node_top_k,
             max_tree_width,
             curr_verify_num,
@@ -632,6 +860,61 @@ orchestrator_depth_loop:
         next_tree_width = cdt_clamp_int(next_tree_width, 0, max_tree_width);
         next_tree_width = cdt_clamp_int(next_tree_width, 0, node_top_k);
         next_verify_num = cdt_clamp_int(next_verify_num, 1, max_verify_num);
+        curr_tree_width = next_tree_width;
+        curr_verify_num = next_verify_num;
+
+        if (tree_depth <= 1 || stop_signal || next_tree_width <= 0) {
+            stopped = stop_signal || (next_tree_width <= 0);
+            goto orchestrator_finalize;
+        }
+
+        // Stage-1 parity: select first tree_width frontier for the first recurrent SLM forward.
+        cdt_prepare_next_layer_inputs_hls(
+            output_scores,
+            output_tokens,
+            output_hidden_states,
+            cache_topk_indices,
+            batch_size,
+            node_top_k,
+            hidden_size,
+            next_tree_width,
+            max_tree_width,
+            step_input_tokens,
+            step_last_layer_scores,
+            step_input_hidden_states,
+            step_topk_indexs_prev);
+
+        loop_start_depth = 1;
+    }
+
+orchestrator_depth_loop:
+    for (int d = loop_start_depth; d < tree_depth; ++d) {
+        if (curr_tree_width <= 0) {
+            stopped = true;
+            break;
+        }
+
+        int next_tree_width = curr_tree_width;
+        int next_verify_num = curr_verify_num;
+        bool stop_signal = false;
+        if (!run_initial_loop) {
+            width_policy(
+                d,
+                batch_size,
+                curr_tree_width,
+                node_top_k,
+                max_tree_width,
+                curr_verify_num,
+                work_scores,
+                max_verify_num,
+                &next_tree_width,
+                &next_verify_num,
+                &stop_signal);
+
+            next_tree_width = cdt_clamp_int(next_tree_width, 0, max_tree_width);
+            next_tree_width = cdt_clamp_int(next_tree_width, 0, node_top_k);
+            next_verify_num = cdt_clamp_int(next_verify_num, 1, max_verify_num);
+        }
 
         // Stage A/B: SLM forward and LM-head top-k for current frontier.
         const int current_depth = curr_depth_start + d;
@@ -677,7 +960,7 @@ orchestrator_depth_loop:
             hidden_size,
             curr_cumu_count,
             curr_verify_num,
-            curr_depth_start + d,
+            run_initial_loop ? (curr_depth_start + d + 1) : (curr_depth_start + d),
             max_node_count,
             max_verify_num,
             cumu_tokens,
@@ -733,6 +1016,24 @@ orchestrator_depth_loop:
         }
 
         ++depth_done;
+        if (run_initial_loop) {
+            width_policy(
+                d,
+                batch_size,
+                curr_tree_width,
+                node_top_k,
+                max_tree_width,
+                curr_verify_num,
+                work_scores,
+                max_verify_num,
+                &next_tree_width,
+                &next_verify_num,
+                &stop_signal);
+
+            next_tree_width = cdt_clamp_int(next_tree_width, 0, max_tree_width);
+            next_tree_width = cdt_clamp_int(next_tree_width, 0, node_top_k);
+            next_verify_num = cdt_clamp_int(next_verify_num, 1, max_verify_num);
+        }
         if (d + 1 >= tree_depth || stop_signal || next_tree_width <= 0) {
             stopped = stop_signal || (next_tree_width <= 0);
             break;
@@ -758,6 +1059,7 @@ orchestrator_depth_loop:
         curr_verify_num = next_verify_num;
     }
 
+orchestrator_finalize:
     *io_tree_width = curr_tree_width;
     *io_verify_num = curr_verify_num;
     *io_cumu_count = curr_cumu_count;
