@@ -30,15 +30,12 @@ inline void cost_draft_tree_update_state_hls(
     const int64_t* sorted_indexs,     // [batch_size, tree_width * node_top_k]
     const int64_t* parent_indexs,     // [batch_size, node_top_k]
     const int64_t* topk_indexs,       // [batch_size, tree_width]
-    const bool* input_tree_mask,      // [batch_size, tree_width, input_count - 1]
     int batch_size,
     int node_top_k,
     int tree_width,
-    int input_count,
     int cumu_count,
     int verify_num,
     int curr_depth,
-    int max_input_size,
     int max_node_count,
     int max_verify_num,
     int64_t* cumu_tokens,             // [batch_size, max_node_count]
@@ -50,12 +47,11 @@ inline void cost_draft_tree_update_state_hls(
     float* output_scores,             // [batch_size, node_top_k]
     int64_t* output_tokens,           // [batch_size, node_top_k]
     float* work_scores,               // [batch_size, max_verify_num + node_top_k]
-    float* sort_scores,               // [batch_size, max_verify_num]
-    bool* output_tree_mask            // [batch_size, node_top_k, max_input_size + 1]
+    float* sort_scores                // [batch_size, max_verify_num]
 ) {
 #pragma HLS INLINE off
     if (batch_size <= 0 || node_top_k <= 0 || tree_width <= 0 ||
-        max_node_count <= 0 || max_verify_num <= 0 || max_input_size < 0) {
+        max_node_count <= 0 || max_verify_num <= 0) {
         return;
     }
 
@@ -99,24 +95,7 @@ batch_loop:
             output_tokens[output_offset + i] = topk_tokens[tok_idx];
         }
 
-        // 2) Update output tree mask prefix from selected parents.
-        const int mask_in_width = (input_count > 0) ? (input_count - 1) : 0;
-    output_mask_loop_i:
-        for (int i = 0; i < node_top_k; ++i) {
-            int64_t parent_idx = parent_indexs[parent_offset + i];
-            parent_idx = cdt_safe_index_i64(parent_idx, 0, tree_width, 0);
-        output_mask_loop_j:
-            for (int j = 0; j < mask_in_width; ++j) {
-#pragma HLS PIPELINE II = 1
-                const int src_offset =
-                    (b * tree_width + static_cast<int>(parent_idx)) * mask_in_width + j;
-                const int dst_offset =
-                    (b * node_top_k + i) * (max_input_size + 1) + j;
-                output_tree_mask[dst_offset] = input_tree_mask[src_offset];
-            }
-        }
-
-        // 3) Update cumulative tensors and in-layer links.
+        // 2) Update cumulative tensors and in-layer links.
         const int start = cumu_count;
     update_new_nodes_loop:
         for (int i = 0; i < num_new_tokens; ++i) {
@@ -138,7 +117,7 @@ batch_loop:
             }
         }
 
-        // 4) Update parent next pointers.
+        // 3) Update parent next pointers.
     update_parent_next_loop:
         for (int i = 0; i < tree_width; ++i) {
 #pragma HLS PIPELINE II = 1
@@ -148,7 +127,7 @@ batch_loop:
             }
         }
 
-        // 5a) Update work_scores prefix.
+        // 4a) Update work_scores prefix.
         const int work_size_0 = cdt_update_min(verify_num, cumu_count);
     work_scores_old_loop:
         for (int i = 0; i < work_size_0; ++i) {
@@ -161,7 +140,7 @@ batch_loop:
             work_scores[work_offset + work_size_0 + i] = output_scores[output_offset + i];
         }
 
-        // 5b) Merge two descending segments into sort_scores prefix.
+        // 4b) Merge two descending segments into sort_scores prefix.
         // left: sort_scores[:work_size_0], right: sorted_scores[:num_new_tokens]
         const int work_size_1 = cdt_update_min(verify_num, cumu_count + num_new_tokens);
 

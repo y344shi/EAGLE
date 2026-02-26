@@ -1,4 +1,3 @@
-#include "cost_draft_tree_controller_hls.hpp"
 #include "cost_draft_tree_fused_wiring_hls.hpp"
 #include "cost_draft_tree_score_hls.hpp"
 #include "cost_draft_tree_tb_case_io.hpp"
@@ -8,47 +7,9 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
-#include <memory>
 #include <random>
 #include <string>
 #include <vector>
-
-struct BoolBuffer {
-    BoolBuffer() = default;
-
-    explicit BoolBuffer(size_t n)
-        : size_(n), data_(n ? new bool[n] : nullptr) {
-        for (size_t i = 0; i < size_; ++i) data_[i] = false;
-    }
-
-    BoolBuffer(const BoolBuffer& other)
-        : size_(other.size_), data_(other.size_ ? new bool[other.size_] : nullptr) {
-        for (size_t i = 0; i < size_; ++i) data_[i] = other.data_[i];
-    }
-
-    BoolBuffer& operator=(const BoolBuffer& other) {
-        if (this == &other) return *this;
-        BoolBuffer tmp(other);
-        swap(tmp);
-        return *this;
-    }
-
-    void swap(BoolBuffer& other) {
-        std::swap(size_, other.size_);
-        std::swap(data_, other.data_);
-    }
-
-    size_t size() const { return size_; }
-    bool* data() { return data_.get(); }
-    const bool* data() const { return data_.get(); }
-
-    bool& operator[](size_t i) { return data_[i]; }
-    const bool& operator[](size_t i) const { return data_[i]; }
-
-private:
-    size_t size_ = 0;
-    std::unique_ptr<bool[]> data_;
-};
 
 struct LegacyState {
     std::vector<int64_t> cumu_tokens;
@@ -61,18 +22,6 @@ struct LegacyState {
     std::vector<int64_t> output_tokens;
     std::vector<float> work_scores;
     std::vector<float> sort_scores;
-    BoolBuffer output_tree_mask;
-};
-
-struct ControllerState {
-    std::vector<int> node_count;
-    std::vector<int64_t> frontier;
-    std::vector<int64_t> node_token;
-    std::vector<int64_t> node_parent;
-    std::vector<int64_t> node_first_child;
-    std::vector<int64_t> node_last_child;
-    std::vector<int64_t> node_next_sibling;
-    std::vector<int64_t> node_depth;
 };
 
 struct TestCfg {
@@ -81,16 +30,12 @@ struct TestCfg {
     int tree_width = 4;
     int hidden_size = 16;
     int cumu_count = 8;
-    int input_count = 6;
     int verify_num = 8;
     int curr_depth = 2;
 
-    int max_input_size = 16;
     int max_node_count = 128;
     int max_verify_num = 16;
     int max_tree_width = 4;
-    int parent_width = 4;
-    int next_tree_width = 4;
 
     int hot_vocab_size = 512;
     bool use_hot_token_id = true;
@@ -103,22 +48,15 @@ struct FusedTestInputs {
     std::vector<float> input_hidden_states;
     std::vector<int64_t> hot_token_id;
     std::vector<int64_t> topk_indexs_prev;
-    BoolBuffer input_tree_mask;
-    std::vector<int64_t> seed_tokens;
 };
 
 struct FusedExpectedOutputs {
     bool has_expected = false;
 
     LegacyState legacy;
-    ControllerState ctrl;
 
     std::vector<float> output_hidden;
     std::vector<int64_t> cache_topk;
-    std::vector<int64_t> frontier_out;
-    std::vector<int64_t> frontier_tokens;
-    std::vector<int64_t> frontier_parent_ids;
-    std::vector<int64_t> frontier_depths;
     std::vector<float> dbg_curr;
     std::vector<float> dbg_sort;
     std::vector<int64_t> dbg_sort_idx;
@@ -149,22 +87,6 @@ static size_t mismatch_i64(const std::vector<int64_t>& a, const std::vector<int6
     return c;
 }
 
-static size_t mismatch_int(const std::vector<int>& a, const std::vector<int>& b) {
-    size_t c = 0;
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (a[i] != b[i]) ++c;
-    }
-    return c;
-}
-
-static size_t mismatch_bool(const BoolBuffer& a, const BoolBuffer& b) {
-    size_t c = 0;
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (a[i] != b[i]) ++c;
-    }
-    return c;
-}
-
 static LegacyState make_legacy_state(const TestCfg& cfg, int seed) {
     LegacyState s;
 
@@ -173,8 +95,6 @@ static LegacyState make_legacy_state(const TestCfg& cfg, int seed) {
     const size_t work_n =
         static_cast<size_t>(cfg.batch_size) * (cfg.max_verify_num + cfg.node_top_k);
     const size_t sort_n = static_cast<size_t>(cfg.batch_size) * cfg.max_verify_num;
-    const size_t mask_n =
-        static_cast<size_t>(cfg.batch_size) * cfg.node_top_k * (cfg.max_input_size + 1);
 
     s.cumu_tokens.assign(node_n, -999);
     s.cumu_scores.assign(node_n, -5.0f);
@@ -186,7 +106,6 @@ static LegacyState make_legacy_state(const TestCfg& cfg, int seed) {
     s.output_tokens.assign(out_n, -3);
     s.work_scores.assign(work_n, -9.0f);
     s.sort_scores.assign(sort_n, -11.0f);
-    s.output_tree_mask = BoolBuffer(mask_n);
 
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> score_dist(0.5f, 2.0f);
@@ -204,50 +123,6 @@ static LegacyState make_legacy_state(const TestCfg& cfg, int seed) {
     return s;
 }
 
-static ControllerState make_controller_state_seeded(const TestCfg& cfg,
-                                                    const std::vector<int64_t>& seed_tokens) {
-    ControllerState st;
-
-    st.node_count.assign(cfg.batch_size, 0);
-    st.frontier.assign(static_cast<size_t>(cfg.batch_size) * cfg.max_tree_width, -1);
-    st.node_token.assign(static_cast<size_t>(cfg.batch_size) * cfg.max_node_count, -1);
-    st.node_parent.assign(static_cast<size_t>(cfg.batch_size) * cfg.max_node_count, -1);
-    st.node_first_child.assign(static_cast<size_t>(cfg.batch_size) * cfg.max_node_count, -1);
-    st.node_last_child.assign(static_cast<size_t>(cfg.batch_size) * cfg.max_node_count, -1);
-    st.node_next_sibling.assign(static_cast<size_t>(cfg.batch_size) * cfg.max_node_count, -1);
-    st.node_depth.assign(static_cast<size_t>(cfg.batch_size) * cfg.max_node_count, -1);
-
-    tmac::hls::cdt_controller_reset(
-        cfg.batch_size,
-        cfg.max_tree_width,
-        cfg.max_node_count,
-        st.node_count.data(),
-        st.frontier.data(),
-        st.node_token.data(),
-        st.node_parent.data(),
-        st.node_first_child.data(),
-        st.node_last_child.data(),
-        st.node_next_sibling.data(),
-        st.node_depth.data());
-
-    tmac::hls::cdt_controller_seed_frontier(
-        seed_tokens.data(),
-        cfg.batch_size,
-        cfg.parent_width,
-        cfg.max_tree_width,
-        cfg.max_node_count,
-        st.node_count.data(),
-        st.frontier.data(),
-        st.node_token.data(),
-        st.node_parent.data(),
-        st.node_first_child.data(),
-        st.node_last_child.data(),
-        st.node_next_sibling.data(),
-        st.node_depth.data());
-
-    return st;
-}
-
 static void run_reference_pipeline(
     const TestCfg& cfg,
     const std::vector<float>& topk_probas,
@@ -256,15 +131,9 @@ static void run_reference_pipeline(
     const std::vector<float>& input_hidden_states,
     const std::vector<int64_t>& hot_token_id,
     const std::vector<int64_t>& topk_indexs_prev,
-    const BoolBuffer& input_tree_mask,
     LegacyState* legacy,
-    ControllerState* controller,
     std::vector<float>* output_hidden_states,
     std::vector<int64_t>* cache_topk_indices,
-    std::vector<int64_t>* frontier_out,
-    std::vector<int64_t>* frontier_tokens,
-    std::vector<int64_t>* frontier_parent_ids,
-    std::vector<int64_t>* frontier_depths,
     std::vector<float>* dbg_curr_scores,
     std::vector<float>* dbg_sort_scores,
     std::vector<int64_t>* dbg_sort_indices,
@@ -310,15 +179,12 @@ static void run_reference_pipeline(
         stage_sort_idx.data(),
         stage_parent.data(),
         topk_indexs_prev.data(),
-        input_tree_mask.data(),
         cfg.batch_size,
         cfg.node_top_k,
         cfg.tree_width,
-        cfg.input_count,
         cfg.cumu_count,
         cfg.verify_num,
         cfg.curr_depth,
-        cfg.max_input_size,
         cfg.max_node_count,
         cfg.max_verify_num,
         legacy->cumu_tokens.data(),
@@ -330,39 +196,7 @@ static void run_reference_pipeline(
         legacy->output_scores.data(),
         legacy->output_tokens.data(),
         legacy->work_scores.data(),
-        legacy->sort_scores.data(),
-        legacy->output_tree_mask.data());
-
-    tmac::hls::cdt_controller_expand_frontier(
-        controller->frontier.data(),
-        stage_parent.data(),
-        stage_output_tokens.data(),
-        cfg.batch_size,
-        cfg.parent_width,
-        cfg.next_tree_width,
-        cfg.max_tree_width,
-        cfg.max_node_count,
-        controller->node_count.data(),
-        frontier_out->data(),
-        controller->node_token.data(),
-        controller->node_parent.data(),
-        controller->node_first_child.data(),
-        controller->node_last_child.data(),
-        controller->node_next_sibling.data(),
-        controller->node_depth.data());
-
-    tmac::hls::cdt_controller_export_frontier(
-        frontier_out->data(),
-        cfg.batch_size,
-        cfg.next_tree_width,
-        cfg.max_tree_width,
-        cfg.max_node_count,
-        controller->node_token.data(),
-        controller->node_parent.data(),
-        controller->node_depth.data(),
-        frontier_tokens->data(),
-        frontier_parent_ids->data(),
-        frontier_depths->data());
+        legacy->sort_scores.data());
 
     *cache_topk_indices = stage_cache_topk;
     *dbg_curr_scores = stage_curr;
@@ -415,7 +249,6 @@ static bool load_file_fixture(const std::string& path,
                               TestCfg* cfg,
                               FusedTestInputs* in,
                               LegacyState* legacy_init,
-                              ControllerState* ctrl_init,
                               FusedExpectedOutputs* expected,
                               std::string* err_msg) {
     using namespace tmac::hls::tb_case_io;
@@ -434,22 +267,19 @@ static bool load_file_fixture(const std::string& path,
     cfg->tree_width = meta[2];
     cfg->hidden_size = meta[3];
     cfg->cumu_count = meta[4];
-    cfg->input_count = meta[5];
+    // meta[5] (input_count) and meta[8] (max_input_size) removed
     cfg->verify_num = meta[6];
     cfg->curr_depth = meta[7];
-    cfg->max_input_size = meta[8];
     cfg->max_node_count = meta[9];
     cfg->max_verify_num = meta[10];
     cfg->max_tree_width = meta[11];
-    cfg->parent_width = meta[12];
-    cfg->next_tree_width = meta[13];
+    // meta[12] (parent_width) and meta[13] (next_tree_width) removed
     cfg->hot_vocab_size = meta[14];
     cfg->use_hot_token_id = (meta[15] != 0);
 
     if (cfg->batch_size <= 0 || cfg->node_top_k <= 0 || cfg->tree_width <= 0 ||
-        cfg->hidden_size <= 0 || cfg->input_count <= 0 || cfg->max_input_size <= 0 ||
-        cfg->max_node_count <= 0 || cfg->max_verify_num <= 0 || cfg->max_tree_width <= 0 ||
-        cfg->parent_width <= 0 || cfg->next_tree_width < 0) {
+        cfg->hidden_size <= 0 ||
+        cfg->max_node_count <= 0 || cfg->max_verify_num <= 0 || cfg->max_tree_width <= 0) {
         *err_msg = "invalid scalar dimensions in meta";
         return false;
     }
@@ -460,16 +290,11 @@ static bool load_file_fixture(const std::string& path,
     const size_t hidden_n =
         static_cast<size_t>(cfg->batch_size) * cfg->tree_width * cfg->hidden_size;
     const size_t tree_n = static_cast<size_t>(cfg->batch_size) * cfg->tree_width;
-    const size_t in_mask_n = static_cast<size_t>(cfg->batch_size) * cfg->tree_width *
-                             static_cast<size_t>(cfg->input_count - 1);
-    const size_t frontier_n = static_cast<size_t>(cfg->batch_size) * cfg->max_tree_width;
     const size_t node_n = static_cast<size_t>(cfg->batch_size) * cfg->max_node_count;
     const size_t out_n = static_cast<size_t>(cfg->batch_size) * cfg->node_top_k;
     const size_t work_n = static_cast<size_t>(cfg->batch_size) *
                           static_cast<size_t>(cfg->max_verify_num + cfg->node_top_k);
     const size_t sort_n = static_cast<size_t>(cfg->batch_size) * cfg->max_verify_num;
-    const size_t out_mask_n = static_cast<size_t>(cfg->batch_size) * cfg->node_top_k *
-                              static_cast<size_t>(cfg->max_input_size + 1);
 
     if (!read_float_array(kv, "topk_probas_sampling", topk_n, &in->topk_probas, err_msg, true) ||
         !read_i64_array(kv, "topk_tokens_sampling", topk_n, &in->topk_tokens, err_msg, true) ||
@@ -478,15 +303,6 @@ static bool load_file_fixture(const std::string& path,
                           true) ||
         !read_i64_array(kv, "topk_indexs_prev", tree_n, &in->topk_indexs_prev, err_msg, true)) {
         return false;
-    }
-
-    std::vector<bool> in_mask_tmp;
-    if (!read_bool_array(kv, "input_tree_mask", in_mask_n, &in_mask_tmp, err_msg, true)) {
-        return false;
-    }
-    in->input_tree_mask = BoolBuffer(in_mask_n);
-    for (size_t i = 0; i < in_mask_n; ++i) {
-        in->input_tree_mask[i] = in_mask_tmp[i];
     }
 
     if (has_key(kv, "hot_token_id")) {
@@ -501,34 +317,6 @@ static bool load_file_fixture(const std::string& path,
         }
     }
 
-    ctrl_init->node_count.assign(static_cast<size_t>(cfg->batch_size), 0);
-    ctrl_init->frontier.assign(frontier_n, -1);
-    ctrl_init->node_token.assign(node_n, -1);
-    ctrl_init->node_parent.assign(node_n, -1);
-    ctrl_init->node_first_child.assign(node_n, -1);
-    ctrl_init->node_last_child.assign(node_n, -1);
-    ctrl_init->node_next_sibling.assign(node_n, -1);
-    ctrl_init->node_depth.assign(node_n, -1);
-
-    if (!read_int_array(kv, "controller_node_count", cfg->batch_size, &ctrl_init->node_count,
-                        err_msg, true) ||
-        !read_i64_array(kv, "controller_frontier_in", frontier_n, &ctrl_init->frontier, err_msg,
-                        true) ||
-        !read_i64_array(kv, "controller_node_token_ids", node_n, &ctrl_init->node_token, err_msg,
-                        true) ||
-        !read_i64_array(kv, "controller_node_parent_ids", node_n, &ctrl_init->node_parent,
-                        err_msg, true) ||
-        !read_i64_array(kv, "controller_node_first_child_ids", node_n,
-                        &ctrl_init->node_first_child, err_msg, true) ||
-        !read_i64_array(kv, "controller_node_last_child_ids", node_n, &ctrl_init->node_last_child,
-                        err_msg, true) ||
-        !read_i64_array(kv, "controller_node_next_sibling_ids", node_n,
-                        &ctrl_init->node_next_sibling, err_msg, true) ||
-        !read_i64_array(kv, "controller_node_depths", node_n, &ctrl_init->node_depth, err_msg,
-                        true)) {
-        return false;
-    }
-
     legacy_init->cumu_tokens.assign(node_n, -1);
     legacy_init->cumu_scores.assign(node_n, 0.0f);
     legacy_init->cumu_deltas.assign(node_n, -1);
@@ -539,7 +327,6 @@ static bool load_file_fixture(const std::string& path,
     legacy_init->output_tokens.assign(out_n, -1);
     legacy_init->work_scores.assign(work_n, 0.0f);
     legacy_init->sort_scores.assign(sort_n, 0.0f);
-    legacy_init->output_tree_mask = BoolBuffer(out_mask_n);
 
     if (!read_i64_array(kv, "legacy_cumu_tokens", node_n, &legacy_init->cumu_tokens, err_msg,
                         true) ||
@@ -563,24 +350,14 @@ static bool load_file_fixture(const std::string& path,
                           true)) {
         return false;
     }
-    std::vector<bool> legacy_mask_tmp;
-    if (!read_bool_array(kv, "legacy_output_tree_mask", out_mask_n, &legacy_mask_tmp, err_msg,
-                         true)) {
-        return false;
-    }
-    for (size_t i = 0; i < out_mask_n; ++i) {
-        legacy_init->output_tree_mask[i] = legacy_mask_tmp[i];
-    }
 
     expected->has_expected =
-        has_key(kv, "expected_cache_topk_indices") || has_key(kv, "expected_legacy_cumu_tokens") ||
-        has_key(kv, "expected_controller_frontier_out");
+        has_key(kv, "expected_cache_topk_indices") || has_key(kv, "expected_legacy_cumu_tokens");
     if (!expected->has_expected) {
         return true;
     }
 
     expected->legacy = LegacyState{};
-    expected->ctrl = ControllerState{};
     expected->legacy.cumu_tokens.assign(node_n, -1);
     expected->legacy.cumu_scores.assign(node_n, 0.0f);
     expected->legacy.cumu_deltas.assign(node_n, -1);
@@ -591,25 +368,11 @@ static bool load_file_fixture(const std::string& path,
     expected->legacy.output_tokens.assign(out_n, -1);
     expected->legacy.work_scores.assign(work_n, 0.0f);
     expected->legacy.sort_scores.assign(sort_n, 0.0f);
-    expected->legacy.output_tree_mask = BoolBuffer(out_mask_n);
-
-    expected->ctrl.node_count.assign(static_cast<size_t>(cfg->batch_size), 0);
-    expected->ctrl.frontier.assign(frontier_n, -1);
-    expected->ctrl.node_token.assign(node_n, -1);
-    expected->ctrl.node_parent.assign(node_n, -1);
-    expected->ctrl.node_first_child.assign(node_n, -1);
-    expected->ctrl.node_last_child.assign(node_n, -1);
-    expected->ctrl.node_next_sibling.assign(node_n, -1);
-    expected->ctrl.node_depth.assign(node_n, -1);
 
     expected->output_hidden.assign(static_cast<size_t>(cfg->batch_size) * cfg->node_top_k *
                                        cfg->hidden_size,
                                    0.0f);
     expected->cache_topk.assign(out_n, -1);
-    expected->frontier_out.assign(frontier_n, -1);
-    expected->frontier_tokens.assign(frontier_n, -1);
-    expected->frontier_parent_ids.assign(frontier_n, -1);
-    expected->frontier_depths.assign(frontier_n, -1);
     expected->dbg_curr.assign(topk_n, 0.0f);
     expected->dbg_sort.assign(topk_n, 0.0f);
     expected->dbg_sort_idx.assign(topk_n, -1);
@@ -620,17 +383,6 @@ static bool load_file_fixture(const std::string& path,
                           &expected->output_hidden, err_msg, true) ||
         !read_i64_array(kv, "expected_cache_topk_indices", expected->cache_topk.size(),
                         &expected->cache_topk, err_msg, true) ||
-        !read_i64_array(kv, "expected_controller_frontier_out", expected->frontier_out.size(),
-                        &expected->frontier_out, err_msg, true) ||
-        !read_i64_array(kv, "expected_controller_frontier_tokens",
-                        expected->frontier_tokens.size(), &expected->frontier_tokens, err_msg,
-                        true) ||
-        !read_i64_array(kv, "expected_controller_frontier_parent_ids",
-                        expected->frontier_parent_ids.size(), &expected->frontier_parent_ids,
-                        err_msg, true) ||
-        !read_i64_array(kv, "expected_controller_frontier_depths",
-                        expected->frontier_depths.size(), &expected->frontier_depths, err_msg,
-                        true) ||
         !read_float_array(kv, "expected_dbg_curr_layer_scores", expected->dbg_curr.size(),
                           &expected->dbg_curr, err_msg, true) ||
         !read_float_array(kv, "expected_dbg_sort_layer_scores", expected->dbg_sort.size(),
@@ -660,38 +412,8 @@ static bool load_file_fixture(const std::string& path,
         !read_float_array(kv, "expected_legacy_work_scores", expected->legacy.work_scores.size(),
                           &expected->legacy.work_scores, err_msg, true) ||
         !read_float_array(kv, "expected_legacy_sort_scores", expected->legacy.sort_scores.size(),
-                          &expected->legacy.sort_scores, err_msg, true) ||
-        !read_int_array(kv, "expected_controller_node_count", expected->ctrl.node_count.size(),
-                        &expected->ctrl.node_count, err_msg, true) ||
-        !read_i64_array(kv, "expected_controller_node_token_ids",
-                        expected->ctrl.node_token.size(), &expected->ctrl.node_token, err_msg,
-                        true) ||
-        !read_i64_array(kv, "expected_controller_node_parent_ids",
-                        expected->ctrl.node_parent.size(), &expected->ctrl.node_parent, err_msg,
-                        true) ||
-        !read_i64_array(kv, "expected_controller_node_first_child_ids",
-                        expected->ctrl.node_first_child.size(), &expected->ctrl.node_first_child,
-                        err_msg, true) ||
-        !read_i64_array(kv, "expected_controller_node_last_child_ids",
-                        expected->ctrl.node_last_child.size(), &expected->ctrl.node_last_child,
-                        err_msg, true) ||
-        !read_i64_array(kv, "expected_controller_node_next_sibling_ids",
-                        expected->ctrl.node_next_sibling.size(),
-                        &expected->ctrl.node_next_sibling, err_msg, true) ||
-        !read_i64_array(kv, "expected_controller_node_depths",
-                        expected->ctrl.node_depth.size(), &expected->ctrl.node_depth, err_msg,
-                        true)) {
+                          &expected->legacy.sort_scores, err_msg, true)) {
         return false;
-    }
-
-    std::vector<bool> exp_legacy_mask_tmp;
-    if (!read_bool_array(kv, "expected_legacy_output_tree_mask",
-                         expected->legacy.output_tree_mask.size(), &exp_legacy_mask_tmp, err_msg,
-                         true)) {
-        return false;
-    }
-    for (size_t i = 0; i < expected->legacy.output_tree_mask.size(); ++i) {
-        expected->legacy.output_tree_mask[i] = exp_legacy_mask_tmp[i];
     }
 
     return true;
@@ -699,8 +421,7 @@ static bool load_file_fixture(const std::string& path,
 
 static void make_synthetic_fixture(TestCfg* cfg,
                                    FusedTestInputs* in,
-                                   LegacyState* legacy_init,
-                                   ControllerState* ctrl_init) {
+                                   LegacyState* legacy_init) {
     const int total_topk = cfg->tree_width * cfg->node_top_k;
     std::mt19937 rng(1234);
     std::uniform_real_distribution<float> prob_dist(0.01f, 0.99f);
@@ -736,48 +457,22 @@ static void make_synthetic_fixture(TestCfg* cfg,
         }
     }
 
-    const size_t in_mask_n =
-        static_cast<size_t>(cfg->batch_size) * cfg->tree_width * (cfg->input_count - 1);
-    in->input_tree_mask = BoolBuffer(in_mask_n);
-    for (size_t i = 0; i < in_mask_n; ++i) {
-        in->input_tree_mask[i] = ((i % 2) == 0);
-    }
-
-    std::vector<int64_t> seed_tokens(static_cast<size_t>(cfg->batch_size) * cfg->parent_width, 0);
-    for (int b = 0; b < cfg->batch_size; ++b) {
-        for (int i = 0; i < cfg->parent_width; ++i) {
-            seed_tokens[b * cfg->parent_width + i] = 100 + b * 10 + i;
-        }
-    }
-
     *legacy_init = make_legacy_state(*cfg, 1);
-    *ctrl_init = make_controller_state_seeded(*cfg, seed_tokens);
 }
 
 static bool run_fused_test(const TestCfg& cfg,
                            const FusedTestInputs& in,
                            const LegacyState& legacy_init,
-                           const ControllerState& ctrl_init,
                            const FusedExpectedOutputs* file_expected) {
     const int total_topk = cfg.tree_width * cfg.node_top_k;
 
     LegacyState ref_legacy = legacy_init;
     LegacyState fused_legacy = legacy_init;
-    ControllerState ref_ctrl = ctrl_init;
-    ControllerState fused_ctrl = ctrl_init;
 
     std::vector<float> ref_output_hidden(cfg.batch_size * cfg.node_top_k * cfg.hidden_size, 0.0f);
     std::vector<float> fused_output_hidden(cfg.batch_size * cfg.node_top_k * cfg.hidden_size, 0.0f);
     std::vector<int64_t> ref_cache_topk(cfg.batch_size * cfg.node_top_k, -1);
     std::vector<int64_t> fused_cache_topk(cfg.batch_size * cfg.node_top_k, -1);
-    std::vector<int64_t> ref_frontier_out(cfg.batch_size * cfg.max_tree_width, -1);
-    std::vector<int64_t> fused_frontier_out(cfg.batch_size * cfg.max_tree_width, -1);
-    std::vector<int64_t> ref_frontier_tokens(cfg.batch_size * cfg.max_tree_width, -1);
-    std::vector<int64_t> fused_frontier_tokens = ref_frontier_tokens;
-    std::vector<int64_t> ref_frontier_parent_ids(cfg.batch_size * cfg.max_tree_width, -1);
-    std::vector<int64_t> fused_frontier_parent_ids = ref_frontier_parent_ids;
-    std::vector<int64_t> ref_frontier_depths(cfg.batch_size * cfg.max_tree_width, -1);
-    std::vector<int64_t> fused_frontier_depths = ref_frontier_depths;
     std::vector<float> ref_dbg_curr(cfg.batch_size * total_topk, 0.0f);
     std::vector<float> fused_dbg_curr(cfg.batch_size * total_topk, 0.0f);
     std::vector<float> ref_dbg_sort(cfg.batch_size * total_topk, 0.0f);
@@ -797,15 +492,9 @@ static bool run_fused_test(const TestCfg& cfg,
         in.input_hidden_states,
         in.hot_token_id,
         in.topk_indexs_prev,
-        in.input_tree_mask,
         &ref_legacy,
-        &ref_ctrl,
         &ref_output_hidden,
         &ref_cache_topk,
-        &ref_frontier_out,
-        &ref_frontier_tokens,
-        &ref_frontier_parent_ids,
-        &ref_frontier_depths,
         &ref_dbg_curr,
         &ref_dbg_sort,
         &ref_dbg_sort_idx,
@@ -821,22 +510,15 @@ static bool run_fused_test(const TestCfg& cfg,
         static_cast<int64_t>(in.hot_token_id.size()),
         cfg.use_hot_token_id,
         in.topk_indexs_prev.data(),
-        in.input_tree_mask.data(),
-        fused_ctrl.frontier.data(),
         cfg.batch_size,
         cfg.node_top_k,
         cfg.tree_width,
         cfg.hidden_size,
         cfg.cumu_count,
-        cfg.input_count,
         cfg.verify_num,
         cfg.curr_depth,
-        cfg.max_input_size,
         cfg.max_node_count,
         cfg.max_verify_num,
-        cfg.max_tree_width,
-        cfg.parent_width,
-        cfg.next_tree_width,
         fused_legacy.cumu_tokens.data(),
         fused_legacy.cumu_scores.data(),
         fused_legacy.cumu_deltas.data(),
@@ -847,20 +529,8 @@ static bool run_fused_test(const TestCfg& cfg,
         fused_legacy.output_tokens.data(),
         fused_legacy.work_scores.data(),
         fused_legacy.sort_scores.data(),
-        fused_legacy.output_tree_mask.data(),
-        fused_ctrl.node_count.data(),
-        fused_ctrl.node_token.data(),
-        fused_ctrl.node_parent.data(),
-        fused_ctrl.node_first_child.data(),
-        fused_ctrl.node_last_child.data(),
-        fused_ctrl.node_next_sibling.data(),
-        fused_ctrl.node_depth.data(),
         fused_output_hidden.data(),
         fused_cache_topk.data(),
-        fused_frontier_out.data(),
-        fused_frontier_tokens.data(),
-        fused_frontier_parent_ids.data(),
-        fused_frontier_depths.data(),
         fused_dbg_curr.data(),
         fused_dbg_sort.data(),
         fused_dbg_sort_idx.data(),
@@ -870,19 +540,10 @@ static bool run_fused_test(const TestCfg& cfg,
     const bool use_file_expected = (file_expected != nullptr && file_expected->has_expected);
 
     const LegacyState& cmp_legacy = use_file_expected ? file_expected->legacy : ref_legacy;
-    const ControllerState& cmp_ctrl = use_file_expected ? file_expected->ctrl : ref_ctrl;
     const std::vector<float>& cmp_output_hidden =
         use_file_expected ? file_expected->output_hidden : ref_output_hidden;
     const std::vector<int64_t>& cmp_cache_topk =
         use_file_expected ? file_expected->cache_topk : ref_cache_topk;
-    const std::vector<int64_t>& cmp_frontier_out =
-        use_file_expected ? file_expected->frontier_out : ref_frontier_out;
-    const std::vector<int64_t>& cmp_frontier_tokens =
-        use_file_expected ? file_expected->frontier_tokens : ref_frontier_tokens;
-    const std::vector<int64_t>& cmp_frontier_parent_ids =
-        use_file_expected ? file_expected->frontier_parent_ids : ref_frontier_parent_ids;
-    const std::vector<int64_t>& cmp_frontier_depths =
-        use_file_expected ? file_expected->frontier_depths : ref_frontier_depths;
     const std::vector<float>& cmp_dbg_curr = use_file_expected ? file_expected->dbg_curr : ref_dbg_curr;
     const std::vector<float>& cmp_dbg_sort = use_file_expected ? file_expected->dbg_sort : ref_dbg_sort;
     const std::vector<int64_t>& cmp_dbg_sort_idx =
@@ -904,12 +565,6 @@ static bool run_fused_test(const TestCfg& cfg,
     const size_t mm_side = mismatch_i64(fused_legacy.side_indexs, cmp_legacy.side_indexs);
     const size_t mm_out_tokens = mismatch_i64(fused_legacy.output_tokens, cmp_legacy.output_tokens);
     const size_t mm_cache_topk = mismatch_i64(fused_cache_topk, cmp_cache_topk);
-    const size_t mm_frontier_out = mismatch_i64(fused_frontier_out, cmp_frontier_out);
-    const size_t mm_frontier_tokens = mismatch_i64(fused_frontier_tokens, cmp_frontier_tokens);
-    const size_t mm_frontier_parents =
-        mismatch_i64(fused_frontier_parent_ids, cmp_frontier_parent_ids);
-    const size_t mm_frontier_depths = mismatch_i64(fused_frontier_depths, cmp_frontier_depths);
-    const size_t mm_ctrl_count = mismatch_int(fused_ctrl.node_count, cmp_ctrl.node_count);
     const size_t mm_dbg_sort_idx = mismatch_i64(fused_dbg_sort_idx, cmp_dbg_sort_idx);
     const size_t mm_dbg_parent = mismatch_i64(fused_dbg_parent, cmp_dbg_parent);
     const size_t mm_dbg_remap = mismatch_i64(fused_dbg_remap, cmp_dbg_remap);
@@ -924,10 +579,6 @@ static bool run_fused_test(const TestCfg& cfg,
     std::cout << "prev/next/side mism    = " << mm_prev << "/" << mm_next << "/" << mm_side << "\n";
     std::cout << "output_tokens mism     = " << mm_out_tokens << "\n";
     std::cout << "cache_topk mism        = " << mm_cache_topk << "\n";
-    std::cout << "frontier_out mism      = " << mm_frontier_out << "\n";
-    std::cout << "frontier fields mism   = " << mm_frontier_tokens << "/" << mm_frontier_parents
-              << "/" << mm_frontier_depths << "\n";
-    std::cout << "controller_count mism  = " << mm_ctrl_count << "\n";
     std::cout << "dbg sort/parent/remap  = " << mm_dbg_sort_idx << "/" << mm_dbg_parent
               << "/" << mm_dbg_remap << "\n";
 
@@ -936,9 +587,7 @@ static bool run_fused_test(const TestCfg& cfg,
         (err_sort_scores <= 1e-6f) && (err_dbg_curr <= 1e-6f) && (err_dbg_sort <= 1e-6f);
     const bool pass_int =
         (mm_cumu_tokens == 0) && (mm_prev == 0) && (mm_next == 0) && (mm_side == 0) &&
-        (mm_out_tokens == 0) && (mm_cache_topk == 0) && (mm_frontier_out == 0) &&
-        (mm_frontier_tokens == 0) && (mm_frontier_parents == 0) && (mm_frontier_depths == 0) &&
-        (mm_ctrl_count == 0) && (mm_dbg_sort_idx == 0) &&
+        (mm_out_tokens == 0) && (mm_cache_topk == 0) && (mm_dbg_sort_idx == 0) &&
         (mm_dbg_parent == 0) && (mm_dbg_remap == 0);
 
     const char* cmp_mode = use_file_expected ? "file-expected tensors" : "reference pipeline";
@@ -952,12 +601,11 @@ static bool run_fused_test(const TestCfg& cfg,
 }
 
 // Multi-depth bench:
-// Repeatedly applies fused step with chained state/frontier and checks candidate outputs
+// Repeatedly applies fused step with chained state and checks candidate outputs
 // against a sequential reference pipeline at each depth.
 static bool run_fused_multidepth_candidate_test(const TestCfg& base_cfg,
                                                 const FusedTestInputs& seed_in,
                                                 const LegacyState& legacy_init,
-                                                const ControllerState& ctrl_init,
                                                 int steps) {
     if (steps <= 0) {
         std::cerr << "[FAIL] multi-depth steps must be > 0.\n";
@@ -965,20 +613,15 @@ static bool run_fused_multidepth_candidate_test(const TestCfg& base_cfg,
     }
 
     const int total_topk = base_cfg.tree_width * base_cfg.node_top_k;
-    const size_t in_mask_n = static_cast<size_t>(base_cfg.batch_size) * base_cfg.tree_width *
-                             static_cast<size_t>(base_cfg.input_count - 1);
 
     LegacyState ref_legacy = legacy_init;
     LegacyState fused_legacy = legacy_init;
-    ControllerState ref_ctrl = ctrl_init;
-    ControllerState fused_ctrl = ctrl_init;
 
     std::vector<float> step_topk_probas = seed_in.topk_probas;
     std::vector<int64_t> step_topk_tokens = seed_in.topk_tokens;
     std::vector<float> step_last_layer_scores = seed_in.last_layer_scores;
     std::vector<float> step_input_hidden_states = seed_in.input_hidden_states;
     std::vector<int64_t> step_topk_indexs_prev = seed_in.topk_indexs_prev;
-    BoolBuffer step_input_tree_mask = seed_in.input_tree_mask;
 
     std::vector<float> prev_fused_output_hidden(
         static_cast<size_t>(base_cfg.batch_size) * base_cfg.node_top_k * base_cfg.hidden_size,
@@ -1035,33 +678,8 @@ static bool run_fused_multidepth_candidate_test(const TestCfg& base_cfg,
                 }
             }
 
-            // 4) previous top-k node ids from current frontier
-            for (int b = 0; b < base_cfg.batch_size; ++b) {
-                for (int t = 0; t < base_cfg.tree_width; ++t) {
-                    const int slot = (base_cfg.max_tree_width > 0) ? (t % base_cfg.max_tree_width) : 0;
-                    int64_t nid = fused_ctrl.frontier[b * base_cfg.max_tree_width + slot];
-                    if (nid < 0) nid = 0;
-                    step_topk_indexs_prev[static_cast<size_t>(b) * base_cfg.tree_width + t] = nid;
-                }
-            }
-
-            // 5) tree-mask chaining from previous output mask prefix
-            for (int b = 0; b < base_cfg.batch_size; ++b) {
-                for (int t = 0; t < base_cfg.tree_width; ++t) {
-                    const int src_t = (base_cfg.node_top_k > 0) ? (t % base_cfg.node_top_k) : 0;
-                    for (int j = 0; j < base_cfg.input_count - 1; ++j) {
-                        const size_t dst = (static_cast<size_t>(b) * base_cfg.tree_width + t) *
-                                               static_cast<size_t>(base_cfg.input_count - 1) +
-                                           j;
-                        const size_t src = (static_cast<size_t>(b) * base_cfg.node_top_k + src_t) *
-                                               static_cast<size_t>(base_cfg.max_input_size + 1) +
-                                           j;
-                        step_input_tree_mask[dst] = (src < fused_legacy.output_tree_mask.size())
-                                                        ? fused_legacy.output_tree_mask[src]
-                                                        : false;
-                    }
-                }
-            }
+            // 4) previous top-k node ids (keep topk_indexs_prev as-is or update externally)
+            // topk_indexs_prev is preserved between steps without frontier chaining
         }
 
         // Per-step outputs for reference and fused paths.
@@ -1071,14 +689,6 @@ static bool run_fused_multidepth_candidate_test(const TestCfg& base_cfg,
             static_cast<size_t>(cfg.batch_size) * cfg.node_top_k * cfg.hidden_size, 0.0f);
         std::vector<int64_t> ref_cache_topk(cfg.batch_size * cfg.node_top_k, -1);
         std::vector<int64_t> fused_cache_topk(cfg.batch_size * cfg.node_top_k, -1);
-        std::vector<int64_t> ref_frontier_out(cfg.batch_size * cfg.max_tree_width, -1);
-        std::vector<int64_t> fused_frontier_out(cfg.batch_size * cfg.max_tree_width, -1);
-        std::vector<int64_t> ref_frontier_tokens(cfg.batch_size * cfg.max_tree_width, -1);
-        std::vector<int64_t> fused_frontier_tokens = ref_frontier_tokens;
-        std::vector<int64_t> ref_frontier_parent_ids(cfg.batch_size * cfg.max_tree_width, -1);
-        std::vector<int64_t> fused_frontier_parent_ids = ref_frontier_parent_ids;
-        std::vector<int64_t> ref_frontier_depths(cfg.batch_size * cfg.max_tree_width, -1);
-        std::vector<int64_t> fused_frontier_depths = ref_frontier_depths;
         std::vector<float> ref_dbg_curr(cfg.batch_size * total_topk, 0.0f);
         std::vector<float> fused_dbg_curr(cfg.batch_size * total_topk, 0.0f);
         std::vector<float> ref_dbg_sort(cfg.batch_size * total_topk, 0.0f);
@@ -1098,15 +708,9 @@ static bool run_fused_multidepth_candidate_test(const TestCfg& base_cfg,
             step_input_hidden_states,
             seed_in.hot_token_id,
             step_topk_indexs_prev,
-            step_input_tree_mask,
             &ref_legacy,
-            &ref_ctrl,
             &ref_output_hidden,
             &ref_cache_topk,
-            &ref_frontier_out,
-            &ref_frontier_tokens,
-            &ref_frontier_parent_ids,
-            &ref_frontier_depths,
             &ref_dbg_curr,
             &ref_dbg_sort,
             &ref_dbg_sort_idx,
@@ -1122,22 +726,15 @@ static bool run_fused_multidepth_candidate_test(const TestCfg& base_cfg,
             static_cast<int64_t>(seed_in.hot_token_id.size()),
             cfg.use_hot_token_id,
             step_topk_indexs_prev.data(),
-            step_input_tree_mask.data(),
-            fused_ctrl.frontier.data(),
             cfg.batch_size,
             cfg.node_top_k,
             cfg.tree_width,
             cfg.hidden_size,
             cfg.cumu_count,
-            cfg.input_count,
             cfg.verify_num,
             cfg.curr_depth,
-            cfg.max_input_size,
             cfg.max_node_count,
             cfg.max_verify_num,
-            cfg.max_tree_width,
-            cfg.parent_width,
-            cfg.next_tree_width,
             fused_legacy.cumu_tokens.data(),
             fused_legacy.cumu_scores.data(),
             fused_legacy.cumu_deltas.data(),
@@ -1148,20 +745,8 @@ static bool run_fused_multidepth_candidate_test(const TestCfg& base_cfg,
             fused_legacy.output_tokens.data(),
             fused_legacy.work_scores.data(),
             fused_legacy.sort_scores.data(),
-            fused_legacy.output_tree_mask.data(),
-            fused_ctrl.node_count.data(),
-            fused_ctrl.node_token.data(),
-            fused_ctrl.node_parent.data(),
-            fused_ctrl.node_first_child.data(),
-            fused_ctrl.node_last_child.data(),
-            fused_ctrl.node_next_sibling.data(),
-            fused_ctrl.node_depth.data(),
             fused_output_hidden.data(),
             fused_cache_topk.data(),
-            fused_frontier_out.data(),
-            fused_frontier_tokens.data(),
-            fused_frontier_parent_ids.data(),
-            fused_frontier_depths.data(),
             fused_dbg_curr.data(),
             fused_dbg_sort.data(),
             fused_dbg_sort_idx.data(),
@@ -1169,26 +754,19 @@ static bool run_fused_multidepth_candidate_test(const TestCfg& base_cfg,
             fused_dbg_remap.data());
 
         const size_t mm_out_tokens = mismatch_i64(fused_legacy.output_tokens, ref_legacy.output_tokens);
-        const size_t mm_frontier_tokens = mismatch_i64(fused_frontier_tokens, ref_frontier_tokens);
-        const size_t mm_frontier_out = mismatch_i64(fused_frontier_out, ref_frontier_out);
         const size_t mm_cache_topk = mismatch_i64(fused_cache_topk, ref_cache_topk);
-        const size_t mm_ctrl_count = mismatch_int(fused_ctrl.node_count, ref_ctrl.node_count);
         const float err_hidden = max_abs_diff(fused_output_hidden, ref_output_hidden);
 
-        std::cout << "[depth " << depth << "] candidate mism(output/frontier/cache/count)= "
-                  << mm_out_tokens << "/" << mm_frontier_tokens << "/" << mm_cache_topk << "/"
-                  << mm_ctrl_count << "  hidden_max_diff=" << err_hidden
+        std::cout << "[depth " << depth << "] candidate mism(output/cache)= "
+                  << mm_out_tokens << "/" << mm_cache_topk
+                  << "  hidden_max_diff=" << err_hidden
                   << "\n";
 
-        if (mm_out_tokens != 0 || mm_frontier_tokens != 0 || mm_frontier_out != 0 ||
-            mm_cache_topk != 0 || mm_ctrl_count != 0 || err_hidden > 1e-6f) {
+        if (mm_out_tokens != 0 || mm_cache_topk != 0 || err_hidden > 1e-6f) {
             std::cerr << "[FAIL] multi-depth fused mismatch at depth " << depth << ".\n";
             return false;
         }
 
-        // Chain frontier for next depth.
-        ref_ctrl.frontier = ref_frontier_out;
-        fused_ctrl.frontier = fused_frontier_out;
         prev_fused_output_hidden = fused_output_hidden;
     }
 
@@ -1220,11 +798,10 @@ int main(int argc, char** argv) {
     TestCfg cfg;
     FusedTestInputs in;
     LegacyState legacy_init;
-    ControllerState ctrl_init;
     FusedExpectedOutputs file_expected;
 
     if (!opts.case_file.empty()) {
-        if (!load_file_fixture(opts.case_file, &cfg, &in, &legacy_init, &ctrl_init,
+        if (!load_file_fixture(opts.case_file, &cfg, &in, &legacy_init,
                                &file_expected, &err_msg)) {
             std::cerr << "[FAIL] " << err_msg << "\n";
             return 1;
@@ -1241,7 +818,7 @@ int main(int argc, char** argv) {
             return 0;
         }
     } else {
-        make_synthetic_fixture(&cfg, &in, &legacy_init, &ctrl_init);
+        make_synthetic_fixture(&cfg, &in, &legacy_init);
     }
 
     if (opts.multi_depth_steps > 1) {
@@ -1250,14 +827,14 @@ int main(int argc, char** argv) {
                       << " as initial seed inputs, per-step compare uses generated reference.\n";
         }
         if (!run_fused_multidepth_candidate_test(
-                cfg, in, legacy_init, ctrl_init, opts.multi_depth_steps)) {
+                cfg, in, legacy_init, opts.multi_depth_steps)) {
             return 1;
         }
         return 0;
     }
 
     const FusedExpectedOutputs* expected_ptr = opts.case_file.empty() ? nullptr : &file_expected;
-    if (!run_fused_test(cfg, in, legacy_init, ctrl_init, expected_ptr)) {
+    if (!run_fused_test(cfg, in, legacy_init, expected_ptr)) {
         return 1;
     }
     return 0;

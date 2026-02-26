@@ -15,10 +15,9 @@ constexpr int kCdtFusedMaxBatch = 128;
 constexpr int kCdtFusedMaxNodeTopK = 16;
 
 // Fused step wiring for one draft-tree layer in HLS:
-// 1) score/sort + parent pick,
-// 2) cumulative state update,
-// 3) controller frontier expansion,
-// 4) parent-only KV listing/mask generation.
+// 1) score/sort + parent pick + hidden gather,
+// 2) cumulative state update (cumu_tokens, prev/next/side_indexs, work/sort_scores).
+// KV management uses contiguous HBM ancestor-chain; no tree-mask or controller needed.
 inline void cost_draft_tree_fused_step_hls(
     // Score inputs
     const float* topk_probas_sampling,      // [batch, tree_width * node_top_k]
@@ -30,11 +29,7 @@ inline void cost_draft_tree_fused_step_hls(
     bool use_hot_token_id,
 
     // Update-state inputs
-    const int64_t* topk_indexs_prev,        // [batch, tree_width]
-    const bool* input_tree_mask,            // [batch, tree_width, input_count - 1]
-
-    // Controller inputs
-    const int64_t* controller_frontier_in,  // [batch, max_tree_width]
+    const int64_t* topk_indexs_prev,        // [batch, tree_width] global cumu indices
 
     // Shared dims
     int batch_size,
@@ -42,19 +37,14 @@ inline void cost_draft_tree_fused_step_hls(
     int tree_width,
     int hidden_size,
     int cumu_count,
-    int input_count,
     int verify_num,
     int curr_depth,
 
     // Capacity dims
-    int max_input_size,
     int max_node_count,
     int max_verify_num,
-    int max_tree_width,
-    int parent_width,
-    int next_tree_width,
 
-    // Persistent legacy draft state (update kernel output)
+    // Persistent legacy draft state (in/out)
     int64_t* cumu_tokens,                   // [batch, max_node_count]
     float* cumu_scores,                     // [batch, max_node_count]
     int64_t* cumu_deltas,                   // [batch, max_node_count]
@@ -65,24 +55,10 @@ inline void cost_draft_tree_fused_step_hls(
     int64_t* output_tokens,                 // [batch, node_top_k]
     float* work_scores,                     // [batch, max_verify_num + node_top_k]
     float* sort_scores,                     // [batch, max_verify_num]
-    bool* output_tree_mask,                 // [batch, node_top_k, max_input_size + 1]
-
-    // Persistent controller state
-    int* controller_node_count,             // [batch]
-    int64_t* controller_node_token_ids,     // [batch, max_node_count]
-    int64_t* controller_node_parent_ids,    // [batch, max_node_count]
-    int64_t* controller_node_first_child_ids, // [batch, max_node_count]
-    int64_t* controller_node_last_child_ids,  // [batch, max_node_count]
-    int64_t* controller_node_next_sibling_ids, // [batch, max_node_count]
-    int64_t* controller_node_depths,        // [batch, max_node_count]
 
     // Fused outputs
     float* output_hidden_states,            // [batch, node_top_k, hidden]
     int64_t* cache_topk_indices,            // [batch, node_top_k]
-    int64_t* controller_frontier_out,       // [batch, max_tree_width]
-    int64_t* controller_frontier_tokens,    // [batch, max_tree_width]
-    int64_t* controller_frontier_parent_ids,// [batch, max_tree_width]
-    int64_t* controller_frontier_depths,    // [batch, max_tree_width]
 
     // Optional debug outputs (can be nullptr)
     float* dbg_curr_layer_scores,           // [batch, tree_width * node_top_k]
@@ -102,12 +78,6 @@ inline void cost_draft_tree_fused_step_hls(
     if (total_topk <= 0 || total_topk > kCdtSortWidth) {
         return;
     }
-    if (parent_width <= 0 || parent_width > max_tree_width) {
-        return;
-    }
-    if (next_tree_width < 0 || next_tree_width > max_tree_width) {
-        return;
-    }
 
     // Inter-stage buffers (fixed upper bounds for synthesis).
     float s_curr_layer_scores[kCdtFusedMaxBatch * kCdtSortWidth];
@@ -115,13 +85,11 @@ inline void cost_draft_tree_fused_step_hls(
     int64_t s_sort_layer_indices[kCdtFusedMaxBatch * kCdtSortWidth];
     int64_t s_parent_indices_in_layer[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
     int64_t s_remapped_topk_tokens[kCdtFusedMaxBatch * kCdtSortWidth];
-    int64_t s_selected_output_tokens[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
 #pragma HLS BIND_STORAGE variable = s_curr_layer_scores type = ram_2p impl = bram
 #pragma HLS BIND_STORAGE variable = s_sort_layer_scores type = ram_2p impl = bram
 #pragma HLS BIND_STORAGE variable = s_sort_layer_indices type = ram_2p impl = bram
 #pragma HLS BIND_STORAGE variable = s_parent_indices_in_layer type = ram_2p impl = bram
 #pragma HLS BIND_STORAGE variable = s_remapped_topk_tokens type = ram_2p impl = bram
-#pragma HLS BIND_STORAGE variable = s_selected_output_tokens type = ram_2p impl = bram
 
 #pragma HLS DATAFLOW
 
@@ -146,7 +114,7 @@ inline void cost_draft_tree_fused_step_hls(
         s_parent_indices_in_layer,
         output_hidden_states,
         s_remapped_topk_tokens,
-        s_selected_output_tokens);
+        nullptr);   // output_tokens not needed (no controller)
 
     // Stage 2: update cumulative draft state.
     cost_draft_tree_update_state_hls(
@@ -156,15 +124,12 @@ inline void cost_draft_tree_fused_step_hls(
         s_sort_layer_indices,
         s_parent_indices_in_layer,
         topk_indexs_prev,
-        input_tree_mask,
         batch_size,
         node_top_k,
         tree_width,
-        input_count,
         cumu_count,
         verify_num,
         curr_depth,
-        max_input_size,
         max_node_count,
         max_verify_num,
         cumu_tokens,
@@ -176,41 +141,7 @@ inline void cost_draft_tree_fused_step_hls(
         output_scores,
         output_tokens,
         work_scores,
-        sort_scores,
-        output_tree_mask);
-
-    // Stage 3: controller frontier expansion.
-    cdt_controller_expand_frontier(
-        controller_frontier_in,
-        s_parent_indices_in_layer,
-        s_selected_output_tokens,
-        batch_size,
-        parent_width,
-        next_tree_width,
-        max_tree_width,
-        max_node_count,
-        controller_node_count,
-        controller_frontier_out,
-        controller_node_token_ids,
-        controller_node_parent_ids,
-        controller_node_first_child_ids,
-        controller_node_last_child_ids,
-        controller_node_next_sibling_ids,
-        controller_node_depths);
-
-    // Stage 4: export frontier metadata.
-    cdt_controller_export_frontier(
-        controller_frontier_out,
-        batch_size,
-        next_tree_width,
-        max_tree_width,
-        max_node_count,
-        controller_node_token_ids,
-        controller_node_parent_ids,
-        controller_node_depths,
-        controller_frontier_tokens,
-        controller_frontier_parent_ids,
-        controller_frontier_depths);
+        sort_scores);
 
     // Optional debug copies.
     if (dbg_curr_layer_scores != nullptr || dbg_sort_layer_scores != nullptr ||
@@ -306,64 +237,42 @@ copy_frontier_loop_b:
 }
 
 // Wire per-layer outputs into the next layer's inputs.
-// Mirrors Python draft_RemainLoop_1 behavior:
-// - choose first next_tree_width from node_top_k outputs,
-// - feed selected hidden states back into next SLM input,
-// - carry top-k global indices for prev linkage,
-// - build next tree mask as [selected-parent-prefix | identity(next_tree_width)].
+// Selects first next_tree_width entries from node_top_k outputs and
+// feeds selected hidden states and global indices back into the next SLM call.
 inline void cdt_prepare_next_layer_inputs_hls(
     const float* output_scores,           // [batch, node_top_k]
     const int64_t* output_tokens,         // [batch, node_top_k]
     const float* output_hidden_states,    // [batch, node_top_k, hidden]
-    const bool* output_tree_mask,         // [batch, node_top_k, max_input_size + 1]
-    const int64_t* cache_topk_indices,    // [batch, node_top_k] preferred
-    const int64_t* controller_frontier_out, // [batch, max_tree_width] fallback for prev ids
+    const int64_t* cache_topk_indices,    // [batch, node_top_k]
     int batch_size,
     int node_top_k,
     int hidden_size,
     int next_tree_width,
     int max_tree_width,
-    int curr_input_count,
-    int max_input_size,
     int64_t* next_input_tokens,           // packed [batch, next_tree_width]
     float* next_last_layer_scores,        // packed [batch, next_tree_width]
     float* next_input_hidden_states,      // packed [batch, next_tree_width, hidden]
-    int64_t* next_topk_indexs_prev,       // packed [batch, next_tree_width]
-    bool* next_input_tree_mask,           // packed [batch, next_tree_width, next_input_count - 1]
-    int* next_input_count                 // out, clamped to max_input_size + 1
+    int64_t* next_topk_indexs_prev        // packed [batch, next_tree_width]
 ) {
 #pragma HLS INLINE off
-    if (batch_size <= 0 || node_top_k <= 0 || hidden_size <= 0 || max_tree_width <= 0 ||
-        max_input_size <= 0) {
+    if (batch_size <= 0 || node_top_k <= 0 || hidden_size <= 0 || max_tree_width <= 0) {
         return;
     }
     if (next_input_tokens == nullptr || next_last_layer_scores == nullptr ||
-        next_input_hidden_states == nullptr || next_topk_indexs_prev == nullptr ||
-        next_input_tree_mask == nullptr) {
+        next_input_hidden_states == nullptr || next_topk_indexs_prev == nullptr) {
         return;
     }
 
     int use_width = cdt_clamp_int(next_tree_width, 0, max_tree_width);
     use_width = cdt_clamp_int(use_width, 0, node_top_k);
 
-    const int prefix_width = cdt_clamp_int(curr_input_count - 1, 0, max_input_size);
-    const int next_mask_width = cdt_clamp_int(prefix_width + use_width, 0, max_input_size);
-    const int next_input_count_v = next_mask_width + 1;
-    if (next_input_count != nullptr) {
-        *next_input_count = next_input_count_v;
-    }
-
 next_layer_batch_loop:
     for (int b = 0; b < batch_size; ++b) {
     next_layer_slot_loop:
         for (int t = 0; t < use_width; ++t) {
             const int token_dst = b * use_width + t;
-            const int64_t prev_idx_fallback =
-                (controller_frontier_out != nullptr)
-                    ? controller_frontier_out[b * max_tree_width + t]
-                    : -1;
 
-            int64_t prev_idx_v = prev_idx_fallback;
+            int64_t prev_idx_v = -1;
             if (cache_topk_indices != nullptr) {
                 prev_idx_v = cache_topk_indices[b * node_top_k + t];
             }
@@ -371,33 +280,6 @@ next_layer_batch_loop:
             next_input_tokens[token_dst] = output_tokens[b * node_top_k + t];
             next_last_layer_scores[token_dst] = output_scores[b * node_top_k + t];
             next_topk_indexs_prev[token_dst] = prev_idx_v;
-
-            const int mask_dst_base = (b * use_width + t) * next_mask_width;
-            const int mask_src_base = (b * node_top_k + t) * (max_input_size + 1);
-
-        next_layer_mask_zero_loop:
-            for (int j = 0; j < next_mask_width; ++j) {
-#pragma HLS PIPELINE II = 1
-                next_input_tree_mask[mask_dst_base + j] = false;
-            }
-
-            if (output_tree_mask != nullptr) {
-            next_layer_mask_prefix_loop:
-                for (int j = 0; j < prefix_width; ++j) {
-#pragma HLS PIPELINE II = 1
-                    next_input_tree_mask[mask_dst_base + j] =
-                        output_tree_mask[mask_src_base + j];
-                }
-
-            next_layer_mask_id_loop:
-                for (int j = 0; j < use_width; ++j) {
-#pragma HLS PIPELINE II = 1
-                    const int col = prefix_width + j;
-                    if (col < next_mask_width) {
-                        next_input_tree_mask[mask_dst_base + col] = (j == t);
-                    }
-                }
-            }
 
             const int64_t hidden_dst_base =
                 (static_cast<int64_t>(b) * use_width + t) * hidden_size;
@@ -571,9 +453,12 @@ slm_batch_loop:
 // Multi-layer orchestrator:
 //   per depth:
 //     1) run EAGLE4 SLM forward + LM-head top-k (`eagle_tier1_lm_top_eagle4`),
-//     2) run one fused tree step,
-//     3) wire fused outputs into next-layer inputs (including hidden recurrence),
+//     2) run one fused tree step (score + update),
+//     3) wire fused outputs into next-layer inputs (hidden recurrence + index carry),
 //     4) repeat until tree_depth or stop.
+//
+// KV management uses contiguous HBM ancestor-chain (parent_indices_accum);
+// no controller node graph or tree mask is needed.
 //
 // WidthPolicy contract:
 //   void operator()(
@@ -591,7 +476,6 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
     float* step_input_hidden_states,      // packed [batch, tree_width, hidden]
     float* step_last_layer_scores,        // packed [batch, tree_width]
     int64_t* step_topk_indexs_prev,       // packed [batch, tree_width]
-    bool* step_input_tree_mask,           // packed [batch, tree_width, input_count - 1]
     float* step_topk_probas_sampling,     // packed [batch, tree_width * node_top_k]
     int64_t* step_topk_tokens_sampling,   // packed [batch, tree_width * node_top_k]
 
@@ -633,15 +517,12 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
     int hidden_size,
     int* io_tree_width,
     int* io_verify_num,
-    int* io_input_count,
     int* io_cumu_count,
 
     // Capacity dims
-    int max_input_size,
     int max_node_count,
     int max_verify_num,
     int max_tree_width,
-    int parent_width,
 
     // Persistent legacy state
     int64_t* cumu_tokens,
@@ -654,25 +535,10 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
     int64_t* output_tokens,
     float* work_scores,
     float* sort_scores,
-    bool* output_tree_mask,
-
-    // Persistent controller state
-    int* controller_node_count,
-    int64_t* controller_node_token_ids,
-    int64_t* controller_node_parent_ids,
-    int64_t* controller_node_first_child_ids,
-    int64_t* controller_node_last_child_ids,
-    int64_t* controller_node_next_sibling_ids,
-    int64_t* controller_node_depths,
-    int64_t* controller_frontier_in,      // [batch, max_tree_width] in/out across depths
-    int64_t* controller_frontier_out,     // [batch, max_tree_width] per-step output
 
     // Per-step fused outputs / scratch
     float* output_hidden_states,          // [batch, node_top_k, hidden]
     int64_t* cache_topk_indices,          // [batch, node_top_k]
-    int64_t* controller_frontier_tokens,  // [batch, max_tree_width]
-    int64_t* controller_frontier_parent_ids, // [batch, max_tree_width]
-    int64_t* controller_frontier_depths,  // [batch, max_tree_width]
 
     // Optional debug outputs (final executed step contents)
     float* dbg_curr_layer_scores,
@@ -689,16 +555,14 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
     if (tree_depth <= 0 || batch_size <= 0 || node_top_k <= 0 || hidden_size <= 0) {
         return;
     }
-    if (io_tree_width == nullptr || io_verify_num == nullptr || io_input_count == nullptr ||
-        io_cumu_count == nullptr) {
+    if (io_tree_width == nullptr || io_verify_num == nullptr || io_cumu_count == nullptr) {
         return;
     }
     if (step_input_tokens == nullptr || step_input_hidden_states == nullptr ||
         step_last_layer_scores == nullptr || step_topk_indexs_prev == nullptr ||
-        step_input_tree_mask == nullptr || step_topk_probas_sampling == nullptr ||
-        step_topk_tokens_sampling == nullptr || output_hidden_states == nullptr ||
-        cache_topk_indices == nullptr || output_scores == nullptr || output_tokens == nullptr ||
-        output_tree_mask == nullptr) {
+        step_topk_probas_sampling == nullptr || step_topk_tokens_sampling == nullptr ||
+        output_hidden_states == nullptr || cache_topk_indices == nullptr ||
+        output_scores == nullptr || output_tokens == nullptr) {
         return;
     }
     if (w_q == nullptr || s_q == nullptr || w_k == nullptr || s_k == nullptr ||
@@ -720,20 +584,26 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
     int curr_tree_width = cdt_clamp_int(*io_tree_width, 0, max_tree_width);
     curr_tree_width = cdt_clamp_int(curr_tree_width, 0, node_top_k);
     int curr_verify_num = cdt_clamp_int(*io_verify_num, 1, max_verify_num);
-    int curr_input_count = cdt_clamp_int(*io_input_count, 1, max_input_size + 1);
     int curr_cumu_count = cdt_clamp_int(*io_cumu_count, 0, max_node_count);
 
     int depth_done = 0;
     bool stopped = false;
 
-    // Accumulated parent indices: parent_indices_accum[l * max_tree_width + t] =
+    // Accumulated parent indices: parent_indices_accum[l * TREE_WIDTH + t] =
     //   slot in layer l that is the parent of slot t at layer l+1.
+    // Indexed by absolute depth (curr_depth_start + d), stride TREE_WIDTH.
     int parent_indices_accum[kCdtControllerMaxDepth * TREE_WIDTH];
 #pragma HLS BIND_STORAGE variable = parent_indices_accum type = ram_2p impl = bram
     for (int i = 0; i < kCdtControllerMaxDepth * TREE_WIDTH; ++i) {
 #pragma HLS PIPELINE II = 1
         parent_indices_accum[i] = 0;
     }
+
+    // Internal scratch: receives parent slot indices from the fused step on every depth.
+    // Using a dedicated buffer (always non-null) guarantees the step writes parent indices
+    // even when the caller does not supply a debug output pointer.
+    int64_t s_parent_scratch[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
+#pragma HLS BIND_STORAGE variable = s_parent_scratch type = ram_2p impl = bram
 
 orchestrator_depth_loop:
     for (int d = 0; d < tree_depth; ++d) {
@@ -791,7 +661,7 @@ orchestrator_depth_loop:
             step_topk_probas_sampling,
             step_topk_tokens_sampling);
 
-        // Stage C: fused score/update/controller for one depth.
+        // Stage C: fused score/update for one depth.
         cost_draft_tree_fused_step_hls(
             step_topk_probas_sampling,
             step_topk_tokens_sampling,
@@ -801,22 +671,15 @@ orchestrator_depth_loop:
             hot_token_vocab_size,
             use_hot_token_id,
             step_topk_indexs_prev,
-            step_input_tree_mask,
-            controller_frontier_in,
             batch_size,
             node_top_k,
             curr_tree_width,
             hidden_size,
             curr_cumu_count,
-            curr_input_count,
             curr_verify_num,
             curr_depth_start + d,
-            max_input_size,
             max_node_count,
             max_verify_num,
-            max_tree_width,
-            parent_width,
-            next_tree_width,
             cumu_tokens,
             cumu_scores,
             cumu_deltas,
@@ -827,39 +690,40 @@ orchestrator_depth_loop:
             output_tokens,
             work_scores,
             sort_scores,
-            output_tree_mask,
-            controller_node_count,
-            controller_node_token_ids,
-            controller_node_parent_ids,
-            controller_node_first_child_ids,
-            controller_node_last_child_ids,
-            controller_node_next_sibling_ids,
-            controller_node_depths,
             output_hidden_states,
             cache_topk_indices,
-            controller_frontier_out,
-            controller_frontier_tokens,
-            controller_frontier_parent_ids,
-            controller_frontier_depths,
             dbg_curr_layer_scores,
             dbg_sort_layer_scores,
             dbg_sort_layer_indices,
-            dbg_parent_indices_in_layer,
+            s_parent_scratch,        // always non-null: step always writes parent indices here
             dbg_remapped_topk_tokens);
 
-        // Accumulate parent indices for contiguous KV gather at next depth.
-        // dbg_parent_indices_in_layer holds [batch, node_top_k] parent slot indices.
-        // For batch=0, copy first curr_tree_width entries into parent_indices_accum[d * TREE_WIDTH ..].
-        if (dbg_parent_indices_in_layer != nullptr) {
+        // Always accumulate parent indices for contiguous KV gather at next depth.
+        // s_parent_scratch holds [batch, node_top_k] parent slot indices written by the step above.
+        // We use batch-0 entries (multi-batch KV ancestor support deferred to a future pass).
+        // Bounds-guard against curr_depth_start overflow of parent_indices_accum.
+        if (current_depth >= 0 && current_depth < kCdtControllerMaxDepth) {
         accum_parent_loop:
             for (int t = 0; t < TREE_WIDTH; ++t) {
 #pragma HLS PIPELINE II = 1
                 int parent_slot = 0;
                 if (t < node_top_k) {
-                    int64_t v = dbg_parent_indices_in_layer[t];
+                    int64_t v = s_parent_scratch[t];  // batch-0 entry
                     parent_slot = (v >= 0 && v < max_tree_width) ? static_cast<int>(v) : 0;
                 }
                 parent_indices_accum[current_depth * TREE_WIDTH + t] = parent_slot;
+            }
+        }
+        // Forward to caller's debug output if requested.
+        if (dbg_parent_indices_in_layer != nullptr) {
+        dbg_parent_fwd_loop_b:
+            for (int b = 0; b < batch_size; ++b) {
+            dbg_parent_fwd_loop_i:
+                for (int i = 0; i < node_top_k; ++i) {
+#pragma HLS PIPELINE II = 1
+                    dbg_parent_indices_in_layer[b * node_top_k + i] =
+                        s_parent_scratch[b * node_top_k + i];
+                }
             }
         }
 
@@ -871,45 +735,31 @@ orchestrator_depth_loop:
         ++depth_done;
         if (d + 1 >= tree_depth || stop_signal || next_tree_width <= 0) {
             stopped = stop_signal || (next_tree_width <= 0);
-            cdt_copy_frontier_for_next_depth_hls(
-                controller_frontier_out, batch_size, max_tree_width, controller_frontier_in);
             break;
         }
 
-        // Stage D/E: recurrence wiring for next SLM call.
-        int next_input_count_v = curr_input_count;
+        // Stage D: recurrence wiring for next SLM call.
         cdt_prepare_next_layer_inputs_hls(
             output_scores,
             output_tokens,
             output_hidden_states,
-            output_tree_mask,
             cache_topk_indices,
-            controller_frontier_out,
             batch_size,
             node_top_k,
             hidden_size,
             next_tree_width,
             max_tree_width,
-            curr_input_count,
-            max_input_size,
             step_input_tokens,
             step_last_layer_scores,
             step_input_hidden_states,
-            step_topk_indexs_prev,
-            step_input_tree_mask,
-            &next_input_count_v);
-
-        cdt_copy_frontier_for_next_depth_hls(
-            controller_frontier_out, batch_size, max_tree_width, controller_frontier_in);
+            step_topk_indexs_prev);
 
         curr_tree_width = next_tree_width;
         curr_verify_num = next_verify_num;
-        curr_input_count = cdt_clamp_int(next_input_count_v, 1, max_input_size + 1);
     }
 
     *io_tree_width = curr_tree_width;
     *io_verify_num = curr_verify_num;
-    *io_input_count = curr_input_count;
     *io_cumu_count = curr_cumu_count;
     if (executed_depths != nullptr) {
         *executed_depths = depth_done;

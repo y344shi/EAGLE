@@ -71,14 +71,6 @@ void fused_online_attention_pwl(hls_stream<vec_t<VEC_W>>& q_stream,
                               hls_stream<vec_t<VEC_W>>& context_out,
                               int seq_len,
                               int padded_len = -1) {
-#pragma HLS INTERFACE axis port = q_stream
-#pragma HLS INTERFACE axis port = k_hist
-#pragma HLS INTERFACE axis port = v_hist
-#pragma HLS INTERFACE axis port = context_out
-#pragma HLS INTERFACE s_axilite port = seq_len bundle = control
-#pragma HLS INTERFACE s_axilite port = padded_len bundle = control
-#pragma HLS INTERFACE s_axilite port = return bundle = control
-
     static_assert(HEAD_DIM % VEC_W == 0, "HEAD_DIM must align to VEC_W");
 
     const int total_len = (padded_len > 0) ? padded_len : seq_len;
