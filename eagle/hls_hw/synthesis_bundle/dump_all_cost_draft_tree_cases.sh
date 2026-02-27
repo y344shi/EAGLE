@@ -45,6 +45,7 @@ EXPECTED_FILES=(
   "cost_draft_tree_update_case.txt"
   "cost_draft_tree_controller_case.txt"
   "cost_draft_tree_fused_wiring_case.txt"
+  "cost_draft_tree_multilayer_orchestrator_case.txt"
 )
 
 run_dump() {
@@ -60,8 +61,9 @@ SCORE_SCRIPT="${SCRIPT_DIR}/dump_cost_draft_tree_score_case.py"
 UPDATE_SCRIPT="${SCRIPT_DIR}/dump_cost_draft_tree_update_case.py"
 CONTROLLER_SCRIPT="${SCRIPT_DIR}/dump_cost_draft_tree_controller_case.py"
 FUSED_SCRIPT="${SCRIPT_DIR}/dump_cost_draft_tree_fused_wiring_case.py"
+ORCH_SCRIPT="${SCRIPT_DIR}/dump_cost_draft_tree_multilayer_orchestrator_case.py"
 
-for script in "${SCORE_SCRIPT}" "${UPDATE_SCRIPT}" "${CONTROLLER_SCRIPT}" "${FUSED_SCRIPT}"; do
+for script in "${SCORE_SCRIPT}" "${UPDATE_SCRIPT}" "${CONTROLLER_SCRIPT}" "${FUSED_SCRIPT}" "${ORCH_SCRIPT}"; do
   if [[ ! -f "${script}" ]]; then
     echo "[error] Missing dump script: ${script}" >&2
     exit 1
@@ -75,18 +77,20 @@ if [[ -n "${KERNEL_SRC}" ]]; then
   score_hot_cmd+=(--kernel-src "${KERNEL_SRC}")
 fi
 
-run_dump 1 5 "score case" "${score_cmd[@]}"
-run_dump 2 5 "score hot-token case" "${score_hot_cmd[@]}"
+run_dump 1 6 "score case" "${score_cmd[@]}"
+run_dump 2 6 "score hot-token case" "${score_hot_cmd[@]}"
 update_cmd=("${PYTHON_BIN}" "${UPDATE_SCRIPT}" --output "${OUTPUT_DIR}/cost_draft_tree_update_case.txt")
 fused_cmd=("${PYTHON_BIN}" "${FUSED_SCRIPT}" --output "${OUTPUT_DIR}/cost_draft_tree_fused_wiring_case.txt")
+orch_cmd=("${PYTHON_BIN}" "${ORCH_SCRIPT}" --output "${OUTPUT_DIR}/cost_draft_tree_multilayer_orchestrator_case.txt")
 if [[ -n "${KERNEL_SRC}" ]]; then
   update_cmd+=(--kernel-src "${KERNEL_SRC}")
   fused_cmd+=(--kernel-src "${KERNEL_SRC}")
 fi
 
-run_dump 3 5 "update-state case" "${update_cmd[@]}"
-run_dump 4 5 "controller case" "${PYTHON_BIN}" "${CONTROLLER_SCRIPT}" --output "${OUTPUT_DIR}/cost_draft_tree_controller_case.txt"
-run_dump 5 5 "fused wiring case" "${fused_cmd[@]}"
+run_dump 3 6 "update-state case" "${update_cmd[@]}"
+run_dump 4 6 "controller case" "${PYTHON_BIN}" "${CONTROLLER_SCRIPT}" --output "${OUTPUT_DIR}/cost_draft_tree_controller_case.txt"
+run_dump 5 6 "fused wiring case" "${fused_cmd[@]}"
+run_dump 6 6 "multilayer orchestrator case" "${orch_cmd[@]}"
 
 echo "[self-check] verifying expected filenames and non-empty files..."
 missing=0

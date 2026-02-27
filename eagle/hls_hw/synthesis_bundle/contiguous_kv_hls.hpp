@@ -8,26 +8,26 @@
 //   [0 .. prefix_len-1]                          : prefix KV from target model
 //   [prefix_len + layer * max_tree_width + t]     : draft layer `layer`, tree slot `t`
 //
-// max_tree_width is the fixed stride per layer (= compile-time TREE_WIDTH for now).
+// max_tree_width is the fixed stride per layer (= compile-time kContiguousKvTreeWidth for now).
 // Each layer may use fewer than max_tree_width slots; unused slots are padding.
 //
 // Each token occupies VECS_PER_KV_TOKEN = (NUM_KV_HEADS * HEAD_DIM) / VEC_W vectors.
 
 #include "tmac_utils.hpp"
-#include "eagle_tier1_top.hpp"
 
 namespace tmac {
 namespace hls {
 
 constexpr int kMaxDraftDepth = 16;
+constexpr int kContiguousKvTreeWidth = 4;
 
 // ---------------------------------------------------------------------------
-// Write TREE_WIDTH new K/V tokens to contiguous HBM.
+// Write kContiguousKvTreeWidth new K/V tokens to contiguous HBM.
 // ---------------------------------------------------------------------------
 template <int HEAD_DIM, int NUM_KV_HEADS>
 void contiguous_kv_write(
-    hls_stream<vec_t<VEC_W>>& k_in,   // post-RoPE K, TREE_WIDTH tokens token-major
-    hls_stream<vec_t<VEC_W>>& v_in,   // V projection, TREE_WIDTH tokens token-major
+    hls_stream<vec_t<VEC_W>>& k_in,   // post-RoPE K, kContiguousKvTreeWidth tokens token-major
+    hls_stream<vec_t<VEC_W>>& v_in,   // V projection, kContiguousKvTreeWidth tokens token-major
     vec_t<VEC_W>* hbm_k,
     vec_t<VEC_W>* hbm_v,
     int write_base_token               // = prefix_len + current_depth * max_tree_width
@@ -37,7 +37,7 @@ void contiguous_kv_write(
     static_assert((NUM_KV_HEADS * HEAD_DIM) % VEC_W == 0, "KV width must align to VEC_W");
 
 write_token_loop:
-    for (int t = 0; t < TREE_WIDTH; ++t) {
+    for (int t = 0; t < kContiguousKvTreeWidth; ++t) {
         const int base = (write_base_token + t) * VECS_PER_TOKEN;
     write_vec_loop:
         for (int v = 0; v < VECS_PER_TOKEN; ++v) {
@@ -68,8 +68,8 @@ void contiguous_kv_gather(
     int current_depth,
     int max_tree_width,
     const int* parent_indices_per_layer,  // [MAX_DEPTH * max_tree_width]
-    hls_stream<vec_t<VEC_W>> k_out[TREE_WIDTH],
-    hls_stream<vec_t<VEC_W>> v_out[TREE_WIDTH]
+    hls_stream<vec_t<VEC_W>> k_out[kContiguousKvTreeWidth],
+    hls_stream<vec_t<VEC_W>> v_out[kContiguousKvTreeWidth]
 ) {
 #pragma HLS INLINE off
     constexpr int VECS_PER_TOKEN = (NUM_KV_HEADS * HEAD_DIM) / VEC_W;
@@ -86,7 +86,7 @@ prefix_token_loop:
             vec_t<VEC_W> kv = hbm_k[base + v];
             vec_t<VEC_W> vv = hbm_v[base + v];
         prefix_broadcast_loop:
-            for (int t = 0; t < TREE_WIDTH; ++t) {
+            for (int t = 0; t < kContiguousKvTreeWidth; ++t) {
 #pragma HLS UNROLL
                 k_out[t].write(kv);
                 v_out[t].write(vv);
@@ -97,7 +97,7 @@ prefix_token_loop:
     // Phase 2: Stream ancestor tokens (per-query, trace chain backward).
     // For each query t at current_depth d, trace from layer d-1 back to layer 0.
 ancestor_query_loop:
-    for (int t = 0; t < TREE_WIDTH; ++t) {
+    for (int t = 0; t < kContiguousKvTreeWidth; ++t) {
         int slot = t;
     ancestor_layer_loop:
         for (int l = current_depth - 1; l >= 0; --l) {
@@ -117,7 +117,7 @@ ancestor_query_loop:
 
     // Phase 3: Stream self tokens (one per query, just written by contiguous_kv_write).
 self_token_loop:
-    for (int t = 0; t < TREE_WIDTH; ++t) {
+    for (int t = 0; t < kContiguousKvTreeWidth; ++t) {
         int token_idx = prefix_len + current_depth * max_tree_width + t;
         int base = token_idx * VECS_PER_TOKEN;
     self_vec_loop:
@@ -131,7 +131,7 @@ self_token_loop:
 
 // ---------------------------------------------------------------------------
 // Combined write + gather: single DATAFLOW stage that writes new K/V to HBM
-// then gathers prefix + ancestors + self for all TREE_WIDTH queries.
+// then gathers prefix + ancestors + self for all kContiguousKvTreeWidth queries.
 // ---------------------------------------------------------------------------
 template <int HEAD_DIM, int NUM_KV_HEADS, int MAX_DEPTH>
 void contiguous_kv_write_and_gather(
@@ -143,8 +143,8 @@ void contiguous_kv_write_and_gather(
     int current_depth,
     int max_tree_width,
     const int* parent_indices_per_layer,  // [MAX_DEPTH * max_tree_width]
-    hls_stream<vec_t<VEC_W>> k_out[TREE_WIDTH],
-    hls_stream<vec_t<VEC_W>> v_out[TREE_WIDTH]
+    hls_stream<vec_t<VEC_W>> k_out[kContiguousKvTreeWidth],
+    hls_stream<vec_t<VEC_W>> v_out[kContiguousKvTreeWidth]
 ) {
 #pragma HLS INLINE off
     // Write first (so self-token is in HBM for gather phase 3).

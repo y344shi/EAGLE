@@ -258,8 +258,13 @@ static bool load_file_fixture(const std::string& path,
     }
 
     std::vector<int> meta;
-    if (!read_int_array(kv, "meta", 16, &meta, err_msg, true)) {
+    if (!read_int_array(kv, "meta", 17, &meta, err_msg, false)) {
         return false;
+    }
+    if (meta.empty()) {
+        if (!read_int_array(kv, "meta", 16, &meta, err_msg, true)) {
+            return false;
+        }
     }
 
     cfg->batch_size = meta[0];
@@ -274,8 +279,13 @@ static bool load_file_fixture(const std::string& path,
     cfg->max_verify_num = meta[10];
     cfg->max_tree_width = meta[11];
     // meta[12] (parent_width) and meta[13] (next_tree_width) removed
-    cfg->hot_vocab_size = meta[14];
-    cfg->use_hot_token_id = (meta[15] != 0);
+    if (meta.size() >= 17) {
+        cfg->hot_vocab_size = meta[15];
+        cfg->use_hot_token_id = (meta[16] != 0);
+    } else {
+        cfg->hot_vocab_size = meta[14];
+        cfg->use_hot_token_id = (meta[15] != 0);
+    }
 
     if (cfg->batch_size <= 0 || cfg->node_top_k <= 0 || cfg->tree_width <= 0 ||
         cfg->hidden_size <= 0 ||

@@ -583,15 +583,12 @@ static bool run_case_data(const TestCase& tc,
         tc.sorted_indexs.data(),
         tc.parent_indexs.data(),
         tc.topk_indexs.data(),
-        tc.input_tree_mask.data(),
         cfg.batch_size,
         cfg.node_top_k,
         cfg.tree_width,
-        cfg.input_count,
         cfg.cumu_count,
         cfg.verify_num,
         cfg.curr_depth,
-        cfg.max_input_size,
         cfg.max_node_count,
         cfg.max_verify_num,
         actual.cumu_tokens.data(),
@@ -603,8 +600,7 @@ static bool run_case_data(const TestCase& tc,
         actual.output_scores.data(),
         actual.output_tokens.data(),
         actual.work_scores.data(),
-        actual.sort_scores.data(),
-        actual.output_tree_mask.data());
+        actual.sort_scores.data());
 
     const float err_cumu_scores = max_abs_diff(actual.cumu_scores, expected.cumu_scores);
     const float err_output_scores = max_abs_diff(actual.output_scores, expected.output_scores);
@@ -617,7 +613,6 @@ static bool run_case_data(const TestCase& tc,
     const size_t mm_next = count_mismatch_i64(actual.next_indexs, expected.next_indexs);
     const size_t mm_side = count_mismatch_i64(actual.side_indexs, expected.side_indexs);
     const size_t mm_output_tokens = count_mismatch_i64(actual.output_tokens, expected.output_tokens);
-    const size_t mm_mask = count_mismatch_bool(actual.output_tree_mask, expected.output_tree_mask);
 
     std::cout << "[" << label << "] max|cumu_scores diff|  = " << err_cumu_scores << "\n";
     std::cout << "[" << label << "] max|output_scores diff|= " << err_output_scores << "\n";
@@ -629,7 +624,8 @@ static bool run_case_data(const TestCase& tc,
     std::cout << "[" << label << "] next_indexs mismatches = " << mm_next << "\n";
     std::cout << "[" << label << "] side_indexs mismatches = " << mm_side << "\n";
     std::cout << "[" << label << "] output_tokens mismatches = " << mm_output_tokens << "\n";
-    std::cout << "[" << label << "] output_tree_mask mismatches = " << mm_mask << "\n";
+    std::cout << "[" << label
+              << "] output_tree_mask mismatches = N/A (mask no longer produced by update kernel)\n";
 
     const bool pass_float =
         (err_cumu_scores <= 1e-6f) &&
@@ -643,8 +639,7 @@ static bool run_case_data(const TestCase& tc,
         (mm_prev == 0) &&
         (mm_next == 0) &&
         (mm_side == 0) &&
-        (mm_output_tokens == 0) &&
-        (mm_mask == 0);
+        (mm_output_tokens == 0);
 
     return pass_float && pass_int;
 }

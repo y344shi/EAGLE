@@ -463,8 +463,8 @@ inline void cdt_run_eagle4_slm_topk_hls(
 
 slm_batch_loop:
     for (int b = 0; b < batch_size; ++b) {
-        hls::stream<vec_t<VEC_W>> hidden_in_stream("cdt_hidden_in_stream");
-        hls::stream<vec_t<VEC_W>> embed_in_stream("cdt_embed_in_stream");
+        hls_stream<vec_t<VEC_W>> hidden_in_stream("cdt_hidden_in_stream");
+        hls_stream<vec_t<VEC_W>> embed_in_stream("cdt_embed_in_stream");
 
     slm_stream_token_loop:
         for (int t = 0; t < TREE_WIDTH; ++t) {
@@ -556,6 +556,71 @@ slm_batch_loop:
         }
     }
 }
+
+#ifdef TMAC_CDT_ORCH_TB_INJECT_TOPK
+// Test-only recurrent top-k injector for multilayer orchestrator TB.
+// When enabled, recurrent depths can bypass the SLM path and consume caller-supplied
+// top-k tensors, while production builds remain unchanged.
+struct CdtOrchTbTopkProvider {
+    const float* recurrent_topk_probas = nullptr;    // [depth, batch, max_tree_width * node_top_k]
+    const int64_t* recurrent_topk_tokens = nullptr;  // [depth, batch, max_tree_width * node_top_k]
+    int depth_count = 0;
+    int batch_size = 0;
+    int max_tree_width = 0;
+    int node_top_k = 0;
+    int curr_depth_start = 0;
+};
+
+inline CdtOrchTbTopkProvider* cdt_orch_tb_topk_provider = nullptr;
+
+inline void cdt_set_orch_tb_topk_provider(CdtOrchTbTopkProvider* provider) {
+    cdt_orch_tb_topk_provider = provider;
+}
+
+inline bool cdt_try_load_orch_tb_topk(
+    int current_depth,
+    int batch_size,
+    int curr_tree_width,
+    int node_top_k,
+    float* topk_probas_sampling_out,
+    int64_t* topk_tokens_sampling_out) {
+#pragma HLS INLINE
+    if (topk_probas_sampling_out == nullptr || topk_tokens_sampling_out == nullptr) {
+        return false;
+    }
+    CdtOrchTbTopkProvider* provider = cdt_orch_tb_topk_provider;
+    if (provider == nullptr || provider->recurrent_topk_probas == nullptr ||
+        provider->recurrent_topk_tokens == nullptr) {
+        return false;
+    }
+    if (batch_size <= 0 || curr_tree_width <= 0 || node_top_k <= 0) {
+        return false;
+    }
+    if (provider->batch_size < batch_size || provider->max_tree_width < curr_tree_width ||
+        provider->node_top_k < node_top_k) {
+        return false;
+    }
+
+    const int rel_depth = current_depth - provider->curr_depth_start;
+    if (rel_depth < 0 || rel_depth >= provider->depth_count) {
+        return false;
+    }
+
+    const int per_batch = provider->max_tree_width * provider->node_top_k;
+copy_injected_topk_loop_b:
+    for (int b = 0; b < batch_size; ++b) {
+copy_injected_topk_loop_t:
+        for (int t = 0; t < curr_tree_width * node_top_k; ++t) {
+#pragma HLS PIPELINE II = 1
+            const int src = rel_depth * (provider->batch_size * per_batch) + b * per_batch + t;
+            const int dst = b * (curr_tree_width * node_top_k) + t;
+            topk_probas_sampling_out[dst] = provider->recurrent_topk_probas[src];
+            topk_tokens_sampling_out[dst] = provider->recurrent_topk_tokens[src];
+        }
+    }
+    return true;
+}
+#endif
 
 // Multi-layer orchestrator:
 //   optional InitialLoop (PyTorch draft_InitialLoop parity):
@@ -676,7 +741,11 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
     const float* initial_hidden_states = nullptr       // [batch, hidden]
 ) {
 #pragma HLS INLINE off
-    if (tree_depth <= 0 || batch_size <= 0 || node_top_k <= 0 || hidden_size <= 0) {
+    if (tree_depth <= 0 || batch_size <= 0 || batch_size > kCdtFusedMaxBatch ||
+        node_top_k <= 0 || hidden_size <= 0) {
+        return;
+    }
+    if (curr_depth_start < 0 || curr_depth_start + tree_depth > kCdtControllerMaxDepth) {
         return;
     }
     if (io_tree_width == nullptr || io_verify_num == nullptr || io_cumu_count == nullptr) {
@@ -918,6 +987,19 @@ orchestrator_depth_loop:
 
         // Stage A/B: SLM forward and LM-head top-k for current frontier.
         const int current_depth = curr_depth_start + d;
+#ifdef TMAC_CDT_ORCH_TB_INJECT_TOPK
+        // In TB injection mode we avoid linking the SLM fallback path entirely.
+        const bool used_injected_topk = cdt_try_load_orch_tb_topk(
+            current_depth,
+            batch_size,
+            curr_tree_width,
+            node_top_k,
+            step_topk_probas_sampling,
+            step_topk_tokens_sampling);
+        if (!used_injected_topk) {
+            return;
+        }
+#else
         cdt_run_eagle4_slm_topk_hls(
             step_input_hidden_states,
             batch_size,
@@ -943,6 +1025,7 @@ orchestrator_depth_loop:
             step_input_hidden_states,
             step_topk_probas_sampling,
             step_topk_tokens_sampling);
+#endif
 
         // Stage C: fused score/update for one depth.
         cost_draft_tree_fused_step_hls(
@@ -1035,6 +1118,8 @@ orchestrator_depth_loop:
             next_verify_num = cdt_clamp_int(next_verify_num, 1, max_verify_num);
         }
         if (d + 1 >= tree_depth || stop_signal || next_tree_width <= 0) {
+            curr_tree_width = next_tree_width;
+            curr_verify_num = next_verify_num;
             stopped = stop_signal || (next_tree_width <= 0);
             break;
         }

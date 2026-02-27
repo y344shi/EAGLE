@@ -46,6 +46,7 @@ echo "[info] compiling dry-run checkers..."
 "${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_update_tb.cpp -o /tmp/cdt_update_tb_check
 "${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_controller_tb.cpp -o /tmp/cdt_controller_tb_check
 "${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_fused_wiring_tb.cpp -o /tmp/cdt_fused_wiring_tb_check
+"${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_multilayer_orchestrator_tb.cpp -o /tmp/cdt_multilayer_orch_tb_check
 
 declare -a SPECS=(
   "cost_draft_tree_score_case.txt|/tmp/cdt_score_tb_check"
@@ -53,6 +54,7 @@ declare -a SPECS=(
   "cost_draft_tree_update_case.txt|/tmp/cdt_update_tb_check --case-file"
   "cost_draft_tree_controller_case.txt|/tmp/cdt_controller_tb_check --case-file"
   "cost_draft_tree_fused_wiring_case.txt|/tmp/cdt_fused_wiring_tb_check --case-file"
+  "cost_draft_tree_multilayer_orchestrator_case.txt|/tmp/cdt_multilayer_orch_tb_check --case-file"
 )
 declare -a EXPECTED_ORDER=(
   "cost_draft_tree_score_case.txt"
@@ -60,6 +62,7 @@ declare -a EXPECTED_ORDER=(
   "cost_draft_tree_update_case.txt"
   "cost_draft_tree_controller_case.txt"
   "cost_draft_tree_fused_wiring_case.txt"
+  "cost_draft_tree_multilayer_orchestrator_case.txt"
 )
 
 missing=0

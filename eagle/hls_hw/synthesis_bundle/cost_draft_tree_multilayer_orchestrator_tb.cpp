@@ -1,13 +1,11 @@
+#define TMAC_CDT_ORCH_TB_INJECT_TOPK
 #include "cost_draft_tree_fused_wiring_hls.hpp"
+#include "cost_draft_tree_tb_case_io.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
 #include <iostream>
-#include <limits>
-#include <numeric>
 #include <random>
 #include <string>
 #include <vector>
@@ -16,797 +14,1104 @@ using namespace tmac::hls;
 
 namespace {
 
-constexpr int kGroupSize = 128;
-constexpr int kDefaultTreeDepth = 3;  // single draft call with depth > 1
-constexpr int kDefaultSeed = 1337;
-constexpr int kDefaultMaxSeqTokens = 512;
-constexpr int kDefaultRank = 128;     // must be divisible by 8 and group_size
-constexpr int kDefaultVocab = 256;
+constexpr float kDefaultEps = 1e-5f;
+constexpr int kMaskFieldCount = 10;
 
-inline size_t expected_pack_count(int in_dim, int out_dim) {
-    return (static_cast<size_t>(in_dim) * static_cast<size_t>(out_dim)) / 128;
-}
-
-inline size_t expected_scale_count(int in_dim, int out_dim) {
-    return static_cast<size_t>(in_dim / kGroupSize) * static_cast<size_t>(out_dim);
-}
-
-inline uint16_t fp32_to_fp16(float x) {
-    uint32_t bits = 0;
-    std::memcpy(&bits, &x, sizeof(bits));
-    const uint32_t sign = (bits >> 16) & 0x8000u;
-    const int32_t exp = static_cast<int32_t>((bits >> 23) & 0xFFu) - 127 + 15;
-    uint32_t mant = bits & 0x7FFFFFu;
-
-    if (exp <= 0) {
-        if (exp < -10) return static_cast<uint16_t>(sign);
-        mant = (mant | 0x800000u) >> (1 - exp);
-        return static_cast<uint16_t>(sign | ((mant + 0x1000u) >> 13));
-    }
-    if (exp >= 31) {
-        return static_cast<uint16_t>(sign | 0x7C00u);
-    }
-    return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) |
-                                 ((mant + 0x1000u) >> 13));
-}
-
-inline bool finite_vec(const std::vector<float>& v) {
-    for (float x : v) {
-        if (!std::isfinite(x)) return false;
-    }
-    return true;
-}
-
-inline bool changed_vec(const std::vector<float>& before,
-                        const std::vector<float>& after,
-                        float eps = 1e-7f) {
-    const size_t n = std::min(before.size(), after.size());
-    for (size_t i = 0; i < n; ++i) {
-        if (std::fabs(before[i] - after[i]) > eps) return true;
-    }
-    return false;
-}
-
-inline bool changed_vec_i64(const std::vector<int64_t>& before,
-                            const std::vector<int64_t>& after) {
-    const size_t n = std::min(before.size(), after.size());
-    for (size_t i = 0; i < n; ++i) {
-        if (before[i] != after[i]) return true;
-    }
-    return false;
-}
-
-inline bool in_range_i64(const std::vector<int64_t>& v,
-                         int64_t low_inclusive,
-                         int64_t high_exclusive) {
-    for (int64_t x : v) {
-        if (x < low_inclusive || x >= high_exclusive) return false;
-    }
-    return true;
-}
-
-inline bool in_range_i64_prefix(const std::vector<int64_t>& v,
-                                size_t n,
-                                int64_t low_inclusive,
-                                int64_t high_exclusive) {
-    const size_t use_n = std::min(n, v.size());
-    for (size_t i = 0; i < use_n; ++i) {
-        const int64_t x = v[i];
-        if (x < low_inclusive || x >= high_exclusive) return false;
-    }
-    return true;
-}
-
-inline std::vector<float> build_llama3_inv_freq(int head_dim) {
-    constexpr float kRopeTheta = 500000.0f;
-    constexpr float kScalingFactor = 8.0f;
-    constexpr float kLowFreqFactor = 1.0f;
-    constexpr float kHighFreqFactor = 4.0f;
-    constexpr float kOrigMaxPos = 8192.0f;
-    constexpr float kTwoPi = 6.2831853071795864769f;
-
-    std::vector<float> inv_freq(static_cast<size_t>(head_dim / 2));
-    const float low_freq_wavelen = kOrigMaxPos / kLowFreqFactor;
-    const float high_freq_wavelen = kOrigMaxPos / kHighFreqFactor;
-    for (int i = 0; i < head_dim / 2; ++i) {
-        const float inv = 1.0f / std::pow(kRopeTheta, (2.0f * i) / head_dim);
-        const float wave_len = kTwoPi / inv;
-        float out = inv;
-        if (wave_len > low_freq_wavelen) {
-            out = inv / kScalingFactor;
-        } else if (wave_len >= high_freq_wavelen) {
-            const float smooth =
-                (kOrigMaxPos / wave_len - kLowFreqFactor) / (kHighFreqFactor - kLowFreqFactor);
-            out = (1.0f - smooth) * (inv / kScalingFactor) + smooth * inv;
-        }
-        inv_freq[static_cast<size_t>(i)] = out;
-    }
-    return inv_freq;
-}
-
-template <int HEAD_DIM_>
-void fill_rope_cfg(RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM_>& cfg,
-                   const std::vector<float>& inv_freq,
-                   int pos) {
-    for (int i = 0; i < HEAD_DIM_ / 2; ++i) {
-        const float freq = static_cast<float>(pos) * inv_freq[static_cast<size_t>(i)];
-        cfg.cos_vals[i] = std::cos(freq);
-        cfg.sin_vals[i] = std::sin(freq);
-    }
-}
-
-void fill_random_pack(std::vector<pack512>& v, std::mt19937& rng) {
-    std::uniform_int_distribution<int> byte_dist(0, 255);
-    for (pack512& p : v) {
-        uint8_t* b = reinterpret_cast<uint8_t*>(&p);
-        for (int i = 0; i < 64; ++i) {
-            b[i] = static_cast<uint8_t>(byte_dist(rng));
-        }
-    }
-}
-
-void fill_random_float(std::vector<float>& v, std::mt19937& rng, float lo, float hi) {
-    std::uniform_real_distribution<float> dist(lo, hi);
-    for (float& x : v) x = dist(rng);
-}
-
-void fill_random_fp16(std::vector<uint16_t>& v, std::mt19937& rng, float lo, float hi) {
-    std::uniform_real_distribution<float> dist(lo, hi);
-    for (uint16_t& x : v) x = fp32_to_fp16(dist(rng));
-}
-
-void fill_random_qweight_row_major(std::vector<int32_t>& v, std::mt19937& rng) {
-    std::uniform_int_distribution<int> nib(0, 15);
-    for (int32_t& x : v) {
-        int32_t packed = 0;
-        for (int j = 0; j < 8; ++j) {
-            packed |= (nib(rng) & 0xF) << (j * 4);
-        }
-        x = packed;
-    }
-}
-
-struct CliOptions {
-    int tree_depth = kDefaultTreeDepth;
-    int stop_depth = 1;
-    int seed = kDefaultSeed;
-    bool run_stop_scenario = false;
-    bool run_width_change_scenario = false;
-    bool verbose = true;
+enum MaskFieldIndex {
+    kMaskIoTreeWidth = 0,
+    kMaskIoVerifyNum = 1,
+    kMaskIoCumuCount = 2,
+    kMaskExecutedDepths = 3,
+    kMaskStoppedEarly = 4,
+    kMaskCumuTokens = 5,
+    kMaskCumuScores = 6,
+    kMaskCumuDeltas = 7,
+    kMaskOutputScores = 8,
+    kMaskOutputTokens = 9,
 };
 
-struct ScenarioConfig {
+struct CliOptions {
+    std::string case_file;
+    bool dry_run = false;
+    int seed = 20260226;
+};
+
+struct CaseData {
     int batch_size = 1;
-    int tree_depth = kDefaultTreeDepth;
+    int node_top_k = 4;
+    int hidden_size = 64;
+    int tree_depth = 3;
     int curr_depth_start = 0;
-    int node_top_k = 4;          // >1 as requested
-    int hidden_size = HIDDEN;
+    int prefix_len = 8;
+    int max_node_count = 128;
+    int max_verify_num = 64;
+    int max_tree_width = 4;
     int init_tree_width = 4;
     int init_verify_num = 8;
     int init_cumu_count = 1;
-    int max_node_count = 256;
-    int max_verify_num = 64;
-    int max_tree_width = TREE_WIDTH;
-    int prefix_len = 8;
-    int efficient_lm_rank = kDefaultRank;
-    int efficient_lm_vocab_size = kDefaultVocab;
-    int max_seq_tokens = kDefaultMaxSeqTokens;
+    bool enable_initial_loop = true;
+    int hot_vocab_size = 8192;
+    bool use_hot_token_id = false;
+    int efficient_lm_rank = 128;
+    int efficient_lm_vocab_size = 256;
+    int max_seq_tokens = 512;
+    int seed = 20260226;
+
+    float eps_abs = kDefaultEps;
+    float eps_rel = kDefaultEps;
+    std::string gt_mode = "synthetic";
+
+    std::vector<int64_t> step_input_tokens_init;
+    std::vector<float> step_input_hidden_states_init;
+    std::vector<float> step_last_layer_scores_init;
+    std::vector<int64_t> step_topk_indexs_prev_init;
+
+    std::vector<int64_t> hot_token_id;
+    std::vector<float> initial_hidden_states;
+    std::vector<float> initial_topk_probas;
+    std::vector<int64_t> initial_topk_tokens;
+
+    std::vector<int> policy_next_tree_width;
+    std::vector<int> policy_next_verify_num;
+    std::vector<int> policy_stop_signal;
+
+    std::vector<float> recurrent_topk_probas;
+    std::vector<int64_t> recurrent_topk_tokens;
+    std::vector<int> expected_mask_recurrent_depth;
+
+    std::vector<int64_t> init_legacy_cumu_tokens;
+    std::vector<float> init_legacy_cumu_scores;
+    std::vector<int64_t> init_legacy_cumu_deltas;
+    std::vector<int64_t> init_legacy_prev_indexs;
+    std::vector<int64_t> init_legacy_next_indexs;
+    std::vector<int64_t> init_legacy_side_indexs;
+    std::vector<float> init_legacy_output_scores;
+    std::vector<int64_t> init_legacy_output_tokens;
+    std::vector<float> init_legacy_work_scores;
+    std::vector<float> init_legacy_sort_scores;
+
+    int expected_io_tree_width = 0;
+    int expected_io_verify_num = 0;
+    int expected_io_cumu_count = 0;
+    int expected_executed_depths = 0;
+    bool expected_stopped_early = false;
+
+    std::vector<int64_t> expected_cumu_tokens;
+    std::vector<float> expected_cumu_scores;
+    std::vector<int64_t> expected_cumu_deltas;
+    std::vector<float> expected_output_scores;
+    std::vector<int64_t> expected_output_tokens;
+    std::vector<int> expected_mask_fields;
 };
 
-inline int clamp_int_local(int x, int low, int high) {
-    if (x < low) return low;
-    if (x > high) return high;
+struct RuntimeState {
+    std::vector<int64_t> step_input_tokens;
+    std::vector<float> step_input_hidden_states;
+    std::vector<float> step_last_layer_scores;
+    std::vector<int64_t> step_topk_indexs_prev;
+    std::vector<float> step_topk_probas_sampling;
+    std::vector<int64_t> step_topk_tokens_sampling;
+
+    std::vector<int64_t> cumu_tokens;
+    std::vector<float> cumu_scores;
+    std::vector<int64_t> cumu_deltas;
+    std::vector<int64_t> prev_indexs;
+    std::vector<int64_t> next_indexs;
+    std::vector<int64_t> side_indexs;
+    std::vector<float> output_scores;
+    std::vector<int64_t> output_tokens;
+    std::vector<float> work_scores;
+    std::vector<float> sort_scores;
+
+    std::vector<float> output_hidden_states;
+    std::vector<int64_t> cache_topk_indices;
+
+    std::vector<float> dbg_curr_layer_scores;
+    std::vector<float> dbg_sort_layer_scores;
+    std::vector<int64_t> dbg_sort_layer_indices;
+    std::vector<int64_t> dbg_parent_indices_in_layer;
+    std::vector<int64_t> dbg_remapped_topk_tokens;
+
+    int io_tree_width = 0;
+    int io_verify_num = 0;
+    int io_cumu_count = 0;
+    int executed_depths = 0;
+    bool stopped_early = false;
+};
+
+inline int clamp_int(int x, int lo, int hi) {
+    if (x < lo) return lo;
+    if (x > hi) return hi;
     return x;
 }
 
-struct ExpectedOutcome {
-    int executed_depths = 0;
-    bool stopped_early = false;
-    int final_tree_width = 0;
-    int final_verify_num = 0;
-    int final_cumu_count = 0;
-};
+bool parse_cli(int argc, char** argv, CliOptions* opts, std::string* err_msg) {
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg(argv[i]);
+        if (arg == "--case-file") {
+            if (i + 1 >= argc) {
+                *err_msg = "--case-file requires a path";
+                return false;
+            }
+            opts->case_file = argv[++i];
+        } else if (arg == "--dry-run") {
+            opts->dry_run = true;
+        } else if (arg == "--seed") {
+            if (i + 1 >= argc) {
+                *err_msg = "--seed requires an integer";
+                return false;
+            }
+            try {
+                opts->seed = std::stoi(argv[++i]);
+            } catch (...) {
+                *err_msg = "invalid integer for --seed";
+                return false;
+            }
+        } else if (arg == "--help" || arg == "-h") {
+            std::cout
+                << "Usage: cost_draft_tree_multilayer_orchestrator_tb [--case-file <path>]"
+                << " [--dry-run] [--seed <n>]\n";
+            return false;
+        } else {
+            *err_msg = "unknown argument: " + arg;
+            return false;
+        }
+    }
+    return true;
+}
 
-struct FixedNoStopPolicy {
-    int fixed_tree_width = 4;
-    int fixed_verify_num = 8;
-    inline void operator()(
-        int depth,
-        int batch_size,
-        int curr_tree_width,
-        int node_top_k,
-        int max_tree_width,
-        int curr_verify_num,
-        const float* work_scores,
-        int max_verify_num,
-        int* next_tree_width,
-        int* next_verify_num,
-        bool* stop_signal) const {
-#pragma HLS INLINE
-        (void)depth;
-        (void)batch_size;
-        (void)curr_tree_width;
-        (void)node_top_k;
-        (void)max_tree_width;
-        (void)curr_verify_num;
-        (void)work_scores;
-        (void)max_verify_num;
-        *next_tree_width = fixed_tree_width;
-        *next_verify_num = fixed_verify_num;
+bool load_case_file(const std::string& path, CaseData* out, std::string* err_msg) {
+    using namespace tmac::hls::tb_case_io;
+
+    RawCaseMap kv;
+    if (!parse_key_count_file(path, &kv, err_msg)) {
+        return false;
+    }
+
+    std::vector<int> meta;
+    if (!read_int_array(kv, "meta", 19, &meta, err_msg, true)) {
+        return false;
+    }
+
+    out->batch_size = meta[0];
+    out->node_top_k = meta[1];
+    out->hidden_size = meta[2];
+    out->tree_depth = meta[3];
+    out->curr_depth_start = meta[4];
+    out->prefix_len = meta[5];
+    out->max_node_count = meta[6];
+    out->max_verify_num = meta[7];
+    out->max_tree_width = meta[8];
+    out->init_tree_width = meta[9];
+    out->init_verify_num = meta[10];
+    out->init_cumu_count = meta[11];
+    out->enable_initial_loop = (meta[12] != 0);
+    out->hot_vocab_size = meta[13];
+    out->use_hot_token_id = (meta[14] != 0);
+    out->efficient_lm_rank = meta[15];
+    out->efficient_lm_vocab_size = meta[16];
+    out->max_seq_tokens = meta[17];
+    out->seed = meta[18];
+
+    std::vector<float> eps_abs;
+    std::vector<float> eps_rel;
+    if (!read_float_array(kv, "eps_abs", 1, &eps_abs, err_msg, false) ||
+        !read_float_array(kv, "eps_rel", 1, &eps_rel, err_msg, false)) {
+        return false;
+    }
+    if (!eps_abs.empty()) out->eps_abs = eps_abs[0];
+    if (!eps_rel.empty()) out->eps_rel = eps_rel[0];
+
+    const auto it_gt = kv.find("gt_mode");
+    if (it_gt != kv.end() && !it_gt->second.empty()) {
+        out->gt_mode = it_gt->second[0];
+    }
+
+    const size_t tree_n = static_cast<size_t>(out->batch_size) * out->max_tree_width;
+    const size_t hidden_n = tree_n * out->hidden_size;
+    const size_t topk_stage_n = tree_n * out->node_top_k;
+    const size_t recurrent_n = static_cast<size_t>(out->tree_depth) * topk_stage_n;
+    const size_t node_n = static_cast<size_t>(out->batch_size) * out->max_node_count;
+    const size_t out_n = static_cast<size_t>(out->batch_size) * out->node_top_k;
+    const size_t work_n = static_cast<size_t>(out->batch_size) *
+                          static_cast<size_t>(out->max_verify_num + out->node_top_k);
+    const size_t sort_n = static_cast<size_t>(out->batch_size) * out->max_verify_num;
+
+    int expected_stopped_early_i = 0;
+
+    if (!read_i64_array(kv, "step_input_tokens_init", tree_n, &out->step_input_tokens_init, err_msg,
+                        true) ||
+        !read_float_array(kv, "step_input_hidden_states_init", hidden_n,
+                          &out->step_input_hidden_states_init, err_msg, true) ||
+        !read_float_array(kv, "step_last_layer_scores_init", tree_n,
+                          &out->step_last_layer_scores_init, err_msg, true) ||
+        !read_i64_array(kv, "step_topk_indexs_prev_init", tree_n,
+                        &out->step_topk_indexs_prev_init, err_msg, true) ||
+        !read_i64_array(kv, "hot_token_id", static_cast<size_t>(out->hot_vocab_size),
+                        &out->hot_token_id, err_msg, true) ||
+        !read_float_array(kv, "initial_hidden_states",
+                          static_cast<size_t>(out->batch_size) * out->hidden_size,
+                          &out->initial_hidden_states, err_msg, true) ||
+        !read_float_array(kv, "initial_topk_probas", out_n, &out->initial_topk_probas, err_msg,
+                          true) ||
+        !read_i64_array(kv, "initial_topk_tokens", out_n, &out->initial_topk_tokens, err_msg,
+                        true) ||
+        !read_int_array(kv, "policy_next_tree_width", static_cast<size_t>(out->tree_depth),
+                        &out->policy_next_tree_width, err_msg, true) ||
+        !read_int_array(kv, "policy_next_verify_num", static_cast<size_t>(out->tree_depth),
+                        &out->policy_next_verify_num, err_msg, true) ||
+        !read_int_array(kv, "policy_stop_signal", static_cast<size_t>(out->tree_depth),
+                        &out->policy_stop_signal, err_msg, true) ||
+        !read_float_array(kv, "recurrent_topk_probas", recurrent_n, &out->recurrent_topk_probas,
+                          err_msg, true) ||
+        !read_i64_array(kv, "recurrent_topk_tokens", recurrent_n, &out->recurrent_topk_tokens,
+                        err_msg, true) ||
+        !read_int_array(kv, "expected_mask_recurrent_depth", static_cast<size_t>(out->tree_depth),
+                        &out->expected_mask_recurrent_depth, err_msg, false) ||
+        !read_i64_array(kv, "init_legacy_cumu_tokens", node_n, &out->init_legacy_cumu_tokens,
+                        err_msg, true) ||
+        !read_float_array(kv, "init_legacy_cumu_scores", node_n, &out->init_legacy_cumu_scores,
+                          err_msg, true) ||
+        !read_i64_array(kv, "init_legacy_cumu_deltas", node_n, &out->init_legacy_cumu_deltas,
+                        err_msg, true) ||
+        !read_i64_array(kv, "init_legacy_prev_indexs", node_n, &out->init_legacy_prev_indexs,
+                        err_msg, true) ||
+        !read_i64_array(kv, "init_legacy_next_indexs", node_n, &out->init_legacy_next_indexs,
+                        err_msg, true) ||
+        !read_i64_array(kv, "init_legacy_side_indexs", node_n, &out->init_legacy_side_indexs,
+                        err_msg, true) ||
+        !read_float_array(kv, "init_legacy_output_scores", out_n,
+                          &out->init_legacy_output_scores, err_msg, true) ||
+        !read_i64_array(kv, "init_legacy_output_tokens", out_n,
+                        &out->init_legacy_output_tokens, err_msg, true) ||
+        !read_float_array(kv, "init_legacy_work_scores", work_n,
+                          &out->init_legacy_work_scores, err_msg, true) ||
+        !read_float_array(kv, "init_legacy_sort_scores", sort_n,
+                          &out->init_legacy_sort_scores, err_msg, true) ||
+        !read_scalar_int(kv, "expected_io_tree_width", &out->expected_io_tree_width, err_msg,
+                         true) ||
+        !read_scalar_int(kv, "expected_io_verify_num", &out->expected_io_verify_num, err_msg,
+                         true) ||
+        !read_scalar_int(kv, "expected_io_cumu_count", &out->expected_io_cumu_count, err_msg,
+                         true) ||
+        !read_scalar_int(kv, "expected_executed_depths", &out->expected_executed_depths, err_msg,
+                         true) ||
+        !read_scalar_int(kv, "expected_stopped_early", &expected_stopped_early_i, err_msg,
+                         true) ||
+        !read_i64_array(kv, "expected_cumu_tokens", node_n, &out->expected_cumu_tokens, err_msg,
+                        true) ||
+        !read_float_array(kv, "expected_cumu_scores", node_n, &out->expected_cumu_scores,
+                          err_msg, true) ||
+        !read_i64_array(kv, "expected_cumu_deltas", node_n, &out->expected_cumu_deltas, err_msg,
+                        true) ||
+        !read_float_array(kv, "expected_output_scores", out_n, &out->expected_output_scores,
+                          err_msg, true) ||
+        !read_i64_array(kv, "expected_output_tokens", out_n, &out->expected_output_tokens,
+                        err_msg, true) ||
+        !read_int_array(kv, "expected_mask_fields", static_cast<size_t>(kMaskFieldCount),
+                        &out->expected_mask_fields, err_msg, false)) {
+        return false;
+    }
+
+    out->expected_stopped_early = (expected_stopped_early_i != 0);
+
+    if (out->expected_mask_recurrent_depth.empty()) {
+        out->expected_mask_recurrent_depth.assign(static_cast<size_t>(out->tree_depth), 0);
+    }
+    if (out->expected_mask_fields.empty()) {
+        out->expected_mask_fields.assign(static_cast<size_t>(kMaskFieldCount), 0);
+    }
+
+    return true;
+}
+
+void make_synthetic_case(CaseData* out, int seed) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> p_dist(0.05f, 0.95f);
+    std::uniform_real_distribution<float> h_dist(-1.0f, 1.0f);
+
+    const size_t tree_n = static_cast<size_t>(out->batch_size) * out->max_tree_width;
+    const size_t hidden_n = tree_n * out->hidden_size;
+    const size_t topk_stage_n = tree_n * out->node_top_k;
+    const size_t recurrent_n = static_cast<size_t>(out->tree_depth) * topk_stage_n;
+    const size_t node_n = static_cast<size_t>(out->batch_size) * out->max_node_count;
+    const size_t out_n = static_cast<size_t>(out->batch_size) * out->node_top_k;
+    const size_t work_n = static_cast<size_t>(out->batch_size) *
+                          static_cast<size_t>(out->max_verify_num + out->node_top_k);
+    const size_t sort_n = static_cast<size_t>(out->batch_size) * out->max_verify_num;
+
+    out->step_input_tokens_init.assign(tree_n, 0);
+    out->step_last_layer_scores_init.assign(tree_n, 1.0f);
+    out->step_topk_indexs_prev_init.assign(tree_n, 0);
+    out->step_input_hidden_states_init.assign(hidden_n, 0.0f);
+    for (size_t i = 0; i < tree_n; ++i) {
+        out->step_input_tokens_init[i] = static_cast<int64_t>(i);
+        out->step_last_layer_scores_init[i] = 1.0f - 0.05f * static_cast<float>(i);
+        out->step_topk_indexs_prev_init[i] = static_cast<int64_t>(i);
+    }
+    for (float& x : out->step_input_hidden_states_init) x = h_dist(rng);
+
+    out->hot_token_id.assign(static_cast<size_t>(out->hot_vocab_size), 0);
+    for (int i = 0; i < out->hot_vocab_size; ++i) {
+        out->hot_token_id[static_cast<size_t>(i)] = i;
+    }
+
+    out->initial_hidden_states.assign(static_cast<size_t>(out->batch_size) * out->hidden_size, 0.0f);
+    for (float& x : out->initial_hidden_states) x = h_dist(rng);
+
+    out->initial_topk_probas.assign(out_n, 0.0f);
+    out->initial_topk_tokens.assign(out_n, 0);
+    float sum = 0.0f;
+    for (size_t i = 0; i < out_n; ++i) {
+        out->initial_topk_probas[i] = p_dist(rng);
+        sum += out->initial_topk_probas[i];
+        out->initial_topk_tokens[i] = static_cast<int64_t>(rng() % std::max(1, out->hot_vocab_size));
+    }
+    if (sum > 0.0f) {
+        for (size_t i = 0; i < out_n; ++i) {
+            out->initial_topk_probas[i] /= sum;
+        }
+    }
+
+    out->policy_next_tree_width.assign(static_cast<size_t>(out->tree_depth), out->init_tree_width);
+    out->policy_next_verify_num.assign(static_cast<size_t>(out->tree_depth), out->init_verify_num);
+    out->policy_stop_signal.assign(static_cast<size_t>(out->tree_depth), 0);
+
+    out->recurrent_topk_probas.assign(recurrent_n, 0.0f);
+    out->recurrent_topk_tokens.assign(recurrent_n, 0);
+    for (size_t i = 0; i < recurrent_n; ++i) {
+        out->recurrent_topk_probas[i] = p_dist(rng);
+        out->recurrent_topk_tokens[i] = static_cast<int64_t>(rng() % std::max(1, out->hot_vocab_size));
+    }
+    out->expected_mask_recurrent_depth.assign(static_cast<size_t>(out->tree_depth), 0);
+
+    out->init_legacy_cumu_tokens.assign(node_n, -777);
+    out->init_legacy_cumu_scores.assign(node_n, -3.0f);
+    out->init_legacy_cumu_deltas.assign(node_n, -1);
+    out->init_legacy_prev_indexs.assign(node_n, -1);
+    out->init_legacy_next_indexs.assign(node_n, -1);
+    out->init_legacy_side_indexs.assign(node_n, -1);
+    out->init_legacy_output_scores.assign(out_n, -4.0f);
+    out->init_legacy_output_tokens.assign(out_n, -1);
+    out->init_legacy_work_scores.assign(work_n, -6.0f);
+    out->init_legacy_sort_scores.assign(sort_n, -2.0f);
+
+    out->expected_io_tree_width = out->init_tree_width;
+    out->expected_io_verify_num = out->init_verify_num;
+    out->expected_io_cumu_count = out->init_cumu_count;
+    out->expected_executed_depths = out->tree_depth;
+    out->expected_stopped_early = false;
+    out->expected_cumu_tokens.assign(node_n, -1);
+    out->expected_cumu_scores.assign(node_n, 0.0f);
+    out->expected_cumu_deltas.assign(node_n, -1);
+    out->expected_output_scores.assign(out_n, 0.0f);
+    out->expected_output_tokens.assign(out_n, -1);
+    out->expected_mask_fields.assign(static_cast<size_t>(kMaskFieldCount), 0);
+}
+
+bool validate_case(const CaseData& c, std::string* err_msg) {
+    if (c.batch_size != 1) {
+        *err_msg = "precondition failed: batch_size must be 1 in this milestone";
+        return false;
+    }
+    if (!c.enable_initial_loop) {
+        *err_msg = "precondition failed: enable_initial_loop must be true";
+        return false;
+    }
+    if (c.tree_depth <= 1) {
+        *err_msg = "precondition failed: tree_depth must be > 1";
+        return false;
+    }
+    if (c.batch_size <= 0 || c.batch_size > kCdtFusedMaxBatch || c.node_top_k <= 0 ||
+        c.hidden_size <= 0 || c.max_node_count <= 0 || c.max_verify_num <= 0 ||
+        c.max_tree_width <= 0 || c.hot_vocab_size <= 0) {
+        *err_msg = "invalid scalar dimensions in case meta";
+        return false;
+    }
+    if (c.node_top_k > kCdtFusedMaxNodeTopK || c.node_top_k > kEagle4LmTopKMax ||
+        c.max_tree_width > TREE_WIDTH || c.hidden_size > HIDDEN) {
+        *err_msg = "case exceeds compile-time HLS limits";
+        return false;
+    }
+    if (c.init_tree_width < 0 || c.init_tree_width > c.max_tree_width ||
+        c.init_tree_width > c.node_top_k) {
+        *err_msg = "invalid init_tree_width";
+        return false;
+    }
+    if (c.init_verify_num <= 0 || c.init_verify_num > c.max_verify_num) {
+        *err_msg = "invalid init_verify_num";
+        return false;
+    }
+    if (c.init_cumu_count < 0 || c.init_cumu_count > c.max_node_count) {
+        *err_msg = "invalid init_cumu_count";
+        return false;
+    }
+    if (c.curr_depth_start < 0 || c.curr_depth_start + c.tree_depth > kCdtControllerMaxDepth) {
+        *err_msg = "depth range exceeds controller depth capacity";
+        return false;
+    }
+    if (c.prefix_len + c.curr_depth_start + c.tree_depth * c.max_tree_width >= c.max_seq_tokens) {
+        *err_msg = "max_seq_tokens too small for prefix+depth+width envelope";
+        return false;
+    }
+    if (static_cast<int>(c.hot_token_id.size()) != c.hot_vocab_size) {
+        *err_msg = "hot_token_id size mismatch";
+        return false;
+    }
+    if (static_cast<int>(c.expected_mask_fields.size()) != kMaskFieldCount) {
+        *err_msg = "expected_mask_fields size mismatch";
+        return false;
+    }
+    if (static_cast<int>(c.expected_mask_recurrent_depth.size()) != c.tree_depth) {
+        *err_msg = "expected_mask_recurrent_depth size mismatch";
+        return false;
+    }
+    return true;
+}
+
+void init_runtime(const CaseData& c, RuntimeState* s) {
+    const size_t tree_n = static_cast<size_t>(c.batch_size) * c.max_tree_width;
+    const size_t hidden_n = tree_n * c.hidden_size;
+    const size_t topk_stage_n = tree_n * c.node_top_k;
+    const size_t node_n = static_cast<size_t>(c.batch_size) * c.max_node_count;
+    const size_t out_n = static_cast<size_t>(c.batch_size) * c.node_top_k;
+    const size_t work_n = static_cast<size_t>(c.batch_size) *
+                          static_cast<size_t>(c.max_verify_num + c.node_top_k);
+    const size_t sort_n = static_cast<size_t>(c.batch_size) * c.max_verify_num;
+
+    s->step_input_tokens = c.step_input_tokens_init;
+    s->step_input_hidden_states = c.step_input_hidden_states_init;
+    s->step_last_layer_scores = c.step_last_layer_scores_init;
+    s->step_topk_indexs_prev = c.step_topk_indexs_prev_init;
+    s->step_topk_probas_sampling.assign(topk_stage_n, 0.0f);
+    s->step_topk_tokens_sampling.assign(topk_stage_n, 0);
+
+    s->cumu_tokens = c.init_legacy_cumu_tokens;
+    s->cumu_scores = c.init_legacy_cumu_scores;
+    s->cumu_deltas = c.init_legacy_cumu_deltas;
+    s->prev_indexs = c.init_legacy_prev_indexs;
+    s->next_indexs = c.init_legacy_next_indexs;
+    s->side_indexs = c.init_legacy_side_indexs;
+    s->output_scores = c.init_legacy_output_scores;
+    s->output_tokens = c.init_legacy_output_tokens;
+    s->work_scores = c.init_legacy_work_scores;
+    s->sort_scores = c.init_legacy_sort_scores;
+
+    s->output_hidden_states.assign(out_n * c.hidden_size, 0.0f);
+    s->cache_topk_indices.assign(out_n, -1);
+    s->dbg_curr_layer_scores.assign(topk_stage_n, 0.0f);
+    s->dbg_sort_layer_scores.assign(topk_stage_n, 0.0f);
+    s->dbg_sort_layer_indices.assign(topk_stage_n, -1);
+    s->dbg_parent_indices_in_layer.assign(out_n, -1);
+    s->dbg_remapped_topk_tokens.assign(topk_stage_n, -1);
+
+    s->io_tree_width = c.init_tree_width;
+    s->io_verify_num = c.init_verify_num;
+    s->io_cumu_count = c.init_cumu_count;
+    s->executed_depths = 0;
+    s->stopped_early = false;
+
+    (void)hidden_n;
+    (void)node_n;
+    (void)work_n;
+    (void)sort_n;
+}
+
+void schedule_for_depth(const CaseData& c,
+                        int depth,
+                        int curr_tree_width,
+                        int curr_verify_num,
+                        int* next_tree_width,
+                        int* next_verify_num,
+                        bool* stop_signal) {
+    int idx = depth;
+    if (idx < 0) idx = 0;
+    if (!c.policy_next_tree_width.empty()) {
+        idx = std::min(idx, static_cast<int>(c.policy_next_tree_width.size()) - 1);
+        *next_tree_width = c.policy_next_tree_width[static_cast<size_t>(idx)];
+    } else {
+        *next_tree_width = curr_tree_width;
+    }
+    if (!c.policy_next_verify_num.empty()) {
+        idx = std::min(depth, static_cast<int>(c.policy_next_verify_num.size()) - 1);
+        idx = std::max(idx, 0);
+        *next_verify_num = c.policy_next_verify_num[static_cast<size_t>(idx)];
+    } else {
+        *next_verify_num = curr_verify_num;
+    }
+    if (!c.policy_stop_signal.empty()) {
+        idx = std::min(depth, static_cast<int>(c.policy_stop_signal.size()) - 1);
+        idx = std::max(idx, 0);
+        *stop_signal = (c.policy_stop_signal[static_cast<size_t>(idx)] != 0);
+    } else {
         *stop_signal = false;
     }
-};
 
-struct StopAtDepthPolicy {
-    int fixed_tree_width = 4;
-    int fixed_verify_num = 8;
-    int stop_depth = 1;
-    inline void operator()(
-        int depth,
-        int batch_size,
-        int curr_tree_width,
-        int node_top_k,
-        int max_tree_width,
-        int curr_verify_num,
-        const float* work_scores,
-        int max_verify_num,
-        int* next_tree_width,
-        int* next_verify_num,
-        bool* stop_signal) const {
-#pragma HLS INLINE
-        (void)batch_size;
-        (void)curr_tree_width;
-        (void)node_top_k;
-        (void)max_tree_width;
-        (void)curr_verify_num;
-        (void)work_scores;
-        (void)max_verify_num;
-        *next_tree_width = fixed_tree_width;
-        *next_verify_num = fixed_verify_num;
-        *stop_signal = (depth >= stop_depth);
+    *next_tree_width = clamp_int(*next_tree_width, 0, c.max_tree_width);
+    *next_tree_width = clamp_int(*next_tree_width, 0, c.node_top_k);
+    *next_verify_num = clamp_int(*next_verify_num, 1, c.max_verify_num);
+}
+
+void load_recurrent_topk_for_depth(const CaseData& c,
+                                   int depth,
+                                   int curr_tree_width,
+                                   RuntimeState* s) {
+    const int per_batch_src = c.max_tree_width * c.node_top_k;
+    const int per_depth_src = c.batch_size * per_batch_src;
+    const int per_batch_dst = curr_tree_width * c.node_top_k;
+
+    std::fill(s->step_topk_probas_sampling.begin(), s->step_topk_probas_sampling.end(), 0.0f);
+    std::fill(s->step_topk_tokens_sampling.begin(), s->step_topk_tokens_sampling.end(), 0);
+
+    const size_t depth_base = static_cast<size_t>(depth) * per_depth_src;
+    for (int b = 0; b < c.batch_size; ++b) {
+        const size_t src_base = depth_base + static_cast<size_t>(b) * per_batch_src;
+        const size_t dst_base = static_cast<size_t>(b) * per_batch_dst;
+        for (int i = 0; i < per_batch_dst; ++i) {
+            s->step_topk_probas_sampling[dst_base + static_cast<size_t>(i)] =
+                c.recurrent_topk_probas[src_base + static_cast<size_t>(i)];
+            s->step_topk_tokens_sampling[dst_base + static_cast<size_t>(i)] =
+                c.recurrent_topk_tokens[src_base + static_cast<size_t>(i)];
+        }
     }
-};
+}
 
-struct WidthSchedulePolicy {
-    int widths[4] = {4, 2, 4, 2};
-    int sched_len = 4;
-    int fixed_verify_num = 8;
-    inline void operator()(
-        int depth,
-        int batch_size,
-        int curr_tree_width,
-        int node_top_k,
-        int max_tree_width,
-        int curr_verify_num,
-        const float* work_scores,
-        int max_verify_num,
-        int* next_tree_width,
-        int* next_verify_num,
-        bool* stop_signal) const {
-#pragma HLS INLINE
-        (void)batch_size;
-        (void)curr_tree_width;
-        (void)node_top_k;
-        (void)max_tree_width;
-        (void)curr_verify_num;
-        (void)work_scores;
-        (void)max_verify_num;
-        const int idx = (sched_len > 0) ? (depth % sched_len) : 0;
-        *next_tree_width = widths[idx];
-        *next_verify_num = fixed_verify_num;
-        *stop_signal = false;
+void run_reference_replay(const CaseData& c, RuntimeState* s) {
+    init_runtime(c, s);
+
+    int curr_tree_width = clamp_int(s->io_tree_width, 0, c.max_tree_width);
+    curr_tree_width = clamp_int(curr_tree_width, 0, c.node_top_k);
+    int curr_verify_num = clamp_int(s->io_verify_num, 1, c.max_verify_num);
+    int curr_cumu_count = clamp_int(s->io_cumu_count, 0, c.max_node_count);
+
+    int depth_done = 0;
+    bool stopped = false;
+    int loop_start_depth = 0;
+
+    if (c.enable_initial_loop) {
+        std::vector<float> initial_last_layer_scores(static_cast<size_t>(c.batch_size), 1.0f);
+        std::vector<int64_t> initial_topk_indexs_prev(static_cast<size_t>(c.batch_size), 0);
+
+        cost_draft_tree_fused_step_hls(
+            c.initial_topk_probas.data(),
+            c.initial_topk_tokens.data(),
+            initial_last_layer_scores.data(),
+            c.initial_hidden_states.data(),
+            c.hot_token_id.data(),
+            static_cast<int64_t>(c.hot_token_id.size()),
+            c.use_hot_token_id,
+            initial_topk_indexs_prev.data(),
+            c.batch_size,
+            c.node_top_k,
+            1,
+            c.hidden_size,
+            curr_cumu_count,
+            curr_verify_num,
+            c.curr_depth_start + 1,
+            c.max_node_count,
+            c.max_verify_num,
+            s->cumu_tokens.data(),
+            s->cumu_scores.data(),
+            s->cumu_deltas.data(),
+            s->prev_indexs.data(),
+            s->next_indexs.data(),
+            s->side_indexs.data(),
+            s->output_scores.data(),
+            s->output_tokens.data(),
+            s->work_scores.data(),
+            s->sort_scores.data(),
+            s->output_hidden_states.data(),
+            s->cache_topk_indices.data(),
+            s->dbg_curr_layer_scores.data(),
+            s->dbg_sort_layer_scores.data(),
+            s->dbg_sort_layer_indices.data(),
+            s->dbg_parent_indices_in_layer.data(),
+            s->dbg_remapped_topk_tokens.data());
+
+        curr_cumu_count += c.node_top_k;
+        if (curr_cumu_count > c.max_node_count) {
+            curr_cumu_count = c.max_node_count;
+        }
+        ++depth_done;
+
+        int next_tree_width = curr_tree_width;
+        int next_verify_num = curr_verify_num;
+        bool stop_signal = false;
+        schedule_for_depth(
+            c,
+            0,
+            1,
+            curr_verify_num,
+            &next_tree_width,
+            &next_verify_num,
+            &stop_signal);
+
+        curr_tree_width = next_tree_width;
+        curr_verify_num = next_verify_num;
+
+        if (c.tree_depth <= 1 || stop_signal || next_tree_width <= 0) {
+            stopped = stop_signal || (next_tree_width <= 0);
+            goto reference_finalize;
+        }
+
+        cdt_prepare_next_layer_inputs_hls(
+            s->output_scores.data(),
+            s->output_tokens.data(),
+            s->output_hidden_states.data(),
+            s->cache_topk_indices.data(),
+            c.batch_size,
+            c.node_top_k,
+            c.hidden_size,
+            next_tree_width,
+            c.max_tree_width,
+            s->step_input_tokens.data(),
+            s->step_last_layer_scores.data(),
+            s->step_input_hidden_states.data(),
+            s->step_topk_indexs_prev.data());
+
+        loop_start_depth = 1;
     }
-};
 
-template <typename WidthPolicy>
-ExpectedOutcome simulate_expected_outcome(const ScenarioConfig& cfg, const WidthPolicy& width_policy) {
-    ExpectedOutcome out;
-
-    int curr_tree_width = clamp_int_local(cfg.init_tree_width, 0, cfg.max_tree_width);
-    curr_tree_width = clamp_int_local(curr_tree_width, 0, cfg.node_top_k);
-    int curr_verify_num = clamp_int_local(cfg.init_verify_num, 1, cfg.max_verify_num);
-    int curr_cumu_count = clamp_int_local(cfg.init_cumu_count, 0, cfg.max_node_count);
-
-    float dummy_work_scores[1] = {0.0f};
-
-    for (int d = 0; d < cfg.tree_depth; ++d) {
+    for (int d = loop_start_depth; d < c.tree_depth; ++d) {
         if (curr_tree_width <= 0) {
-            out.stopped_early = true;
+            stopped = true;
             break;
         }
 
         int next_tree_width = curr_tree_width;
         int next_verify_num = curr_verify_num;
         bool stop_signal = false;
-        width_policy(
-            d,
-            cfg.batch_size,
-            curr_tree_width,
-            cfg.node_top_k,
-            cfg.max_tree_width,
-            curr_verify_num,
-            dummy_work_scores,
-            cfg.max_verify_num,
-            &next_tree_width,
-            &next_verify_num,
-            &stop_signal);
-
-        next_tree_width = clamp_int_local(next_tree_width, 0, cfg.max_tree_width);
-        next_tree_width = clamp_int_local(next_tree_width, 0, cfg.node_top_k);
-        next_verify_num = clamp_int_local(next_verify_num, 1, cfg.max_verify_num);
-
-        curr_cumu_count += curr_tree_width * cfg.node_top_k;
-        if (curr_cumu_count > cfg.max_node_count) {
-            curr_cumu_count = cfg.max_node_count;
+        if (!c.enable_initial_loop) {
+            schedule_for_depth(
+                c,
+                d,
+                curr_tree_width,
+                curr_verify_num,
+                &next_tree_width,
+                &next_verify_num,
+                &stop_signal);
         }
-        ++out.executed_depths;
 
-        if (d + 1 >= cfg.tree_depth || stop_signal || next_tree_width <= 0) {
-            out.stopped_early = stop_signal || (next_tree_width <= 0);
+        load_recurrent_topk_for_depth(c, d, curr_tree_width, s);
+
+        cost_draft_tree_fused_step_hls(
+            s->step_topk_probas_sampling.data(),
+            s->step_topk_tokens_sampling.data(),
+            s->step_last_layer_scores.data(),
+            s->step_input_hidden_states.data(),
+            c.hot_token_id.data(),
+            static_cast<int64_t>(c.hot_token_id.size()),
+            c.use_hot_token_id,
+            s->step_topk_indexs_prev.data(),
+            c.batch_size,
+            c.node_top_k,
+            curr_tree_width,
+            c.hidden_size,
+            curr_cumu_count,
+            curr_verify_num,
+            c.enable_initial_loop ? (c.curr_depth_start + d + 1) : (c.curr_depth_start + d),
+            c.max_node_count,
+            c.max_verify_num,
+            s->cumu_tokens.data(),
+            s->cumu_scores.data(),
+            s->cumu_deltas.data(),
+            s->prev_indexs.data(),
+            s->next_indexs.data(),
+            s->side_indexs.data(),
+            s->output_scores.data(),
+            s->output_tokens.data(),
+            s->work_scores.data(),
+            s->sort_scores.data(),
+            s->output_hidden_states.data(),
+            s->cache_topk_indices.data(),
+            s->dbg_curr_layer_scores.data(),
+            s->dbg_sort_layer_scores.data(),
+            s->dbg_sort_layer_indices.data(),
+            s->dbg_parent_indices_in_layer.data(),
+            s->dbg_remapped_topk_tokens.data());
+
+        curr_cumu_count += curr_tree_width * c.node_top_k;
+        if (curr_cumu_count > c.max_node_count) {
+            curr_cumu_count = c.max_node_count;
+        }
+
+        ++depth_done;
+        if (c.enable_initial_loop) {
+            schedule_for_depth(
+                c,
+                d,
+                curr_tree_width,
+                curr_verify_num,
+                &next_tree_width,
+                &next_verify_num,
+                &stop_signal);
+        }
+
+        if (d + 1 >= c.tree_depth || stop_signal || next_tree_width <= 0) {
+            curr_tree_width = next_tree_width;
+            curr_verify_num = next_verify_num;
+            stopped = stop_signal || (next_tree_width <= 0);
             break;
         }
+
+        cdt_prepare_next_layer_inputs_hls(
+            s->output_scores.data(),
+            s->output_tokens.data(),
+            s->output_hidden_states.data(),
+            s->cache_topk_indices.data(),
+            c.batch_size,
+            c.node_top_k,
+            c.hidden_size,
+            next_tree_width,
+            c.max_tree_width,
+            s->step_input_tokens.data(),
+            s->step_last_layer_scores.data(),
+            s->step_input_hidden_states.data(),
+            s->step_topk_indexs_prev.data());
 
         curr_tree_width = next_tree_width;
         curr_verify_num = next_verify_num;
     }
 
-    out.final_tree_width = curr_tree_width;
-    out.final_verify_num = curr_verify_num;
-    out.final_cumu_count = curr_cumu_count;
-    return out;
+reference_finalize:
+    s->io_tree_width = curr_tree_width;
+    s->io_verify_num = curr_verify_num;
+    s->io_cumu_count = curr_cumu_count;
+    s->executed_depths = depth_done;
+    s->stopped_early = stopped;
 }
 
-bool parse_cli(int argc, char** argv, CliOptions* opts, std::string* err) {
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg(argv[i]);
-        if (arg == "--run-stop-scenario") {
-            opts->run_stop_scenario = true;
-        } else if (arg == "--run-width-change-scenario") {
-            opts->run_width_change_scenario = true;
-        } else if (arg == "--quiet") {
-            opts->verbose = false;
-        } else if (arg == "--tree-depth" && i + 1 < argc) {
-            opts->tree_depth = std::atoi(argv[++i]);
-        } else if (arg == "--stop-depth" && i + 1 < argc) {
-            opts->stop_depth = std::atoi(argv[++i]);
-        } else if (arg == "--seed" && i + 1 < argc) {
-            opts->seed = std::atoi(argv[++i]);
-        } else if (arg == "--help" || arg == "-h") {
-            std::cout
-                << "Usage: cost_draft_tree_multilayer_orchestrator_tb [options]\n"
-                << "  --tree-depth <n>               default: 3 (must be >1)\n"
-                << "  --run-stop-scenario            also run deterministic early-stop scenario\n"
-                << "  --stop-depth <d>               stop depth for stop scenario (default: 1)\n"
-                << "  --run-width-change-scenario    run optional width schedule scenario\n"
-                << "  --seed <n>                     RNG seed (default: 1337)\n"
-                << "  --quiet                        less logging\n";
-            return false;
-        } else {
-            *err = "unknown argument: " + arg;
-            return false;
+void run_orchestrator_under_test(const CaseData& c, RuntimeState* s) {
+    init_runtime(c, s);
+
+    std::vector<pack512> dummy_pack(1);
+    std::vector<float> dummy_scale(1, 1.0f);
+    std::vector<uint16_t> dummy_u16(1, 0);
+    std::vector<int32_t> dummy_i32(1, 0);
+    std::vector<vec_t<VEC_W>> dummy_vec(1);
+    RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM> rope_cfg{};
+
+    CdtOrchTbTopkProvider provider;
+    provider.recurrent_topk_probas = c.recurrent_topk_probas.data();
+    provider.recurrent_topk_tokens = c.recurrent_topk_tokens.data();
+    provider.depth_count = c.tree_depth;
+    provider.batch_size = c.batch_size;
+    provider.max_tree_width = c.max_tree_width;
+    provider.node_top_k = c.node_top_k;
+    provider.curr_depth_start = c.curr_depth_start;
+
+    cdt_set_orch_tb_topk_provider(&provider);
+
+    cost_draft_tree_multilayer_orchestrator_hls(
+        [&](int depth,
+            int batch_size,
+            int curr_tree_width,
+            int node_top_k,
+            int max_tree_width,
+            int curr_verify_num,
+            const float* work_scores,
+            int max_verify_num,
+            int* next_tree_width,
+            int* next_verify_num,
+            bool* stop_signal) {
+            (void)batch_size;
+            (void)curr_tree_width;
+            (void)node_top_k;
+            (void)max_tree_width;
+            (void)curr_verify_num;
+            (void)work_scores;
+            (void)max_verify_num;
+            schedule_for_depth(
+                c,
+                depth,
+                curr_tree_width,
+                curr_verify_num,
+                next_tree_width,
+                next_verify_num,
+                stop_signal);
+        },
+        c.tree_depth,
+        c.curr_depth_start,
+        s->step_input_tokens.data(),
+        s->step_input_hidden_states.data(),
+        s->step_last_layer_scores.data(),
+        s->step_topk_indexs_prev.data(),
+        s->step_topk_probas_sampling.data(),
+        s->step_topk_tokens_sampling.data(),
+        dummy_pack.data(), dummy_scale.data(),
+        dummy_pack.data(), dummy_scale.data(),
+        dummy_pack.data(), dummy_scale.data(),
+        dummy_pack.data(), dummy_scale.data(),
+        dummy_pack.data(), dummy_scale.data(),
+        dummy_pack.data(), dummy_scale.data(),
+        dummy_pack.data(), dummy_scale.data(),
+        dummy_scale.data(),
+        dummy_scale.data(),
+        dummy_scale.data(),
+        dummy_scale.data(),
+        rope_cfg,
+        dummy_vec.data(),
+        dummy_vec.data(),
+        dummy_u16.data(),
+        dummy_i32.data(),
+        dummy_u16.data(),
+        dummy_i32.data(),
+        dummy_i32.data(),
+        dummy_u16.data(),
+        c.efficient_lm_rank,
+        c.efficient_lm_vocab_size,
+        c.prefix_len,
+        c.hot_token_id.data(),
+        static_cast<int64_t>(c.hot_token_id.size()),
+        c.use_hot_token_id,
+        c.batch_size,
+        c.node_top_k,
+        c.hidden_size,
+        &s->io_tree_width,
+        &s->io_verify_num,
+        &s->io_cumu_count,
+        c.max_node_count,
+        c.max_verify_num,
+        c.max_tree_width,
+        s->cumu_tokens.data(),
+        s->cumu_scores.data(),
+        s->cumu_deltas.data(),
+        s->prev_indexs.data(),
+        s->next_indexs.data(),
+        s->side_indexs.data(),
+        s->output_scores.data(),
+        s->output_tokens.data(),
+        s->work_scores.data(),
+        s->sort_scores.data(),
+        s->output_hidden_states.data(),
+        s->cache_topk_indices.data(),
+        s->dbg_curr_layer_scores.data(),
+        s->dbg_sort_layer_scores.data(),
+        s->dbg_sort_layer_indices.data(),
+        s->dbg_parent_indices_in_layer.data(),
+        s->dbg_remapped_topk_tokens.data(),
+        &s->executed_depths,
+        &s->stopped_early,
+        c.enable_initial_loop,
+        nullptr,
+        nullptr,
+        0,
+        c.initial_topk_probas.data(),
+        c.initial_topk_tokens.data(),
+        c.initial_hidden_states.data());
+
+    cdt_set_orch_tb_topk_provider(nullptr);
+}
+
+bool nearly_equal(float a, float b, float eps_abs, float eps_rel) {
+    const float diff = std::fabs(a - b);
+    const float tol = eps_abs + eps_rel * std::max(std::fabs(a), std::fabs(b));
+    return diff <= tol;
+}
+
+bool compare_i64_vector(const char* name,
+                        const std::vector<int64_t>& actual,
+                        const std::vector<int64_t>& expected) {
+    if (actual.size() != expected.size()) {
+        std::cerr << "[FAIL] " << name << " size mismatch: got=" << actual.size()
+                  << " expected=" << expected.size() << "\n";
+        return false;
+    }
+    bool ok = true;
+    int printed = 0;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        if (actual[i] != expected[i]) {
+            ok = false;
+            if (printed < 12) {
+                std::cerr << "[mismatch] " << name << "[" << i << "]: got=" << actual[i]
+                          << " expected=" << expected[i] << "\n";
+                ++printed;
+            }
         }
     }
+    return ok;
+}
 
-    if (opts->tree_depth <= 1) {
-        *err = "--tree-depth must be > 1 for multi-depth single-call verification";
+bool compare_float_vector(const char* name,
+                          const std::vector<float>& actual,
+                          const std::vector<float>& expected,
+                          float eps_abs,
+                          float eps_rel) {
+    if (actual.size() != expected.size()) {
+        std::cerr << "[FAIL] " << name << " size mismatch: got=" << actual.size()
+                  << " expected=" << expected.size() << "\n";
         return false;
     }
-    if (opts->stop_depth < 0) {
-        *err = "--stop-depth must be >= 0";
+    bool ok = true;
+    int printed = 0;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        if (!nearly_equal(actual[i], expected[i], eps_abs, eps_rel)) {
+            ok = false;
+            if (printed < 12) {
+                std::cerr << "[mismatch] " << name << "[" << i << "]: got=" << actual[i]
+                          << " expected=" << expected[i] << "\n";
+                ++printed;
+            }
+        }
+    }
+    return ok;
+}
+
+template <typename T>
+bool compare_scalar(const char* name, T actual, T expected) {
+    if (actual != expected) {
+        std::cerr << "[FAIL] " << name << " mismatch: got=" << actual
+                  << " expected=" << expected << "\n";
         return false;
     }
     return true;
 }
 
-template <typename WidthPolicy>
-bool run_single_call_scenario(const char* scenario_name,
-                              const ScenarioConfig& cfg,
-                              const WidthPolicy& width_policy,
-                              bool expect_stopped_early,
-                              int expected_executed_depths,
-                              int seed,
-                              bool verbose) {
-    std::mt19937 rng(seed);
+bool mask_enabled(const std::vector<int>& mask, int idx) {
+    if (idx < 0 || idx >= static_cast<int>(mask.size())) return false;
+    return mask[static_cast<size_t>(idx)] != 0;
+}
 
-    if (cfg.batch_size != 1) {
-        std::cerr << "[" << scenario_name << "] only batch_size=1 is supported by this bench.\n";
-        return false;
-    }
+bool run_and_compare(const CaseData& c) {
+    RuntimeState ref_state;
+    RuntimeState uut_state;
 
-    const ExpectedOutcome expected = simulate_expected_outcome(cfg, width_policy);
-    if (expected.executed_depths != expected_executed_depths) {
-        std::cerr << "[" << scenario_name
-                  << "] scenario expectation mismatch (executed_depths). cfg/policy predicts "
-                  << expected.executed_depths << " but test expects "
-                  << expected_executed_depths << "\n";
-        return false;
-    }
-    if (expected.stopped_early != expect_stopped_early) {
-        std::cerr << "[" << scenario_name
-                  << "] scenario expectation mismatch (stopped_early). cfg/policy predicts "
-                  << expected.stopped_early << " but test expects "
-                  << expect_stopped_early << "\n";
-        return false;
-    }
+    run_reference_replay(c, &ref_state);
+    run_orchestrator_under_test(c, &uut_state);
 
-    const int b = cfg.batch_size;
-    const int topk = cfg.node_top_k;
-    const int hidden = cfg.hidden_size;
-    const int max_tw = cfg.max_tree_width;
-    const int rank = cfg.efficient_lm_rank;
-    const int vocab = cfg.efficient_lm_vocab_size;
-    const int in_packs = rank / 8;
-    const int groups = rank / kGroupSize;
+    const int exp_io_tree_width =
+        mask_enabled(c.expected_mask_fields, kMaskIoTreeWidth) ? c.expected_io_tree_width
+                                                                : ref_state.io_tree_width;
+    const int exp_io_verify_num =
+        mask_enabled(c.expected_mask_fields, kMaskIoVerifyNum) ? c.expected_io_verify_num
+                                                                : ref_state.io_verify_num;
+    const int exp_io_cumu_count =
+        mask_enabled(c.expected_mask_fields, kMaskIoCumuCount) ? c.expected_io_cumu_count
+                                                                : ref_state.io_cumu_count;
+    const int exp_executed_depths =
+        mask_enabled(c.expected_mask_fields, kMaskExecutedDepths) ? c.expected_executed_depths
+                                                                   : ref_state.executed_depths;
+    const bool exp_stopped_early =
+        mask_enabled(c.expected_mask_fields, kMaskStoppedEarly) ? c.expected_stopped_early
+                                                                 : ref_state.stopped_early;
 
-    if (rank <= 0 || rank % 8 != 0 || rank % kGroupSize != 0) {
-        std::cerr << "[" << scenario_name << "] invalid rank: " << rank << "\n";
-        return false;
-    }
-    if (vocab <= 0 || topk <= 1 || topk > kCdtFusedMaxNodeTopK) {
-        std::cerr << "[" << scenario_name << "] invalid topk/vocab values.\n";
-        return false;
-    }
+    const std::vector<int64_t>& exp_cumu_tokens =
+        mask_enabled(c.expected_mask_fields, kMaskCumuTokens) ? c.expected_cumu_tokens
+                                                               : ref_state.cumu_tokens;
+    const std::vector<float>& exp_cumu_scores =
+        mask_enabled(c.expected_mask_fields, kMaskCumuScores) ? c.expected_cumu_scores
+                                                               : ref_state.cumu_scores;
+    const std::vector<int64_t>& exp_cumu_deltas =
+        mask_enabled(c.expected_mask_fields, kMaskCumuDeltas) ? c.expected_cumu_deltas
+                                                               : ref_state.cumu_deltas;
+    const std::vector<float>& exp_output_scores =
+        mask_enabled(c.expected_mask_fields, kMaskOutputScores) ? c.expected_output_scores
+                                                                 : ref_state.output_scores;
+    const std::vector<int64_t>& exp_output_tokens =
+        mask_enabled(c.expected_mask_fields, kMaskOutputTokens) ? c.expected_output_tokens
+                                                                 : ref_state.output_tokens;
 
-    // Step working buffers.
-    std::vector<int64_t> step_input_tokens(static_cast<size_t>(b) * max_tw, 0);
-    std::vector<float> step_input_hidden_states(static_cast<size_t>(b) * max_tw * hidden, 0.0f);
-    std::vector<float> step_last_layer_scores(static_cast<size_t>(b) * max_tw, 0.0f);
-    std::vector<int64_t> step_topk_indexs_prev(static_cast<size_t>(b) * max_tw, 0);
-    std::vector<float> step_topk_probas_sampling(static_cast<size_t>(b) * max_tw * topk, 0.0f);
-    std::vector<int64_t> step_topk_tokens_sampling(static_cast<size_t>(b) * max_tw * topk, 0);
+    bool ok = true;
+    ok &= compare_scalar("io_tree_width", uut_state.io_tree_width, exp_io_tree_width);
+    ok &= compare_scalar("io_verify_num", uut_state.io_verify_num, exp_io_verify_num);
+    ok &= compare_scalar("io_cumu_count", uut_state.io_cumu_count, exp_io_cumu_count);
+    ok &= compare_scalar("executed_depths", uut_state.executed_depths, exp_executed_depths);
+    ok &= compare_scalar("stopped_early", uut_state.stopped_early, exp_stopped_early);
 
-    for (int i = 0; i < max_tw; ++i) {
-        step_input_tokens[static_cast<size_t>(i)] = i;
-        step_last_layer_scores[static_cast<size_t>(i)] = 1.0f - 0.05f * static_cast<float>(i);
-        step_topk_indexs_prev[static_cast<size_t>(i)] = i + 1;  // valid existing global indices
-    }
-    fill_random_float(step_input_hidden_states, rng, -0.05f, 0.05f);
+    ok &= compare_i64_vector("cumu_tokens", uut_state.cumu_tokens, exp_cumu_tokens);
+    ok &= compare_float_vector(
+        "cumu_scores", uut_state.cumu_scores, exp_cumu_scores, c.eps_abs, c.eps_rel);
+    ok &= compare_i64_vector("cumu_deltas", uut_state.cumu_deltas, exp_cumu_deltas);
+    ok &= compare_float_vector(
+        "output_scores", uut_state.output_scores, exp_output_scores, c.eps_abs, c.eps_rel);
+    ok &= compare_i64_vector("output_tokens", uut_state.output_tokens, exp_output_tokens);
 
-    // Keep snapshots to verify recurrence-related buffers are updated.
-    const std::vector<float> before_last_layer_scores = step_last_layer_scores;
-    const std::vector<int64_t> before_topk_indexs_prev = step_topk_indexs_prev;
-    const std::vector<float> before_input_hidden_states = step_input_hidden_states;
+    const int strict_fields =
+        static_cast<int>(std::count_if(c.expected_mask_fields.begin(),
+                                       c.expected_mask_fields.end(),
+                                       [](int v) { return v != 0; }));
+    const int strict_depths =
+        static_cast<int>(std::count_if(c.expected_mask_recurrent_depth.begin(),
+                                       c.expected_mask_recurrent_depth.end(),
+                                       [](int v) { return v != 0; }));
+    const int cov_total = kMaskFieldCount + c.tree_depth;
+    const int cov_strict = strict_fields + strict_depths;
+    const float cov_pct = (cov_total > 0)
+                              ? (100.0f * static_cast<float>(cov_strict) /
+                                 static_cast<float>(cov_total))
+                              : 0.0f;
 
-    // EAGLE4 tier1/LM-head weight buffers.
-    std::vector<pack512> w_q(expected_pack_count(QKV_INPUT, HIDDEN));
-    std::vector<pack512> w_k(expected_pack_count(QKV_INPUT, NUM_KV_HEADS * HEAD_DIM));
-    std::vector<pack512> w_v(expected_pack_count(QKV_INPUT, NUM_KV_HEADS * HEAD_DIM));
-    std::vector<pack512> w_o(expected_pack_count(HIDDEN, HIDDEN));
-    std::vector<pack512> w_gate(expected_pack_count(HIDDEN, INTERMEDIATE));
-    std::vector<pack512> w_up(expected_pack_count(HIDDEN, INTERMEDIATE));
-    std::vector<pack512> w_down(expected_pack_count(INTERMEDIATE, DOWN_OUTPUT));
+    std::cout << "[coverage] strict_fields=" << strict_fields << "/" << kMaskFieldCount
+              << " strict_recurrent_depths=" << strict_depths << "/" << c.tree_depth
+              << " total_strict=" << cov_strict << "/" << cov_total
+              << " (" << cov_pct << "%)\n";
 
-    std::vector<float> s_q(expected_scale_count(QKV_INPUT, HIDDEN));
-    std::vector<float> s_k(expected_scale_count(QKV_INPUT, NUM_KV_HEADS * HEAD_DIM));
-    std::vector<float> s_v(expected_scale_count(QKV_INPUT, NUM_KV_HEADS * HEAD_DIM));
-    std::vector<float> s_o(expected_scale_count(HIDDEN, HIDDEN));
-    std::vector<float> gate_scales(expected_scale_count(HIDDEN, INTERMEDIATE));
-    std::vector<float> up_scales(expected_scale_count(HIDDEN, INTERMEDIATE));
-    std::vector<float> down_scales(expected_scale_count(INTERMEDIATE, DOWN_OUTPUT));
-
-    std::vector<float> hidden_norm_gamma(HIDDEN, 1.0f);
-    std::vector<float> embed_norm_gamma(HIDDEN, 1.0f);
-    std::vector<float> post_attn_norm_gamma(HIDDEN, 1.0f);
-    std::vector<float> final_norm_gamma(HIDDEN, 1.0f);
-
-    fill_random_pack(w_q, rng);
-    fill_random_pack(w_k, rng);
-    fill_random_pack(w_v, rng);
-    fill_random_pack(w_o, rng);
-    fill_random_pack(w_gate, rng);
-    fill_random_pack(w_up, rng);
-    fill_random_pack(w_down, rng);
-    fill_random_float(s_q, rng, 0.001f, 0.02f);
-    fill_random_float(s_k, rng, 0.001f, 0.02f);
-    fill_random_float(s_v, rng, 0.001f, 0.02f);
-    fill_random_float(s_o, rng, 0.001f, 0.02f);
-    fill_random_float(gate_scales, rng, 0.001f, 0.02f);
-    fill_random_float(up_scales, rng, 0.001f, 0.02f);
-    fill_random_float(down_scales, rng, 0.001f, 0.02f);
-    fill_random_float(hidden_norm_gamma, rng, 0.9f, 1.1f);
-    fill_random_float(embed_norm_gamma, rng, 0.9f, 1.1f);
-    fill_random_float(post_attn_norm_gamma, rng, 0.9f, 1.1f);
-    fill_random_float(final_norm_gamma, rng, 0.9f, 1.1f);
-
-    std::vector<uint16_t> efficient_lm_head_down_proj_weight(static_cast<size_t>(rank) * HIDDEN);
-    std::vector<int32_t> efficient_lm_head_qweight_row_major(static_cast<size_t>(vocab) * in_packs);
-    std::vector<uint16_t> efficient_lm_head_scales_row_major(static_cast<size_t>(groups) * vocab);
-    std::vector<uint16_t> lm_head_weight(static_cast<size_t>(vocab) * HIDDEN);
-
-    fill_random_fp16(efficient_lm_head_down_proj_weight, rng, -0.02f, 0.02f);
-    fill_random_qweight_row_major(efficient_lm_head_qweight_row_major, rng);
-    fill_random_fp16(efficient_lm_head_scales_row_major, rng, 0.001f, 0.02f);
-    fill_random_fp16(lm_head_weight, rng, -0.02f, 0.02f);
-
-    // Contiguous KV buffers.
-    const size_t kv_tokens = static_cast<size_t>(cfg.max_seq_tokens);
-    const size_t kv_vecs = kv_tokens * static_cast<size_t>((NUM_KV_HEADS * HEAD_DIM) / VEC_W);
-    std::vector<vec_t<VEC_W>> hbm_k(kv_vecs);
-    std::vector<vec_t<VEC_W>> hbm_v(kv_vecs);
-
-    // Optional hot-token remap (disabled in this bench).
-    std::vector<int64_t> hot_token_id(static_cast<size_t>(vocab), 0);
-    std::iota(hot_token_id.begin(), hot_token_id.end(), 0);
-    const bool use_hot_token_id = false;
-
-    // Runtime I/O dims.
-    int io_tree_width = cfg.init_tree_width;
-    int io_verify_num = cfg.init_verify_num;
-    int io_cumu_count = cfg.init_cumu_count;
-
-    // Persistent legacy state.
-    std::vector<int64_t> cumu_tokens(static_cast<size_t>(b) * cfg.max_node_count, -1);
-    std::vector<float> cumu_scores(static_cast<size_t>(b) * cfg.max_node_count, 0.0f);
-    std::vector<int64_t> cumu_deltas(static_cast<size_t>(b) * cfg.max_node_count, -1);
-    std::vector<int64_t> prev_indexs(static_cast<size_t>(b) * cfg.max_node_count, -1);
-    std::vector<int64_t> next_indexs(static_cast<size_t>(b) * cfg.max_node_count, -1);
-    std::vector<int64_t> side_indexs(static_cast<size_t>(b) * cfg.max_node_count, -1);
-    std::vector<float> output_scores(static_cast<size_t>(b) * topk, 0.0f);
-    std::vector<int64_t> output_tokens(static_cast<size_t>(b) * topk, -1);
-    std::vector<float> work_scores(static_cast<size_t>(b) * (cfg.max_verify_num + topk), 0.0f);
-    std::vector<float> sort_scores(static_cast<size_t>(b) * cfg.max_verify_num, 0.0f);
-
-    // Seed initial score pools similarly to the Python-side draft initialization.
-    work_scores[0] = 1.0f;
-    sort_scores[0] = 1.0f;
-
-    // Per-step fused outputs / scratch.
-    std::vector<float> output_hidden_states(static_cast<size_t>(b) * topk * hidden, 0.0f);
-    std::vector<int64_t> cache_topk_indices(static_cast<size_t>(b) * topk, -1);
-    std::vector<float> dbg_curr_layer_scores(static_cast<size_t>(b) * max_tw * topk, 0.0f);
-    std::vector<float> dbg_sort_layer_scores(static_cast<size_t>(b) * max_tw * topk, 0.0f);
-    std::vector<int64_t> dbg_sort_layer_indices(static_cast<size_t>(b) * max_tw * topk, -1);
-    std::vector<int64_t> dbg_parent_indices_in_layer(static_cast<size_t>(b) * topk, -1);
-    std::vector<int64_t> dbg_remapped_topk_tokens(static_cast<size_t>(b) * max_tw * topk, -1);
-
-    int executed_depths = 0;
-    bool stopped_early = false;
-
-    const std::vector<float> inv_freq = build_llama3_inv_freq(HEAD_DIM);
-    RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM> rope_cfg{};
-    fill_rope_cfg<HEAD_DIM>(rope_cfg, inv_freq, cfg.curr_depth_start);
-
-    // One full draft-call equivalent: single orchestrator invocation with tree_depth > 1.
-    cost_draft_tree_multilayer_orchestrator_hls(
-        width_policy,
-        cfg.tree_depth,
-        cfg.curr_depth_start,
-        step_input_tokens.data(),
-        step_input_hidden_states.data(),
-        step_last_layer_scores.data(),
-        step_topk_indexs_prev.data(),
-        step_topk_probas_sampling.data(),
-        step_topk_tokens_sampling.data(),
-        w_q.data(), s_q.data(),
-        w_k.data(), s_k.data(),
-        w_v.data(), s_v.data(),
-        w_o.data(), s_o.data(),
-        w_gate.data(), gate_scales.data(),
-        w_up.data(), up_scales.data(),
-        w_down.data(), down_scales.data(),
-        hidden_norm_gamma.data(),
-        embed_norm_gamma.data(),
-        post_attn_norm_gamma.data(),
-        final_norm_gamma.data(),
-        rope_cfg,
-        hbm_k.data(),
-        hbm_v.data(),
-        efficient_lm_head_down_proj_weight.data(),
-        efficient_lm_head_qweight_row_major.data(),
-        efficient_lm_head_scales_row_major.data(),
-        nullptr,   // qzeros optional
-        nullptr,   // g_idx optional
-        lm_head_weight.data(),
-        rank,
-        vocab,
-        cfg.prefix_len,
-        hot_token_id.data(),
-        static_cast<int64_t>(hot_token_id.size()),
-        use_hot_token_id,
-        b,
-        topk,
-        hidden,
-        &io_tree_width,
-        &io_verify_num,
-        &io_cumu_count,
-        cfg.max_node_count,
-        cfg.max_verify_num,
-        cfg.max_tree_width,
-        cumu_tokens.data(),
-        cumu_scores.data(),
-        cumu_deltas.data(),
-        prev_indexs.data(),
-        next_indexs.data(),
-        side_indexs.data(),
-        output_scores.data(),
-        output_tokens.data(),
-        work_scores.data(),
-        sort_scores.data(),
-        output_hidden_states.data(),
-        cache_topk_indices.data(),
-        dbg_curr_layer_scores.data(),
-        dbg_sort_layer_scores.data(),
-        dbg_sort_layer_indices.data(),
-        dbg_parent_indices_in_layer.data(),
-        dbg_remapped_topk_tokens.data(),
-        &executed_depths,
-        &stopped_early);
-
-    // Assertions requested by plan.
-    if (executed_depths != expected_executed_depths) {
-        std::cerr << "[" << scenario_name << "] executed_depths mismatch. got=" << executed_depths
-                  << " expected=" << expected_executed_depths << "\n";
-        return false;
-    }
-    if (stopped_early != expect_stopped_early) {
-        std::cerr << "[" << scenario_name << "] stopped_early mismatch. got=" << stopped_early
-                  << " expected=" << expect_stopped_early << "\n";
-        return false;
-    }
-
-    if (io_cumu_count != expected.final_cumu_count) {
-        std::cerr << "[" << scenario_name << "] io_cumu_count mismatch. got=" << io_cumu_count
-                  << " expected=" << expected.final_cumu_count << "\n";
-        return false;
-    }
-    if (io_tree_width != expected.final_tree_width) {
-        std::cerr << "[" << scenario_name << "] io_tree_width mismatch. got=" << io_tree_width
-                  << " expected=" << expected.final_tree_width << "\n";
-        return false;
-    }
-    if (io_verify_num != expected.final_verify_num) {
-        std::cerr << "[" << scenario_name << "] io_verify_num mismatch. got=" << io_verify_num
-                  << " expected=" << expected.final_verify_num << "\n";
-        return false;
-    }
-
-    if (!changed_vec(before_last_layer_scores, step_last_layer_scores)) {
-        std::cerr << "[" << scenario_name << "] step_last_layer_scores did not update.\n";
-        return false;
-    }
-    if (!changed_vec_i64(before_topk_indexs_prev, step_topk_indexs_prev)) {
-        std::cerr << "[" << scenario_name << "] step_topk_indexs_prev did not update.\n";
-        return false;
-    }
-    if (!changed_vec(before_input_hidden_states, step_input_hidden_states)) {
-        std::cerr << "[" << scenario_name << "] step_input_hidden_states did not update.\n";
-        return false;
-    }
-
-    if (!finite_vec(step_last_layer_scores) || !finite_vec(step_input_hidden_states) ||
-        !finite_vec(output_scores) || !finite_vec(work_scores) || !finite_vec(sort_scores) ||
-        !finite_vec(output_hidden_states)) {
-        std::cerr << "[" << scenario_name << "] non-finite values detected.\n";
-        return false;
-    }
-
-    if (!in_range_i64(output_tokens, 0, vocab)) {
-        std::cerr << "[" << scenario_name << "] output_tokens out of vocabulary range.\n";
-        return false;
-    }
-    if (!in_range_i64(cache_topk_indices, 0, cfg.max_node_count)) {
-        std::cerr << "[" << scenario_name << "] cache_topk_indices out of node range.\n";
-        return false;
-    }
-    const int prefix_range_n = std::max(cfg.init_tree_width, expected.final_tree_width);
-    if (!in_range_i64_prefix(step_topk_indexs_prev, static_cast<size_t>(prefix_range_n), 0,
-                             cfg.max_node_count)) {
-        std::cerr << "[" << scenario_name << "] step_topk_indexs_prev out of node range.\n";
-        return false;
-    }
-    if (!in_range_i64_prefix(dbg_parent_indices_in_layer, static_cast<size_t>(cfg.node_top_k), 0,
-                             cfg.init_tree_width)) {
-        std::cerr << "[" << scenario_name
-                  << "] dbg_parent_indices_in_layer out of parent slot range.\n";
-        return false;
-    }
-
-    if (verbose) {
-        std::cout << "[" << scenario_name << "] PASS"
-                  << " executed_depths=" << executed_depths
-                  << " stopped_early=" << stopped_early
-                  << " io_tree_width=" << io_tree_width
-                  << " io_verify_num=" << io_verify_num
-                  << " io_cumu_count=" << io_cumu_count
+    if (ok) {
+        std::cout << "[PASS] cost_draft_tree_multilayer_orchestrator_tb"
+                  << " gt_mode=" << c.gt_mode
+                  << " executed_depths=" << uut_state.executed_depths
+                  << " stopped_early=" << uut_state.stopped_early
+                  << " io_tree_width=" << uut_state.io_tree_width
+                  << " io_verify_num=" << uut_state.io_verify_num
+                  << " io_cumu_count=" << uut_state.io_cumu_count
                   << "\n";
     }
-    return true;
+
+    return ok;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
     CliOptions opts;
-    std::string err;
-    if (!parse_cli(argc, argv, &opts, &err)) {
-        if (!err.empty()) {
-            std::cerr << "[FAIL] " << err << "\n";
+    std::string err_msg;
+    if (!parse_cli(argc, argv, &opts, &err_msg)) {
+        if (!err_msg.empty()) {
+            std::cerr << "[FAIL] " << err_msg << "\n";
             return 1;
         }
         return 0;
     }
 
-    ScenarioConfig cfg;
-    cfg.tree_depth = opts.tree_depth;
-    cfg.curr_depth_start = 0;
-    cfg.batch_size = 1;
-    cfg.node_top_k = 4;
-    cfg.hidden_size = HIDDEN;
-    cfg.init_tree_width = 4;
-    cfg.init_verify_num = 8;
-    cfg.init_cumu_count = 1;
-    cfg.max_node_count = 256;
-    cfg.max_verify_num = 64;
-    cfg.max_tree_width = TREE_WIDTH;
-    cfg.prefix_len = 8;
-    cfg.efficient_lm_rank = kDefaultRank;
-    cfg.efficient_lm_vocab_size = kDefaultVocab;
-    cfg.max_seq_tokens = kDefaultMaxSeqTokens;
-
-    if (cfg.init_tree_width > cfg.max_tree_width || cfg.init_tree_width > cfg.node_top_k) {
-        std::cerr << "[FAIL] invalid width configuration.\n";
-        return 1;
+    CaseData c;
+    if (!opts.case_file.empty()) {
+        if (!load_case_file(opts.case_file, &c, &err_msg)) {
+            std::cerr << "[FAIL] " << err_msg << "\n";
+            return 1;
+        }
+    } else {
+        c.seed = opts.seed;
+        make_synthetic_case(&c, opts.seed);
     }
-    if (cfg.prefix_len + cfg.curr_depth_start + cfg.tree_depth * cfg.max_tree_width >=
-        cfg.max_seq_tokens) {
-        std::cerr << "[FAIL] max_seq_tokens too small for configured depth/prefix.\n";
+
+    if (!validate_case(c, &err_msg)) {
+        std::cerr << "[FAIL] " << err_msg << "\n";
         return 1;
     }
 
-    // Scenario 1: single orchestrator call, multi-depth, no early stop.
-    const FixedNoStopPolicy fixed_policy{cfg.init_tree_width, cfg.init_verify_num};
-    if (!run_single_call_scenario(
-            "multi_depth_no_stop",
-            cfg,
-            fixed_policy,
-            /*expect_stopped_early=*/false,
-            /*expected_executed_depths=*/cfg.tree_depth,
-            opts.seed,
-            opts.verbose)) {
+    if (opts.dry_run) {
+        const int strict_fields = static_cast<int>(std::count_if(
+            c.expected_mask_fields.begin(), c.expected_mask_fields.end(), [](int v) { return v != 0; }));
+        const int strict_depths = static_cast<int>(std::count_if(
+            c.expected_mask_recurrent_depth.begin(), c.expected_mask_recurrent_depth.end(),
+            [](int v) { return v != 0; }));
+
+        std::cout << "[DRY-RUN] parsed orchestrator case"
+                  << " gt_mode=" << c.gt_mode
+                  << " dims(B,topk,hidden,depth)="
+                  << c.batch_size << "," << c.node_top_k << "," << c.hidden_size << ","
+                  << c.tree_depth
+                  << " init(tree_width,verify,cumu)="
+                  << c.init_tree_width << "," << c.init_verify_num << "," << c.init_cumu_count
+                  << " strict_fields=" << strict_fields << "/" << kMaskFieldCount
+                  << " strict_recurrent_depths=" << strict_depths << "/" << c.tree_depth
+                  << "\n";
+        return 0;
+    }
+
+    if (!run_and_compare(c)) {
+        std::cerr << "[FAIL] cost_draft_tree_multilayer_orchestrator_tb\n";
         return 1;
     }
-
-    // Scenario 2 (optional): deterministic early-stop behavior.
-    if (opts.run_stop_scenario) {
-        if (opts.stop_depth >= cfg.tree_depth - 1) {
-            std::cerr << "[FAIL] --stop-depth should be < tree_depth-1 for early-stop validation.\n";
-            return 1;
-        }
-        const StopAtDepthPolicy stop_policy{cfg.init_tree_width, cfg.init_verify_num, opts.stop_depth};
-        const int expected_executed = std::min(cfg.tree_depth, opts.stop_depth + 1);
-        if (!run_single_call_scenario(
-                "multi_depth_stop_policy",
-                cfg,
-                stop_policy,
-                /*expect_stopped_early=*/true,
-                expected_executed,
-                opts.seed + 17,
-                opts.verbose)) {
-            return 1;
-        }
-    }
-
-    // Scenario 3 (optional): width schedule stress path.
-    if (opts.run_width_change_scenario) {
-        WidthSchedulePolicy schedule_policy{};
-        schedule_policy.widths[0] = 4;
-        schedule_policy.widths[1] = 2;
-        schedule_policy.widths[2] = 4;
-        schedule_policy.widths[3] = 2;
-        schedule_policy.sched_len = 4;
-        schedule_policy.fixed_verify_num = cfg.init_verify_num;
-        if (!run_single_call_scenario(
-                "multi_depth_width_schedule",
-                cfg,
-                schedule_policy,
-                /*expect_stopped_early=*/false,
-                /*expected_executed_depths=*/cfg.tree_depth,
-                opts.seed + 31,
-                opts.verbose)) {
-            return 1;
-        }
-    }
-
-    std::cout << "[PASS] cost_draft_tree_multilayer_orchestrator_tb\n";
     return 0;
 }
