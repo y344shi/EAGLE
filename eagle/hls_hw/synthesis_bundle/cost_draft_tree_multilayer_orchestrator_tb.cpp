@@ -60,6 +60,7 @@ struct CaseData {
     float eps_abs = kDefaultEps;
     float eps_rel = kDefaultEps;
     std::string gt_mode = "synthetic";
+    std::string policy_mode = "dynamic";
 
     std::vector<int64_t> step_input_tokens_init;
     std::vector<float> step_input_hidden_states_init;
@@ -225,6 +226,10 @@ bool load_case_file(const std::string& path, CaseData* out, std::string* err_msg
     const auto it_gt = kv.find("gt_mode");
     if (it_gt != kv.end() && !it_gt->second.empty()) {
         out->gt_mode = it_gt->second[0];
+    }
+    const auto it_policy = kv.find("policy_mode");
+    if (it_policy != kv.end() && !it_policy->second.empty()) {
+        out->policy_mode = it_policy->second[0];
     }
 
     const size_t tree_n = static_cast<size_t>(out->batch_size) * out->max_tree_width;
@@ -979,6 +984,10 @@ bool run_and_compare(const CaseData& c) {
     run_reference_replay(c, &ref_state);
     run_orchestrator_under_test(c, &uut_state);
 
+    const bool is_constant_policy = (c.policy_mode == "constant");
+    const int default_executed_depths = is_constant_policy ? c.tree_depth : ref_state.executed_depths;
+    const bool default_stopped_early = is_constant_policy ? false : ref_state.stopped_early;
+
     const int exp_io_tree_width =
         mask_enabled(c.expected_mask_fields, kMaskIoTreeWidth) ? c.expected_io_tree_width
                                                                 : ref_state.io_tree_width;
@@ -990,10 +999,10 @@ bool run_and_compare(const CaseData& c) {
                                                                 : ref_state.io_cumu_count;
     const int exp_executed_depths =
         mask_enabled(c.expected_mask_fields, kMaskExecutedDepths) ? c.expected_executed_depths
-                                                                   : ref_state.executed_depths;
+                                                                   : default_executed_depths;
     const bool exp_stopped_early =
         mask_enabled(c.expected_mask_fields, kMaskStoppedEarly) ? c.expected_stopped_early
-                                                                 : ref_state.stopped_early;
+                                                                 : default_stopped_early;
 
     const std::vector<int64_t>& exp_cumu_tokens =
         mask_enabled(c.expected_mask_fields, kMaskCumuTokens) ? c.expected_cumu_tokens
@@ -1049,6 +1058,7 @@ bool run_and_compare(const CaseData& c) {
     if (ok) {
         std::cout << "[PASS] cost_draft_tree_multilayer_orchestrator_tb"
                   << " gt_mode=" << c.gt_mode
+                  << " policy_mode=" << c.policy_mode
                   << " executed_depths=" << uut_state.executed_depths
                   << " stopped_early=" << uut_state.stopped_early
                   << " io_tree_width=" << uut_state.io_tree_width
@@ -1098,6 +1108,7 @@ int main(int argc, char** argv) {
 
         std::cout << "[DRY-RUN] parsed orchestrator case"
                   << " gt_mode=" << c.gt_mode
+                  << " policy_mode=" << c.policy_mode
                   << " dims(B,topk,hidden,depth)="
                   << c.batch_size << "," << c.node_top_k << "," << c.hidden_size << ","
                   << c.tree_depth

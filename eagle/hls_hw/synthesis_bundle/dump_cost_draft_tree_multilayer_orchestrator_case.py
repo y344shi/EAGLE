@@ -181,15 +181,276 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20260226)
     parser.add_argument("--eps-abs", type=float, default=1e-5)
     parser.add_argument("--eps-rel", type=float, default=1e-5)
+    parser.add_argument("--e2e-case", type=Path, default=None)
+    parser.add_argument(
+        "--allow-e2e-fallback",
+        action="store_true",
+        help="Allow fallback to synthetic/mixed generation if e2e case is invalid.",
+    )
     args = parser.parse_args()
 
-    if args.tree_depth <= 1:
+    if args.tree_depth <= 1 and args.e2e_case is None:
         raise ValueError("--tree-depth must be > 1")
 
     script_dir = Path(__file__).resolve().parent
     search_dirs = []
     for p in DEFAULT_SEARCH_DIRS:
         search_dirs.append((p if p.is_absolute() else (script_dir.parents[4] / p)).resolve())
+
+    e2e_case_path: Optional[Path]
+    if args.e2e_case is not None:
+        e2e_case_path = args.e2e_case.resolve()
+    else:
+        e2e_case_path = _find_case(search_dirs, "cost_draft_tree_draft_e2e_case.txt")
+
+    if e2e_case_path is not None and e2e_case_path.exists():
+        try:
+            e2e = _parse_key_count_file(e2e_case_path)
+            meta = _get_ints(e2e, "meta", required=True)
+            if len(meta) < 19:
+                raise ValueError("e2e meta must contain at least 19 ints")
+
+            batch_size = meta[0]
+            node_top_k = meta[1]
+            hidden_size = meta[2]
+            tree_depth = meta[3]
+            curr_depth_start = meta[4]
+            prefix_len = meta[5]
+            max_node_count = meta[6]
+            max_verify_num = meta[7]
+            max_tree_width = meta[8]
+            init_tree_width = meta[9]
+            init_verify_num = meta[10]
+            init_cumu_count = meta[11]
+            enable_initial_loop = meta[12]
+            hot_vocab_size = meta[13]
+            use_hot_token_id = meta[14]
+            efficient_lm_rank = meta[15]
+            efficient_lm_vocab_size = meta[16]
+            max_seq_tokens = meta[17]
+            seed = meta[18]
+
+            if batch_size != 1:
+                raise ValueError("e2e case precondition failed: batch_size must be 1")
+            if tree_depth <= 1:
+                raise ValueError("e2e case precondition failed: tree_depth must be > 1")
+            if enable_initial_loop == 0:
+                raise ValueError("e2e case precondition failed: enable_initial_loop must be 1")
+
+            tree_n = batch_size * max_tree_width
+            hidden_n = tree_n * hidden_size
+            per_depth_topk = batch_size * max_tree_width * node_top_k
+            recurrent_n = tree_depth * per_depth_topk
+            node_n = batch_size * max_node_count
+            out_n = batch_size * node_top_k
+            work_n = batch_size * (max_verify_num + node_top_k)
+            sort_n = batch_size * max_verify_num
+
+            eps_abs_vals = _get_floats(e2e, "eps_abs", required=False)
+            eps_rel_vals = _get_floats(e2e, "eps_rel", required=False)
+            eps_abs = eps_abs_vals[0] if eps_abs_vals else args.eps_abs
+            eps_rel = eps_rel_vals[0] if eps_rel_vals else args.eps_rel
+
+            gt_mode = e2e.get("gt_mode", ["strict"])
+            policy_mode = e2e.get("policy_mode", ["dynamic"])
+
+            step_input_tokens_init = _get_i64s(e2e, "step_input_tokens_init", required=True)
+            if len(step_input_tokens_init) != tree_n:
+                raise ValueError("step_input_tokens_init size mismatch in e2e case")
+            step_input_hidden_states_init = _get_floats(
+                e2e, "step_input_hidden_states_init", required=True
+            )
+            if len(step_input_hidden_states_init) != hidden_n:
+                raise ValueError("step_input_hidden_states_init size mismatch in e2e case")
+            step_last_layer_scores_init = _get_floats(
+                e2e, "step_last_layer_scores_init", required=True
+            )
+            if len(step_last_layer_scores_init) != tree_n:
+                raise ValueError("step_last_layer_scores_init size mismatch in e2e case")
+            step_topk_indexs_prev_init = _get_i64s(e2e, "step_topk_indexs_prev_init", required=True)
+            if len(step_topk_indexs_prev_init) != tree_n:
+                raise ValueError("step_topk_indexs_prev_init size mismatch in e2e case")
+
+            hot_token_id = _get_i64s(e2e, "hot_token_id", required=True)
+            if len(hot_token_id) != hot_vocab_size:
+                raise ValueError("hot_token_id size mismatch in e2e case")
+
+            initial_hidden_states = _get_floats(e2e, "initial_hidden_states", required=True)
+            if len(initial_hidden_states) != batch_size * hidden_size:
+                raise ValueError("initial_hidden_states size mismatch in e2e case")
+            initial_topk_probas = _get_floats(e2e, "initial_topk_probas", required=True)
+            if len(initial_topk_probas) != out_n:
+                raise ValueError("initial_topk_probas size mismatch in e2e case")
+            initial_topk_tokens = _get_i64s(e2e, "initial_topk_tokens", required=True)
+            if len(initial_topk_tokens) != out_n:
+                raise ValueError("initial_topk_tokens size mismatch in e2e case")
+
+            policy_next_tree_width = _get_ints(e2e, "policy_next_tree_width", required=True)
+            policy_next_verify_num = _get_ints(e2e, "policy_next_verify_num", required=True)
+            policy_stop_signal = _get_ints(e2e, "policy_stop_signal", required=True)
+            if (
+                len(policy_next_tree_width) != tree_depth
+                or len(policy_next_verify_num) != tree_depth
+                or len(policy_stop_signal) != tree_depth
+            ):
+                raise ValueError("policy_* size mismatch in e2e case")
+
+            recurrent_topk_probas = _get_floats(e2e, "recurrent_topk_probas", required=True)
+            recurrent_topk_tokens = _get_i64s(e2e, "recurrent_topk_tokens", required=True)
+            if len(recurrent_topk_probas) != recurrent_n or len(recurrent_topk_tokens) != recurrent_n:
+                raise ValueError("recurrent_topk_* size mismatch in e2e case")
+
+            strict_recurrent_depth = _get_ints(
+                e2e, "expected_mask_recurrent_depth", required=False
+            )
+            if not strict_recurrent_depth:
+                strict_recurrent_depth = [0] * tree_depth
+            if len(strict_recurrent_depth) != tree_depth:
+                raise ValueError("expected_mask_recurrent_depth size mismatch in e2e case")
+
+            init_legacy_cumu_tokens = _get_i64s(e2e, "init_legacy_cumu_tokens", required=True)
+            init_legacy_cumu_scores = _get_floats(e2e, "init_legacy_cumu_scores", required=True)
+            init_legacy_cumu_deltas = _get_i64s(e2e, "init_legacy_cumu_deltas", required=True)
+            init_legacy_prev_indexs = _get_i64s(e2e, "init_legacy_prev_indexs", required=True)
+            init_legacy_next_indexs = _get_i64s(e2e, "init_legacy_next_indexs", required=True)
+            init_legacy_side_indexs = _get_i64s(e2e, "init_legacy_side_indexs", required=True)
+            init_legacy_output_scores = _get_floats(e2e, "init_legacy_output_scores", required=True)
+            init_legacy_output_tokens = _get_i64s(e2e, "init_legacy_output_tokens", required=True)
+            init_legacy_work_scores = _get_floats(e2e, "init_legacy_work_scores", required=True)
+            init_legacy_sort_scores = _get_floats(e2e, "init_legacy_sort_scores", required=True)
+            if (
+                len(init_legacy_cumu_tokens) != node_n
+                or len(init_legacy_cumu_scores) != node_n
+                or len(init_legacy_cumu_deltas) != node_n
+                or len(init_legacy_prev_indexs) != node_n
+                or len(init_legacy_next_indexs) != node_n
+                or len(init_legacy_side_indexs) != node_n
+                or len(init_legacy_output_scores) != out_n
+                or len(init_legacy_output_tokens) != out_n
+                or len(init_legacy_work_scores) != work_n
+                or len(init_legacy_sort_scores) != sort_n
+            ):
+                raise ValueError("init_legacy_* size mismatch in e2e case")
+
+            expected_io_tree_width = _get_ints(e2e, "expected_io_tree_width", required=True)
+            expected_io_verify_num = _get_ints(e2e, "expected_io_verify_num", required=True)
+            expected_io_cumu_count = _get_ints(e2e, "expected_io_cumu_count", required=True)
+            expected_executed_depths = _get_ints(e2e, "expected_executed_depths", required=True)
+            expected_stopped_early = _get_ints(e2e, "expected_stopped_early", required=True)
+            if (
+                len(expected_io_tree_width) != 1
+                or len(expected_io_verify_num) != 1
+                or len(expected_io_cumu_count) != 1
+                or len(expected_executed_depths) != 1
+                or len(expected_stopped_early) != 1
+            ):
+                raise ValueError("expected scalar outputs size mismatch in e2e case")
+
+            expected_cumu_tokens = _get_i64s(e2e, "expected_cumu_tokens", required=True)
+            expected_cumu_scores = _get_floats(e2e, "expected_cumu_scores", required=True)
+            expected_cumu_deltas = _get_i64s(e2e, "expected_cumu_deltas", required=True)
+            expected_output_scores = _get_floats(e2e, "expected_output_scores", required=True)
+            expected_output_tokens = _get_i64s(e2e, "expected_output_tokens", required=True)
+            if (
+                len(expected_cumu_tokens) != node_n
+                or len(expected_cumu_scores) != node_n
+                or len(expected_cumu_deltas) != node_n
+                or len(expected_output_scores) != out_n
+                or len(expected_output_tokens) != out_n
+            ):
+                raise ValueError("expected final array size mismatch in e2e case")
+
+            expected_mask_fields = _get_ints(e2e, "expected_mask_fields", required=False)
+            if not expected_mask_fields:
+                expected_mask_fields = [1] * 10
+            if len(expected_mask_fields) != 10:
+                raise ValueError("expected_mask_fields size mismatch in e2e case")
+
+            out_path = args.output.resolve()
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with out_path.open("w", encoding="utf-8") as f:
+                f.write("# cost_draft_tree multilayer orchestrator case v1\n")
+                _write_line(
+                    f,
+                    "meta",
+                    [
+                        batch_size,
+                        node_top_k,
+                        hidden_size,
+                        tree_depth,
+                        curr_depth_start,
+                        prefix_len,
+                        max_node_count,
+                        max_verify_num,
+                        max_tree_width,
+                        init_tree_width,
+                        init_verify_num,
+                        init_cumu_count,
+                        enable_initial_loop,
+                        hot_vocab_size,
+                        use_hot_token_id,
+                        efficient_lm_rank,
+                        efficient_lm_vocab_size,
+                        max_seq_tokens,
+                        seed,
+                    ],
+                )
+                _write_float_line(f, "eps_abs", [eps_abs])
+                _write_float_line(f, "eps_rel", [eps_rel])
+                _write_line(f, "gt_mode", gt_mode)
+                _write_line(f, "policy_mode", policy_mode)
+                _write_line(f, "source_flags", [0, 0, 0])
+
+                _write_line(f, "step_input_tokens_init", step_input_tokens_init)
+                _write_float_line(f, "step_input_hidden_states_init", step_input_hidden_states_init)
+                _write_float_line(f, "step_last_layer_scores_init", step_last_layer_scores_init)
+                _write_line(f, "step_topk_indexs_prev_init", step_topk_indexs_prev_init)
+
+                _write_line(f, "hot_token_id", hot_token_id)
+
+                _write_float_line(f, "initial_hidden_states", initial_hidden_states)
+                _write_float_line(f, "initial_topk_probas", initial_topk_probas)
+                _write_line(f, "initial_topk_tokens", initial_topk_tokens)
+
+                _write_line(f, "policy_next_tree_width", policy_next_tree_width)
+                _write_line(f, "policy_next_verify_num", policy_next_verify_num)
+                _write_line(f, "policy_stop_signal", policy_stop_signal)
+
+                _write_float_line(f, "recurrent_topk_probas", recurrent_topk_probas)
+                _write_line(f, "recurrent_topk_tokens", recurrent_topk_tokens)
+                _write_line(f, "expected_mask_recurrent_depth", strict_recurrent_depth)
+
+                _write_line(f, "init_legacy_cumu_tokens", init_legacy_cumu_tokens)
+                _write_float_line(f, "init_legacy_cumu_scores", init_legacy_cumu_scores)
+                _write_line(f, "init_legacy_cumu_deltas", init_legacy_cumu_deltas)
+                _write_line(f, "init_legacy_prev_indexs", init_legacy_prev_indexs)
+                _write_line(f, "init_legacy_next_indexs", init_legacy_next_indexs)
+                _write_line(f, "init_legacy_side_indexs", init_legacy_side_indexs)
+                _write_float_line(f, "init_legacy_output_scores", init_legacy_output_scores)
+                _write_line(f, "init_legacy_output_tokens", init_legacy_output_tokens)
+                _write_float_line(f, "init_legacy_work_scores", init_legacy_work_scores)
+                _write_float_line(f, "init_legacy_sort_scores", init_legacy_sort_scores)
+
+                _write_line(f, "expected_io_tree_width", expected_io_tree_width)
+                _write_line(f, "expected_io_verify_num", expected_io_verify_num)
+                _write_line(f, "expected_io_cumu_count", expected_io_cumu_count)
+                _write_line(f, "expected_executed_depths", expected_executed_depths)
+                _write_line(f, "expected_stopped_early", expected_stopped_early)
+
+                _write_line(f, "expected_cumu_tokens", expected_cumu_tokens)
+                _write_float_line(f, "expected_cumu_scores", expected_cumu_scores)
+                _write_line(f, "expected_cumu_deltas", expected_cumu_deltas)
+                _write_float_line(f, "expected_output_scores", expected_output_scores)
+                _write_line(f, "expected_output_tokens", expected_output_tokens)
+                _write_line(f, "expected_mask_fields", expected_mask_fields)
+
+            print(f"Wrote orchestrator case from e2e capture: {out_path}")
+            print(f"E2E source: {e2e_case_path}")
+            return
+        except Exception as exc:
+            if not args.allow_e2e_fallback:
+                raise
+            print(f"[warn] e2e case parse failed ({e2e_case_path}): {exc}; fallback enabled.")
 
     fused_case_path = _find_case(search_dirs, "cost_draft_tree_fused_wiring_case.txt")
     update_case_path = _find_case(search_dirs, "cost_draft_tree_update_case.txt")
@@ -440,6 +701,7 @@ def main() -> None:
         _write_float_line(f, "eps_abs", [args.eps_abs])
         _write_float_line(f, "eps_rel", [args.eps_rel])
         _write_line(f, "gt_mode", [gt_mode])
+        _write_line(f, "policy_mode", ["dynamic"])
         _write_line(
             f,
             "source_flags",
