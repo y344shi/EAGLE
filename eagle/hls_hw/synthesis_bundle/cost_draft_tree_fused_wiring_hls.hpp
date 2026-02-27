@@ -636,16 +636,64 @@ copy_injected_topk_loop_t:
 // KV management uses contiguous HBM ancestor-chain (parent_indices_accum);
 // no controller node graph or tree mask is needed.
 //
-// WidthPolicy contract:
-//   void operator()(
-//       int depth, int batch_size, int curr_tree_width, int node_top_k, int max_tree_width,
-//       int curr_verify_num, const float* work_scores, int max_verify_num,
-//       int* next_tree_width, int* next_verify_num, bool* stop_signal);
-template <typename WidthPolicy>
-inline void cost_draft_tree_multilayer_orchestrator_hls(
-    WidthPolicy width_policy,
+// Policy schedule contract:
+//   If use_policy_schedule=true and schedule arrays are non-null, depth-wise policy comes from:
+//     policy_next_tree_width[depth], policy_next_verify_num[depth], policy_stop_signal[depth].
+//   Otherwise, fixed policy is used: keep curr_tree_width/curr_verify_num and never stop.
+inline void cdt_apply_policy_schedule_hls(
+    int depth,
+    int batch_size,
+    int curr_tree_width,
+    int node_top_k,
+    int max_tree_width,
+    int curr_verify_num,
+    const float* work_scores,
+    int max_verify_num,
+    const int* policy_next_tree_width,
+    const int* policy_next_verify_num,
+    const int* policy_stop_signal,
+    int policy_depth,
+    bool use_policy_schedule,
+    int* next_tree_width,
+    int* next_verify_num,
+    bool* stop_signal) {
+#pragma HLS INLINE
+    (void)batch_size;
+    (void)node_top_k;
+    (void)max_tree_width;
+    (void)work_scores;
+    (void)max_verify_num;
+    int scheduled_tree_width = curr_tree_width;
+    int scheduled_verify_num = curr_verify_num;
+    bool scheduled_stop = false;
+    if (use_policy_schedule && policy_next_tree_width != nullptr &&
+        policy_next_verify_num != nullptr && policy_stop_signal != nullptr &&
+        depth >= 0 && depth < policy_depth) {
+        scheduled_tree_width = policy_next_tree_width[depth];
+        scheduled_verify_num = policy_next_verify_num[depth];
+        scheduled_stop = (policy_stop_signal[depth] != 0);
+    }
+    if (next_tree_width != nullptr) {
+        *next_tree_width = scheduled_tree_width;
+    }
+    if (next_verify_num != nullptr) {
+        *next_verify_num = scheduled_verify_num;
+    }
+    if (stop_signal != nullptr) {
+        *stop_signal = scheduled_stop;
+    }
+}
+
+inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
     int tree_depth,
     int curr_depth_start,
+
+    // Optional policy schedule (depth-indexed).
+    const int* policy_next_tree_width,   // [policy_depth] optional
+    const int* policy_next_verify_num,   // [policy_depth] optional
+    const int* policy_stop_signal,       // [policy_depth] optional (0/1)
+    int policy_depth,
+    bool use_policy_schedule,
 
     // Step-working buffers (in/out across depths)
     int64_t* step_input_tokens,           // packed [batch, tree_width]
@@ -667,7 +715,7 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
     const float* embed_norm_gamma,
     const float* post_attn_norm_gamma,
     const float* final_norm_gamma,
-    const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& rope_cfg,
+    const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>* rope_cfg,
     vec_t<VEC_W>* hbm_k,
     vec_t<VEC_W>* hbm_v,
     const uint16_t* efficient_lm_head_down_proj_weight,
@@ -762,7 +810,7 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
         w_v == nullptr || s_v == nullptr || w_o == nullptr || s_o == nullptr ||
         w_gate == nullptr || gate_scales == nullptr || w_up == nullptr || up_scales == nullptr ||
         w_down == nullptr || down_scales == nullptr || hidden_norm_gamma == nullptr ||
-        embed_norm_gamma == nullptr || post_attn_norm_gamma == nullptr ||
+        embed_norm_gamma == nullptr || post_attn_norm_gamma == nullptr || rope_cfg == nullptr ||
         final_norm_gamma == nullptr || hbm_k == nullptr || hbm_v == nullptr ||
         efficient_lm_head_down_proj_weight == nullptr ||
         efficient_lm_head_qweight_row_major == nullptr ||
@@ -913,7 +961,7 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
         int next_tree_width = curr_tree_width;
         int next_verify_num = curr_verify_num;
         bool stop_signal = false;
-        width_policy(
+        cdt_apply_policy_schedule_hls(
             0,
             batch_size,
             1,
@@ -922,6 +970,11 @@ inline void cost_draft_tree_multilayer_orchestrator_hls(
             curr_verify_num,
             work_scores,
             max_verify_num,
+            policy_next_tree_width,
+            policy_next_verify_num,
+            policy_stop_signal,
+            policy_depth,
+            use_policy_schedule,
             &next_tree_width,
             &next_verify_num,
             &stop_signal);
@@ -967,7 +1020,7 @@ orchestrator_depth_loop:
         int next_verify_num = curr_verify_num;
         bool stop_signal = false;
         if (!run_initial_loop) {
-            width_policy(
+            cdt_apply_policy_schedule_hls(
                 d,
                 batch_size,
                 curr_tree_width,
@@ -976,6 +1029,11 @@ orchestrator_depth_loop:
                 curr_verify_num,
                 work_scores,
                 max_verify_num,
+                policy_next_tree_width,
+                policy_next_verify_num,
+                policy_stop_signal,
+                policy_depth,
+                use_policy_schedule,
                 &next_tree_width,
                 &next_verify_num,
                 &stop_signal);
@@ -1009,7 +1067,7 @@ orchestrator_depth_loop:
             w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales, w_up, up_scales,
             w_down, down_scales,
             hidden_norm_gamma, embed_norm_gamma, post_attn_norm_gamma, final_norm_gamma,
-            rope_cfg,
+            *rope_cfg,
             hbm_k, hbm_v,
             efficient_lm_head_down_proj_weight,
             efficient_lm_head_qweight_row_major,
@@ -1100,7 +1158,7 @@ orchestrator_depth_loop:
 
         ++depth_done;
         if (run_initial_loop) {
-            width_policy(
+            cdt_apply_policy_schedule_hls(
                 d,
                 batch_size,
                 curr_tree_width,
@@ -1109,6 +1167,11 @@ orchestrator_depth_loop:
                 curr_verify_num,
                 work_scores,
                 max_verify_num,
+                policy_next_tree_width,
+                policy_next_verify_num,
+                policy_stop_signal,
+                policy_depth,
+                use_policy_schedule,
                 &next_tree_width,
                 &next_verify_num,
                 &stop_signal);
@@ -1158,5 +1221,244 @@ orchestrator_finalize:
 
 } // namespace hls
 } // namespace tmac
+
+extern "C" void cost_draft_tree_multilayer_orchestrator_hls(
+    int tree_depth,
+    int curr_depth_start,
+    const int* policy_next_tree_width,
+    const int* policy_next_verify_num,
+    const int* policy_stop_signal,
+    int policy_depth,
+    bool use_policy_schedule,
+    int64_t* step_input_tokens,
+    float* step_input_hidden_states,
+    float* step_last_layer_scores,
+    int64_t* step_topk_indexs_prev,
+    float* step_topk_probas_sampling,
+    int64_t* step_topk_tokens_sampling,
+    const tmac::hls::pack512* w_q,     const float* s_q,
+    const tmac::hls::pack512* w_k,     const float* s_k,
+    const tmac::hls::pack512* w_v,     const float* s_v,
+    const tmac::hls::pack512* w_o,     const float* s_o,
+    const tmac::hls::pack512* w_gate,  const float* gate_scales,
+    const tmac::hls::pack512* w_up,    const float* up_scales,
+    const tmac::hls::pack512* w_down,  const float* down_scales,
+    const float* hidden_norm_gamma,
+    const float* embed_norm_gamma,
+    const float* post_attn_norm_gamma,
+    const float* final_norm_gamma,
+    const tmac::hls::RopeConfig<tmac::hls::NUM_HEADS, tmac::hls::NUM_KV_HEADS, tmac::hls::HEAD_DIM>* rope_cfg,
+    tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_k,
+    tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_v,
+    const uint16_t* efficient_lm_head_down_proj_weight,
+    const int32_t* efficient_lm_head_qweight_row_major,
+    const uint16_t* efficient_lm_head_scales_row_major,
+    const int32_t* efficient_lm_head_qzeros,
+    const int32_t* efficient_lm_head_g_idx,
+    const uint16_t* lm_head_weight,
+    int efficient_lm_rank,
+    int efficient_lm_vocab_size,
+    int prefix_len,
+    const int64_t* hot_token_id,
+    int64_t hot_token_vocab_size,
+    bool use_hot_token_id,
+    int batch_size,
+    int node_top_k,
+    int hidden_size,
+    int* io_tree_width,
+    int* io_verify_num,
+    int* io_cumu_count,
+    int max_node_count,
+    int max_verify_num,
+    int max_tree_width,
+    int64_t* cumu_tokens,
+    float* cumu_scores,
+    int64_t* cumu_deltas,
+    int64_t* prev_indexs,
+    int64_t* next_indexs,
+    int64_t* side_indexs,
+    float* output_scores,
+    int64_t* output_tokens,
+    float* work_scores,
+    float* sort_scores,
+    float* output_hidden_states,
+    int64_t* cache_topk_indices,
+    float* dbg_curr_layer_scores,
+    float* dbg_sort_layer_scores,
+    int64_t* dbg_sort_layer_indices,
+    int64_t* dbg_parent_indices_in_layer,
+    int64_t* dbg_remapped_topk_tokens,
+    int* executed_depths,
+    bool* stopped_early,
+    bool enable_initial_loop,
+    const float* initial_logits,
+    const int64_t* initial_candidate_indices,
+    int initial_logits_width,
+    const float* initial_topk_probas,
+    const int64_t* initial_topk_tokens,
+    const float* initial_hidden_states) {
+#pragma HLS INLINE off
+#pragma HLS INTERFACE m_axi port=policy_next_tree_width offset=slave bundle=gmem_policy
+#pragma HLS INTERFACE m_axi port=policy_next_verify_num offset=slave bundle=gmem_policy
+#pragma HLS INTERFACE m_axi port=policy_stop_signal offset=slave bundle=gmem_policy
+
+#pragma HLS INTERFACE m_axi port=step_input_tokens offset=slave bundle=gmem_step0
+#pragma HLS INTERFACE m_axi port=step_input_hidden_states offset=slave bundle=gmem_step1
+#pragma HLS INTERFACE m_axi port=step_last_layer_scores offset=slave bundle=gmem_step2
+#pragma HLS INTERFACE m_axi port=step_topk_indexs_prev offset=slave bundle=gmem_step3
+#pragma HLS INTERFACE m_axi port=step_topk_probas_sampling offset=slave bundle=gmem_step4
+#pragma HLS INTERFACE m_axi port=step_topk_tokens_sampling offset=slave bundle=gmem_step5
+
+#pragma HLS INTERFACE m_axi port=w_q offset=slave bundle=gmem0
+#pragma HLS INTERFACE m_axi port=s_q offset=slave bundle=gmem0
+#pragma HLS INTERFACE m_axi port=w_k offset=slave bundle=gmem1
+#pragma HLS INTERFACE m_axi port=s_k offset=slave bundle=gmem1
+#pragma HLS INTERFACE m_axi port=w_v offset=slave bundle=gmem2
+#pragma HLS INTERFACE m_axi port=s_v offset=slave bundle=gmem2
+#pragma HLS INTERFACE m_axi port=w_o offset=slave bundle=gmem3
+#pragma HLS INTERFACE m_axi port=s_o offset=slave bundle=gmem3
+#pragma HLS INTERFACE m_axi port=w_gate offset=slave bundle=gmem4
+#pragma HLS INTERFACE m_axi port=gate_scales offset=slave bundle=gmem4
+#pragma HLS INTERFACE m_axi port=w_up offset=slave bundle=gmem5
+#pragma HLS INTERFACE m_axi port=up_scales offset=slave bundle=gmem5
+#pragma HLS INTERFACE m_axi port=w_down offset=slave bundle=gmem6
+#pragma HLS INTERFACE m_axi port=down_scales offset=slave bundle=gmem6
+#pragma HLS INTERFACE m_axi port=hidden_norm_gamma offset=slave bundle=gmem7
+#pragma HLS INTERFACE m_axi port=embed_norm_gamma offset=slave bundle=gmem7
+#pragma HLS INTERFACE m_axi port=post_attn_norm_gamma offset=slave bundle=gmem7
+#pragma HLS INTERFACE m_axi port=final_norm_gamma offset=slave bundle=gmem7
+#pragma HLS INTERFACE m_axi port=rope_cfg offset=slave bundle=gmem_cfg
+#pragma HLS INTERFACE m_axi port=hbm_k offset=slave bundle=gmem8
+#pragma HLS INTERFACE m_axi port=hbm_v offset=slave bundle=gmem9
+
+#pragma HLS INTERFACE m_axi port=efficient_lm_head_down_proj_weight offset=slave bundle=gmem11
+#pragma HLS INTERFACE m_axi port=efficient_lm_head_qweight_row_major offset=slave bundle=gmem12
+#pragma HLS INTERFACE m_axi port=efficient_lm_head_scales_row_major offset=slave bundle=gmem13
+#pragma HLS INTERFACE m_axi port=efficient_lm_head_qzeros offset=slave bundle=gmem14
+#pragma HLS INTERFACE m_axi port=efficient_lm_head_g_idx offset=slave bundle=gmem14
+#pragma HLS INTERFACE m_axi port=lm_head_weight offset=slave bundle=gmem15
+#pragma HLS INTERFACE m_axi port=hot_token_id offset=slave bundle=gmem_hot
+
+#pragma HLS INTERFACE m_axi port=io_tree_width offset=slave bundle=gmem_io
+#pragma HLS INTERFACE m_axi port=io_verify_num offset=slave bundle=gmem_io
+#pragma HLS INTERFACE m_axi port=io_cumu_count offset=slave bundle=gmem_io
+
+#pragma HLS INTERFACE m_axi port=cumu_tokens offset=slave bundle=gmem_state0
+#pragma HLS INTERFACE m_axi port=cumu_scores offset=slave bundle=gmem_state1
+#pragma HLS INTERFACE m_axi port=cumu_deltas offset=slave bundle=gmem_state2
+#pragma HLS INTERFACE m_axi port=prev_indexs offset=slave bundle=gmem_state3
+#pragma HLS INTERFACE m_axi port=next_indexs offset=slave bundle=gmem_state4
+#pragma HLS INTERFACE m_axi port=side_indexs offset=slave bundle=gmem_state5
+#pragma HLS INTERFACE m_axi port=output_scores offset=slave bundle=gmem_state6
+#pragma HLS INTERFACE m_axi port=output_tokens offset=slave bundle=gmem_state7
+#pragma HLS INTERFACE m_axi port=work_scores offset=slave bundle=gmem_state8
+#pragma HLS INTERFACE m_axi port=sort_scores offset=slave bundle=gmem_state9
+#pragma HLS INTERFACE m_axi port=output_hidden_states offset=slave bundle=gmem_state10
+#pragma HLS INTERFACE m_axi port=cache_topk_indices offset=slave bundle=gmem_state11
+
+#pragma HLS INTERFACE m_axi port=dbg_curr_layer_scores offset=slave bundle=gmem_dbg0
+#pragma HLS INTERFACE m_axi port=dbg_sort_layer_scores offset=slave bundle=gmem_dbg1
+#pragma HLS INTERFACE m_axi port=dbg_sort_layer_indices offset=slave bundle=gmem_dbg2
+#pragma HLS INTERFACE m_axi port=dbg_parent_indices_in_layer offset=slave bundle=gmem_dbg3
+#pragma HLS INTERFACE m_axi port=dbg_remapped_topk_tokens offset=slave bundle=gmem_dbg4
+#pragma HLS INTERFACE m_axi port=executed_depths offset=slave bundle=gmem_dbg5
+#pragma HLS INTERFACE m_axi port=stopped_early offset=slave bundle=gmem_dbg5
+
+#pragma HLS INTERFACE m_axi port=initial_logits offset=slave bundle=gmem_init0
+#pragma HLS INTERFACE m_axi port=initial_candidate_indices offset=slave bundle=gmem_init1
+#pragma HLS INTERFACE m_axi port=initial_topk_probas offset=slave bundle=gmem_init2
+#pragma HLS INTERFACE m_axi port=initial_topk_tokens offset=slave bundle=gmem_init3
+#pragma HLS INTERFACE m_axi port=initial_hidden_states offset=slave bundle=gmem_init4
+
+#pragma HLS INTERFACE s_axilite port=tree_depth bundle=control
+#pragma HLS INTERFACE s_axilite port=curr_depth_start bundle=control
+#pragma HLS INTERFACE s_axilite port=policy_depth bundle=control
+#pragma HLS INTERFACE s_axilite port=use_policy_schedule bundle=control
+#pragma HLS INTERFACE s_axilite port=efficient_lm_rank bundle=control
+#pragma HLS INTERFACE s_axilite port=efficient_lm_vocab_size bundle=control
+#pragma HLS INTERFACE s_axilite port=prefix_len bundle=control
+#pragma HLS INTERFACE s_axilite port=hot_token_vocab_size bundle=control
+#pragma HLS INTERFACE s_axilite port=use_hot_token_id bundle=control
+#pragma HLS INTERFACE s_axilite port=batch_size bundle=control
+#pragma HLS INTERFACE s_axilite port=node_top_k bundle=control
+#pragma HLS INTERFACE s_axilite port=hidden_size bundle=control
+#pragma HLS INTERFACE s_axilite port=max_node_count bundle=control
+#pragma HLS INTERFACE s_axilite port=max_verify_num bundle=control
+#pragma HLS INTERFACE s_axilite port=max_tree_width bundle=control
+#pragma HLS INTERFACE s_axilite port=enable_initial_loop bundle=control
+#pragma HLS INTERFACE s_axilite port=initial_logits_width bundle=control
+#pragma HLS INTERFACE s_axilite port=return bundle=control
+
+    tmac::hls::cost_draft_tree_multilayer_orchestrator_impl_hls(
+        tree_depth,
+        curr_depth_start,
+        policy_next_tree_width,
+        policy_next_verify_num,
+        policy_stop_signal,
+        policy_depth,
+        use_policy_schedule,
+        step_input_tokens,
+        step_input_hidden_states,
+        step_last_layer_scores,
+        step_topk_indexs_prev,
+        step_topk_probas_sampling,
+        step_topk_tokens_sampling,
+        w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales, w_up, up_scales, w_down,
+        down_scales,
+        hidden_norm_gamma,
+        embed_norm_gamma,
+        post_attn_norm_gamma,
+        final_norm_gamma,
+        rope_cfg,
+        hbm_k,
+        hbm_v,
+        efficient_lm_head_down_proj_weight,
+        efficient_lm_head_qweight_row_major,
+        efficient_lm_head_scales_row_major,
+        efficient_lm_head_qzeros,
+        efficient_lm_head_g_idx,
+        lm_head_weight,
+        efficient_lm_rank,
+        efficient_lm_vocab_size,
+        prefix_len,
+        hot_token_id,
+        hot_token_vocab_size,
+        use_hot_token_id,
+        batch_size,
+        node_top_k,
+        hidden_size,
+        io_tree_width,
+        io_verify_num,
+        io_cumu_count,
+        max_node_count,
+        max_verify_num,
+        max_tree_width,
+        cumu_tokens,
+        cumu_scores,
+        cumu_deltas,
+        prev_indexs,
+        next_indexs,
+        side_indexs,
+        output_scores,
+        output_tokens,
+        work_scores,
+        sort_scores,
+        output_hidden_states,
+        cache_topk_indices,
+        dbg_curr_layer_scores,
+        dbg_sort_layer_scores,
+        dbg_sort_layer_indices,
+        dbg_parent_indices_in_layer,
+        dbg_remapped_topk_tokens,
+        executed_depths,
+        stopped_early,
+        enable_initial_loop,
+        initial_logits,
+        initial_candidate_indices,
+        initial_logits_width,
+        initial_topk_probas,
+        initial_topk_tokens,
+        initial_hidden_states);
+}
 
 #endif // TMAC_COST_DRAFT_TREE_FUSED_WIRING_HLS_HPP

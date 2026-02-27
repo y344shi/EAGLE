@@ -808,35 +808,13 @@ void run_orchestrator_under_test(const CaseData& c, RuntimeState* s) {
     cdt_set_orch_tb_topk_provider(&provider);
 
     cost_draft_tree_multilayer_orchestrator_hls(
-        [&](int depth,
-            int batch_size,
-            int curr_tree_width,
-            int node_top_k,
-            int max_tree_width,
-            int curr_verify_num,
-            const float* work_scores,
-            int max_verify_num,
-            int* next_tree_width,
-            int* next_verify_num,
-            bool* stop_signal) {
-            (void)batch_size;
-            (void)curr_tree_width;
-            (void)node_top_k;
-            (void)max_tree_width;
-            (void)curr_verify_num;
-            (void)work_scores;
-            (void)max_verify_num;
-            schedule_for_depth(
-                c,
-                depth,
-                curr_tree_width,
-                curr_verify_num,
-                next_tree_width,
-                next_verify_num,
-                stop_signal);
-        },
         c.tree_depth,
         c.curr_depth_start,
+        c.policy_next_tree_width.data(),
+        c.policy_next_verify_num.data(),
+        c.policy_stop_signal.data(),
+        c.tree_depth,
+        true,
         s->step_input_tokens.data(),
         s->step_input_hidden_states.data(),
         s->step_last_layer_scores.data(),
@@ -854,7 +832,7 @@ void run_orchestrator_under_test(const CaseData& c, RuntimeState* s) {
         dummy_scale.data(),
         dummy_scale.data(),
         dummy_scale.data(),
-        rope_cfg,
+        &rope_cfg,
         dummy_vec.data(),
         dummy_vec.data(),
         dummy_u16.data(),
