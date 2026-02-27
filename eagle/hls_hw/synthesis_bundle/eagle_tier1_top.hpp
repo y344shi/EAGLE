@@ -6,7 +6,7 @@
 // draining the KV cache stream (previously only head0 consumed valid data).
 
 #include "tmac_utils.hpp"
-#include "attention_solver.hpp"
+//#include "attention_solver.hpp"
 #include "fused_online_attention_pwl.hpp"
 #include "deep_pipeline_lutmac.hpp"
 #include "contiguous_kv_hls.hpp"
@@ -56,7 +56,7 @@ constexpr float RMS_EPS = 1e-5f;
 constexpr float RESIDUAL_SCALE = 1.4f / 5.7445626465380286f; // sqrt(33)
 constexpr int MAX_CTX = 2048; // maximum sequence length buffered locally
 
-constexpr int TREE_WIDTH = 4; // TEMPORARY, COULD BE 1,2,4,8
+//constexpr int TREE_WIDTH = 4; // TEMPORARY, COULD BE 1,2,4,8
 constexpr int NUM_CHUNKS = (TREE_WIDTH * HIDDEN) / VEC_W;
 
 using tmac::hls::vec_t;

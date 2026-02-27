@@ -25,12 +25,14 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
 
     // rms norm each of TREE_WIDTH tokens
     for (int t = 0; t < TREE_WIDTH; t++) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
         float buf[HIDDEN_DIM];
     #pragma HLS ARRAY_PARTITION variable = buf cyclic factor = VEC_W
 
         // Load and accumulate sum of squares
         float sum_sq = 0.0f;
         for (int i = 0; i < HIDDEN_DIM / VEC_W; ++i) {
+    #pragma HLS loop_tripcount min=HIDDEN_DIM/VEC_W max=HIDDEN_DIM/VEC_W
     #pragma HLS PIPELINE II = 2
             vec_t<VEC_W> v = in_stream.read();
             float partial = 0.0f;
@@ -48,6 +50,7 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
         float scale = ::hls::sqrt(sum_sq / HIDDEN_DIM + eps);
         // Normalize and apply gamma
         for (int i = 0; i < HIDDEN_DIM / VEC_W; ++i) {
+    #pragma HLS loop_tripcount min=HIDDEN_DIM/VEC_W max=HIDDEN_DIM/VEC_W
     #pragma HLS PIPELINE II = 2
             vec_t<VEC_W> out;
             for (int j = 0; j < VEC_W; ++j) {

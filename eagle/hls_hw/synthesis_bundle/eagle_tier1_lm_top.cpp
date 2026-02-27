@@ -8,7 +8,9 @@ void sink_reasoning_stream(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& reas
                            float* reasoning_state_out) {
 #pragma HLS INLINE off
     for (int t = 0; t < tmac::hls::TREE_WIDTH; ++t) {
+#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH
         for (int i = 0; i < tmac::hls::HIDDEN / tmac::hls::VEC_W; ++i) {
+#pragma HLS loop_tripcount min=tmac::hls::HIDDEN/tmac::hls::VEC_W max=tmac::hls::HIDDEN/tmac::hls::VEC_W
 #pragma HLS PIPELINE II=1
             auto v = reasoning_stream.read();
             for (int j = 0; j < tmac::hls::VEC_W; ++j) {
@@ -24,7 +26,9 @@ void collect_logits_stream(
     float logits_hidden[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax]) {
 #pragma HLS INLINE off
     for (int t = 0; t < tmac::hls::TREE_WIDTH; t++) {
+#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH
         for (int i = 0; i < tmac::hls::HIDDEN / tmac::hls::VEC_W; ++i) {
+#pragma HLS loop_tripcount min=tmac::hls::HIDDEN/tmac::hls::VEC_W max=tmac::hls::HIDDEN/tmac::hls::VEC_W
     #pragma HLS PIPELINE II=1
             auto v = logits_stream.read();
             for (int j = 0; j < tmac::hls::VEC_W; ++j) {
@@ -77,43 +81,6 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
                         int prefix_len,
                         int current_depth,
                         const int* parent_indices_per_layer) {
-#pragma HLS INTERFACE axis port=hidden_in_stream
-#pragma HLS INTERFACE axis port=embed_in_stream
-#pragma HLS INTERFACE m_axi port=w_q offset=slave bundle=gmem0 depth=TMAC_W_Q_DEPTH
-#pragma HLS INTERFACE m_axi port=s_q offset=slave bundle=gmem0 depth=TMAC_S_Q_DEPTH
-#pragma HLS INTERFACE m_axi port=w_k offset=slave bundle=gmem1 depth=TMAC_W_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=s_k offset=slave bundle=gmem1 depth=TMAC_S_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=w_v offset=slave bundle=gmem2 depth=TMAC_W_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=s_v offset=slave bundle=gmem2 depth=TMAC_S_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=w_o offset=slave bundle=gmem3 depth=TMAC_W_O_DEPTH
-#pragma HLS INTERFACE m_axi port=s_o offset=slave bundle=gmem3 depth=TMAC_S_O_DEPTH
-#pragma HLS INTERFACE m_axi port=w_gate offset=slave bundle=gmem4 depth=TMAC_W_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=gate_scales offset=slave bundle=gmem4 depth=TMAC_S_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=w_up offset=slave bundle=gmem5 depth=TMAC_W_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=up_scales offset=slave bundle=gmem5 depth=TMAC_S_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=w_down offset=slave bundle=gmem6 depth=TMAC_W_DOWN_DEPTH
-#pragma HLS INTERFACE m_axi port=down_scales offset=slave bundle=gmem6 depth=TMAC_S_DOWN_DEPTH
-#pragma HLS INTERFACE m_axi port=hidden_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=embed_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=post_attn_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=final_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=hbm_k offset=slave bundle=gmem8 depth=TMAC_KV_CACHE_DEPTH
-#pragma HLS INTERFACE m_axi port=hbm_v offset=slave bundle=gmem9 depth=TMAC_KV_CACHE_DEPTH
-#pragma HLS INTERFACE m_axi port=lm_w0 bundle=gmem_lm0 depth=1200000
-#pragma HLS INTERFACE m_axi port=lm_w1 bundle=gmem_lm1 depth=1200000
-#pragma HLS INTERFACE m_axi port=lm_w2 bundle=gmem_lm2 depth=1200000
-#pragma HLS INTERFACE m_axi port=lm_w3 bundle=gmem_lm3 depth=1200000
-#pragma HLS INTERFACE m_axi port=lm_w4 bundle=gmem_lm4 depth=1200000
-#pragma HLS INTERFACE m_axi port=lm_w5 bundle=gmem_lm5 depth=1200000
-#pragma HLS INTERFACE m_axi port=lm_w6 bundle=gmem_lm6 depth=1200000
-#pragma HLS INTERFACE m_axi port=lm_w7 bundle=gmem_lm7 depth=1200000
-#pragma HLS INTERFACE m_axi port=reasoning_state_out bundle=gmem10 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE s_axilite port=prefix_len bundle=control
-#pragma HLS INTERFACE s_axilite port=current_depth bundle=control
-#pragma HLS INTERFACE s_axilite port=best_id bundle=control
-#pragma HLS INTERFACE s_axilite port=best_score bundle=control
-#pragma HLS INTERFACE s_axilite port=reasoning_state_out bundle=control
-#pragma HLS INTERFACE s_axilite port=return bundle=control
 
     // Integration note:
     // Prefer EAGLE4 efficient LM-head path when all required buffers/dims are provided.
@@ -217,50 +184,6 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
                                int prefix_len,
                                int current_depth,
                                const int* parent_indices_per_layer) {
-#pragma HLS INTERFACE axis port=hidden_in_stream
-#pragma HLS INTERFACE axis port=embed_in_stream
-#pragma HLS INTERFACE m_axi port=w_q offset=slave bundle=gmem0 depth=TMAC_W_Q_DEPTH
-#pragma HLS INTERFACE m_axi port=s_q offset=slave bundle=gmem0 depth=TMAC_S_Q_DEPTH
-#pragma HLS INTERFACE m_axi port=w_k offset=slave bundle=gmem1 depth=TMAC_W_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=s_k offset=slave bundle=gmem1 depth=TMAC_S_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=w_v offset=slave bundle=gmem2 depth=TMAC_W_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=s_v offset=slave bundle=gmem2 depth=TMAC_S_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=w_o offset=slave bundle=gmem3 depth=TMAC_W_O_DEPTH
-#pragma HLS INTERFACE m_axi port=s_o offset=slave bundle=gmem3 depth=TMAC_S_O_DEPTH
-#pragma HLS INTERFACE m_axi port=w_gate offset=slave bundle=gmem4 depth=TMAC_W_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=gate_scales offset=slave bundle=gmem4 depth=TMAC_S_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=w_up offset=slave bundle=gmem5 depth=TMAC_W_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=up_scales offset=slave bundle=gmem5 depth=TMAC_S_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=w_down offset=slave bundle=gmem6 depth=TMAC_W_DOWN_DEPTH
-#pragma HLS INTERFACE m_axi port=down_scales offset=slave bundle=gmem6 depth=TMAC_S_DOWN_DEPTH
-#pragma HLS INTERFACE m_axi port=hidden_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=embed_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=post_attn_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=final_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=hbm_k offset=slave bundle=gmem8 depth=TMAC_KV_CACHE_DEPTH
-#pragma HLS INTERFACE m_axi port=hbm_v offset=slave bundle=gmem9 depth=TMAC_KV_CACHE_DEPTH
-#pragma HLS INTERFACE m_axi port=efficient_lm_head_down_proj_weight bundle=gmem11 depth=262144
-#pragma HLS INTERFACE m_axi port=efficient_lm_head_qweight_row_major bundle=gmem12 depth=5000000
-#pragma HLS INTERFACE m_axi port=efficient_lm_head_scales_row_major bundle=gmem13 depth=300000
-#pragma HLS INTERFACE m_axi port=efficient_lm_head_qzeros bundle=gmem14 depth=50000
-#pragma HLS INTERFACE m_axi port=efficient_lm_head_g_idx bundle=gmem14 depth=1024
-#pragma HLS INTERFACE m_axi port=lm_head_weight bundle=gmem15 depth=530000000
-#pragma HLS INTERFACE m_axi port=reasoning_state_out bundle=gmem10 depth=16384
-#pragma HLS INTERFACE m_axi port=candidate_indices_out bundle=gmem16 depth=4096
-#pragma HLS INTERFACE m_axi port=gathered_logits_out bundle=gmem17 depth=4096
-#pragma HLS INTERFACE s_axilite port=efficient_lm_rank bundle=control
-#pragma HLS INTERFACE s_axilite port=efficient_lm_vocab_size bundle=control
-#pragma HLS INTERFACE s_axilite port=efficient_lm_num_candidates bundle=control
-#pragma HLS INTERFACE s_axilite port=prefix_len bundle=control
-#pragma HLS INTERFACE s_axilite port=current_depth bundle=control
-#pragma HLS INTERFACE m_axi port=parent_indices_per_layer bundle=gmem18 depth=64
-#pragma HLS INTERFACE s_axilite port=best_id bundle=control
-#pragma HLS INTERFACE s_axilite port=best_score bundle=control
-#pragma HLS INTERFACE s_axilite port=reasoning_state_out bundle=control
-#pragma HLS INTERFACE s_axilite port=candidate_indices_out bundle=control
-#pragma HLS INTERFACE s_axilite port=gathered_logits_out bundle=control
-#pragma HLS INTERFACE s_axilite port=return bundle=control
-
     int rank = efficient_lm_rank;
     int vocab = efficient_lm_vocab_size;
     int topk = efficient_lm_num_candidates;
@@ -337,7 +260,9 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
     // Output: TREE_WIDTH * topk entries, laid out [t0_c0, t0_c1, ..., t1_c0, t1_c1, ...]
     if (candidate_indices_out != nullptr) {
         for (int t = 0; t < tmac::hls::TREE_WIDTH; ++t) {
+#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH
             for (int i = 0; i < topk; ++i) {
+#pragma HLS loop_tripcount min=tmac::hls::kEagle4LmTopKMax max=tmac::hls::kEagle4LmTopKMax
 #pragma HLS PIPELINE II=1
                 candidate_indices_out[t * topk + i] = topk_tokens[t][i];
             }
@@ -345,7 +270,9 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
     }
     if (gathered_logits_out != nullptr) {
         for (int t = 0; t < tmac::hls::TREE_WIDTH; ++t) {
+#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH
             for (int i = 0; i < topk; ++i) {
+#pragma HLS loop_tripcount min=tmac::hls::kEagle4LmTopKMax max=tmac::hls::kEagle4LmTopKMax
 #pragma HLS PIPELINE II=1
                 gathered_logits_out[t * topk + i] = topk_probas[t][i];
             }

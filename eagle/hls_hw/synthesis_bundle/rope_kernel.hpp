@@ -41,9 +41,12 @@ void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
 #pragma HLS ARRAY_PARTITION variable = k_buf complete dim = 2
 
 for (int t = 0; t < TREE_WIDTH; t++) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
     // Load Q
     for (int h = 0; h < NUM_HEADS; ++h) {
+#pragma HLS loop_tripcount min=NUM_HEADS max=NUM_HEADS
         for (int i = 0; i < HEAD_DIM / VEC_W; ++i) {
+#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II = 1
             vec_t<VEC_W> chunk = q_in.read();
             for (int j = 0; j < VEC_W; ++j) {
@@ -54,7 +57,9 @@ for (int t = 0; t < TREE_WIDTH; t++) {
     }
     // Load K
     for (int h = 0; h < NUM_KV_HEADS; ++h) {
+#pragma HLS loop_tripcount min=NUM_KV_HEADS max=NUM_KV_HEADS
         for (int i = 0; i < HEAD_DIM / VEC_W; ++i) {
+#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II = 1
             vec_t<VEC_W> chunk = k_in.read();
             for (int j = 0; j < VEC_W; ++j) {
@@ -66,7 +71,9 @@ for (int t = 0; t < TREE_WIDTH; t++) {
 
     // Rotate Q
     for (int h = 0; h < NUM_HEADS; ++h) {
+#pragma HLS loop_tripcount min=NUM_HEADS max=NUM_HEADS
         for (int i = 0; i < HALF_DIM; ++i) {
+#pragma HLS loop_tripcount min=HALF_DIM max=HALF_DIM
 #pragma HLS PIPELINE II = 1
             const float a = q_buf[h][i];
             const float b = q_buf[h][i + HALF_DIM];
@@ -78,7 +85,9 @@ for (int t = 0; t < TREE_WIDTH; t++) {
     }
     // Rotate K
     for (int h = 0; h < NUM_KV_HEADS; ++h) {
+#pragma HLS loop_tripcount min=NUM_KV_HEADS max=NUM_KV_HEADS
         for (int i = 0; i < HALF_DIM; ++i) {
+#pragma HLS loop_tripcount min=HALF_DIM max=HALF_DIM
 #pragma HLS PIPELINE II = 1
             const float a = k_buf[h][i];
             const float b = k_buf[h][i + HALF_DIM];
@@ -91,7 +100,9 @@ for (int t = 0; t < TREE_WIDTH; t++) {
 
     // Stream out Q
     for (int h = 0; h < NUM_HEADS; ++h) {
+#pragma HLS loop_tripcount min=NUM_HEADS max=NUM_HEADS
         for (int i = 0; i < HEAD_DIM / VEC_W; ++i) {
+#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II = 1
             vec_t<VEC_W> chunk;
             for (int j = 0; j < VEC_W; ++j) {
@@ -103,7 +114,9 @@ for (int t = 0; t < TREE_WIDTH; t++) {
     }
     // Stream out K
     for (int h = 0; h < NUM_KV_HEADS; ++h) {
+#pragma HLS loop_tripcount min=NUM_KV_HEADS max=NUM_KV_HEADS
         for (int i = 0; i < HEAD_DIM / VEC_W; ++i) {
+#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II = 1
             vec_t<VEC_W> chunk;
             for (int j = 0; j < VEC_W; ++j) {

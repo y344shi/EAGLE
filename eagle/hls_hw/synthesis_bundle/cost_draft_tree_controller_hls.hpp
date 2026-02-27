@@ -22,7 +22,7 @@ inline int64_t cdt_clamp_i64(int64_t x, int64_t low, int64_t high) {
     return x;
 }
 
-inline void cdt_controller_reset(
+void cdt_controller_reset(
     int batch_size,
     int max_tree_width,
     int max_node_count,
@@ -59,7 +59,7 @@ reset_batch_loop:
     }
 }
 
-inline void cdt_controller_seed_frontier(
+void cdt_controller_seed_frontier(
     const int64_t* seed_tokens,         // [batch, width]
     int batch_size,
     int width,
@@ -117,7 +117,7 @@ seed_batch_loop:
     }
 }
 
-inline void cdt_controller_expand_frontier(
+void cdt_controller_expand_frontier(
     const int64_t* parent_frontier_node_ids, // [batch, max_tree_width]
     const int64_t* parent_slots,             // [batch, width], each in [0, parent_width)
     const int64_t* child_tokens,             // [batch, width]
@@ -196,7 +196,7 @@ expand_batch_loop:
     }
 }
 
-inline void cdt_controller_export_frontier(
+void cdt_controller_export_frontier(
     const int64_t* frontier_node_ids,   // [batch, max_tree_width]
     int batch_size,
     int width,

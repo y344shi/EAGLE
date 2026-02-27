@@ -63,7 +63,7 @@ inline bool has_key(const RawCaseMap& kv, const std::string& key) {
 }
 
 inline bool parse_int_token(const std::string& s, int* out) {
-    try {
+    //try {
         const long long v = std::stoll(s);
         if (v < static_cast<long long>(std::numeric_limits<int>::min()) ||
             v > static_cast<long long>(std::numeric_limits<int>::max())) {
@@ -71,13 +71,13 @@ inline bool parse_int_token(const std::string& s, int* out) {
         }
         *out = static_cast<int>(v);
         return true;
-    } catch (...) {
-        return false;
-    }
+    //} catch (...) {
+    //    return false;
+    //}
 }
 
 inline bool parse_i32_token(const std::string& s, int32_t* out) {
-    try {
+    //try {
         const long long v = std::stoll(s);
         if (v < static_cast<long long>(std::numeric_limits<int32_t>::min()) ||
             v > static_cast<long long>(std::numeric_limits<int32_t>::max())) {
@@ -85,27 +85,27 @@ inline bool parse_i32_token(const std::string& s, int32_t* out) {
         }
         *out = static_cast<int32_t>(v);
         return true;
-    } catch (...) {
-        return false;
-    }
+    //} catch (...) {
+    //    return false;
+    //}
 }
 
 inline bool parse_i64_token(const std::string& s, int64_t* out) {
-    try {
+    //try {
         *out = static_cast<int64_t>(std::stoll(s));
         return true;
-    } catch (...) {
-        return false;
-    }
+    //} catch (...) {
+    //    return false;
+    //}
 }
 
 inline bool parse_float_token(const std::string& s, float* out) {
-    try {
+    //try {
         *out = std::stof(s);
         return true;
-    } catch (...) {
-        return false;
-    }
+    //} catch (...) {
+    //    return false;
+    //}
 }
 
 inline bool read_int_array(const RawCaseMap& kv,

@@ -38,9 +38,11 @@ void contiguous_kv_write(
 
 write_token_loop:
     for (int t = 0; t < kContiguousKvTreeWidth; ++t) {
+#pragma HLS loop_tripcount min=kContiguousKvTreeWidth max=kContiguousKvTreeWidth
         const int base = (write_base_token + t) * VECS_PER_TOKEN;
     write_vec_loop:
         for (int v = 0; v < VECS_PER_TOKEN; ++v) {
+#pragma HLS loop_tripcount min=NUM_KV_HEADS*HEAD_DIM/VEC_W max=NUM_KV_HEADS*HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II=1
             vec_t<VEC_W> kv = k_in.read();
             vec_t<VEC_W> vv = v_in.read();
@@ -82,6 +84,7 @@ prefix_token_loop:
         const int base = p * VECS_PER_TOKEN;
     prefix_vec_loop:
         for (int v = 0; v < VECS_PER_TOKEN; ++v) {
+#pragma HLS loop_tripcount min=NUM_KV_HEADS*HEAD_DIM/VEC_W max=NUM_KV_HEADS*HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II=1
             vec_t<VEC_W> kv = hbm_k[base + v];
             vec_t<VEC_W> vv = hbm_v[base + v];
@@ -98,6 +101,7 @@ prefix_token_loop:
     // For each query t at current_depth d, trace from layer d-1 back to layer 0.
 ancestor_query_loop:
     for (int t = 0; t < kContiguousKvTreeWidth; ++t) {
+#pragma HLS loop_tripcount min=kContiguousKvTreeWidth max=kContiguousKvTreeWidth
         int slot = t;
     ancestor_layer_loop:
         for (int l = current_depth - 1; l >= 0; --l) {
@@ -107,6 +111,7 @@ ancestor_query_loop:
             int base = token_idx * VECS_PER_TOKEN;
         ancestor_vec_loop:
             for (int v = 0; v < VECS_PER_TOKEN; ++v) {
+#pragma HLS loop_tripcount min=NUM_KV_HEADS*HEAD_DIM/VEC_W max=NUM_KV_HEADS*HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II=1
                 k_out[t].write(hbm_k[base + v]);
                 v_out[t].write(hbm_v[base + v]);
@@ -118,10 +123,12 @@ ancestor_query_loop:
     // Phase 3: Stream self tokens (one per query, just written by contiguous_kv_write).
 self_token_loop:
     for (int t = 0; t < kContiguousKvTreeWidth; ++t) {
+#pragma HLS loop_tripcount min=kContiguousKvTreeWidth max=kContiguousKvTreeWidth
         int token_idx = prefix_len + current_depth * max_tree_width + t;
         int base = token_idx * VECS_PER_TOKEN;
     self_vec_loop:
         for (int v = 0; v < VECS_PER_TOKEN; ++v) {
+#pragma HLS loop_tripcount min=NUM_KV_HEADS*HEAD_DIM/VEC_W max=NUM_KV_HEADS*HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II=1
             k_out[t].write(hbm_k[base + v]);
             v_out[t].write(hbm_v[base + v]);
