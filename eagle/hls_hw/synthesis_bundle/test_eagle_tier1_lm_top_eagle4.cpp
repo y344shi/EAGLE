@@ -261,7 +261,7 @@ int main(int argc, char** argv) {
             lm_down.data(), lm_q.data(), lm_s.data(), lm_z.empty() ? nullptr : lm_z.data(), lm_g.data(), lm_w.data(),
             rank, vocab, topk, wrap_ids.data(), wrap_logits.data(), t, t);
 
-        eagle_tier1_lm_top_eagle4(
+        e4_lm_top(
             hidden_d, embed_d, &dir_best_id, &dir_best_score,
             w_q.data(), s_q.data(), w_k.data(), s_k.data(), w_v.data(), s_v.data(),
             w_o.data(), s_o.data(), w_gate.data(), s_gate.data(), w_up.data(), s_up.data(), w_down.data(), s_down.data(),

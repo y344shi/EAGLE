@@ -16,27 +16,27 @@ using namespace tmac::hls;
 
 namespace tmac {
 namespace hls {
-void distribute_q_heads(hls_stream<vec_t<VEC_W>>& s_q_rot, hls_stream<vec_t<VEC_W>> q_head_streams[NUM_HEADS]);
-void broadcast_kv_heads(
+void e4_qdist(hls_stream<vec_t<VEC_W>>& s_q_rot, hls_stream<vec_t<VEC_W>> q_head_streams[NUM_HEADS]);
+void e4_kvbcast(
     hls_stream<vec_t<VEC_W>>& s_k_hist_raw,
     hls_stream<vec_t<VEC_W>>& s_v_hist_raw,
     hls_stream<vec_t<VEC_W>> k_head_streams[NUM_HEADS],
     hls_stream<vec_t<VEC_W>> v_head_streams[NUM_HEADS],
     int hist_len);
-void grouped_query_attention(
+void e4_gqa(
     hls_stream<vec_t<VEC_W>> q_head_streams[NUM_HEADS],
     hls_stream<vec_t<VEC_W>> k_head_streams[NUM_HEADS],
     hls_stream<vec_t<VEC_W>> v_head_streams[NUM_HEADS],
     hls_stream<vec_t<VEC_W>> ctx_head_streams[NUM_HEADS],
     int hist_len,
     int padded_len);
-void collect_ctx(hls_stream<vec_t<VEC_W>>& s_context, hls_stream<vec_t<VEC_W>> ctx_head_streams[NUM_HEADS]);
-void concat_embed_hidden(hls_stream<vec_t<VEC_W>>& s_embed_norm,
-                         hls_stream<vec_t<VEC_W>>& s_hidden_norm,
-                         hls_stream<vec_t<VEC_W>>& s_attn_cat);
-void split_down_2hs(hls_stream<vec_t<VEC_W>>& s_down_2hs,
-                    hls_stream<vec_t<VEC_W>>& s_to_logits,
-                    hls_stream<vec_t<VEC_W>>& s_for_reasoning);
+void e4_ctx(hls_stream<vec_t<VEC_W>>& s_context, hls_stream<vec_t<VEC_W>> ctx_head_streams[NUM_HEADS]);
+void e4_cat(hls_stream<vec_t<VEC_W>>& s_embed_norm,
+            hls_stream<vec_t<VEC_W>>& s_hidden_norm,
+            hls_stream<vec_t<VEC_W>>& s_attn_cat);
+void e4_split(hls_stream<vec_t<VEC_W>>& s_down_2hs,
+              hls_stream<vec_t<VEC_W>>& s_to_logits,
+              hls_stream<vec_t<VEC_W>>& s_for_reasoning);
 } // namespace hls
 } // namespace tmac
 

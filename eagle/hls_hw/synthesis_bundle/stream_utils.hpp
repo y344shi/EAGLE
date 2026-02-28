@@ -37,10 +37,10 @@ void stream_scale(hls_stream<vec_t<W>>& in,
 
 // Duplicate a fixed number of elements to two outputs.
 template <int W>
-void stream_dup(hls_stream<vec_t<W>>& in,
-                hls_stream<vec_t<W>>& out0,
-                hls_stream<vec_t<W>>& out1,
-                int elements) {
+void sdup(hls_stream<vec_t<W>>& in,
+          hls_stream<vec_t<W>>& out0,
+          hls_stream<vec_t<W>>& out1,
+          int elements) {
 #pragma HLS INLINE off
     for (int i = 0; i < elements; ++i) {
 #pragma HLS loop_tripcount min=kTcStreamElements max=kTcStreamElements avg=kTcStreamElements
@@ -53,11 +53,11 @@ void stream_dup(hls_stream<vec_t<W>>& in,
 
 // Duplicate to three outputs.
 template <int W>
-void stream_trip(hls_stream<vec_t<W>>& in,
-                 hls_stream<vec_t<W>>& out0,
-                 hls_stream<vec_t<W>>& out1,
-                 hls_stream<vec_t<W>>& out2,
-                 int elements) {
+void strip3(hls_stream<vec_t<W>>& in,
+            hls_stream<vec_t<W>>& out0,
+            hls_stream<vec_t<W>>& out1,
+            hls_stream<vec_t<W>>& out2,
+            int elements) {
 #pragma HLS INLINE off
     for (int i = 0; i < elements; ++i) {
 #pragma HLS loop_tripcount min=kTcStreamElements max=kTcStreamElements avg=kTcStreamElements
@@ -85,10 +85,10 @@ void stream_head(hls_stream<vec_t<W>>& in, hls_stream<vec_t<W>> outs[32], int el
 
 // Elementwise add of two streams.
 template <int W>
-void stream_add(hls_stream<vec_t<W>>& in0,
-                hls_stream<vec_t<W>>& in1,
-                hls_stream<vec_t<W>>& out,
-                int elements) {
+void sadd(hls_stream<vec_t<W>>& in0,
+          hls_stream<vec_t<W>>& in1,
+          hls_stream<vec_t<W>>& out,
+          int elements) {
 #pragma HLS INLINE off
     for (int i = 0; i < elements; ++i) {
 #pragma HLS loop_tripcount min=kTcStreamElements max=kTcStreamElements avg=kTcStreamElements
@@ -106,10 +106,10 @@ void stream_add(hls_stream<vec_t<W>>& in0,
 
 // SiLU(gate) * up stream (SwiGLU style).
 template <int W>
-void silu_mul_stream(hls_stream<vec_t<W>>& gate,
-                     hls_stream<vec_t<W>>& up,
-                     hls_stream<vec_t<W>>& out,
-                     int elements) {
+void swiglu(hls_stream<vec_t<W>>& gate,
+            hls_stream<vec_t<W>>& up,
+            hls_stream<vec_t<W>>& out,
+            int elements) {
 #pragma HLS INLINE off
     for (int i = 0; i < elements; ++i) {
 #pragma HLS loop_tripcount min=kTcStreamElements max=kTcStreamElements avg=kTcStreamElements
@@ -124,6 +124,43 @@ void silu_mul_stream(hls_stream<vec_t<W>>& gate,
         }
         out.write(r);
     }
+}
+
+template <int W>
+void stream_dup(hls_stream<vec_t<W>>& in,
+                hls_stream<vec_t<W>>& out0,
+                hls_stream<vec_t<W>>& out1,
+                int elements) {
+#pragma HLS INLINE
+    sdup<W>(in, out0, out1, elements);
+}
+
+template <int W>
+void stream_trip(hls_stream<vec_t<W>>& in,
+                 hls_stream<vec_t<W>>& out0,
+                 hls_stream<vec_t<W>>& out1,
+                 hls_stream<vec_t<W>>& out2,
+                 int elements) {
+#pragma HLS INLINE
+    strip3<W>(in, out0, out1, out2, elements);
+}
+
+template <int W>
+void stream_add(hls_stream<vec_t<W>>& in0,
+                hls_stream<vec_t<W>>& in1,
+                hls_stream<vec_t<W>>& out,
+                int elements) {
+#pragma HLS INLINE
+    sadd<W>(in0, in1, out, elements);
+}
+
+template <int W>
+void silu_mul_stream(hls_stream<vec_t<W>>& gate,
+                     hls_stream<vec_t<W>>& up,
+                     hls_stream<vec_t<W>>& out,
+                     int elements) {
+#pragma HLS INLINE
+    swiglu<W>(gate, up, out, elements);
 }
 
 // Simple pass-through (copy) for a fixed number of elements.

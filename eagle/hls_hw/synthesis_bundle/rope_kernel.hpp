@@ -22,11 +22,11 @@ struct RopeConfig {
 };
 
 template <int NUM_HEADS, int NUM_KV_HEADS, int HEAD_DIM, int TREE_WIDTH>
-void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
-                       hls_stream<vec_t<VEC_W>>& q_out,
-                       hls_stream<vec_t<VEC_W>>& k_in,
-                       hls_stream<vec_t<VEC_W>>& k_out,
-                       const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& cfg) {
+void rope_s(hls_stream<vec_t<VEC_W>>& q_in,
+            hls_stream<vec_t<VEC_W>>& q_out,
+            hls_stream<vec_t<VEC_W>>& k_in,
+            hls_stream<vec_t<VEC_W>>& k_out,
+            const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& cfg) {
 #pragma HLS INTERFACE axis port = q_in
 #pragma HLS INTERFACE axis port = q_out
 #pragma HLS INTERFACE axis port = k_in
@@ -130,6 +130,17 @@ for (int t = 0; t < TREE_WIDTH; t++) {
         }
     }
 }
+
+}
+
+template <int NUM_HEADS, int NUM_KV_HEADS, int HEAD_DIM, int TREE_WIDTH>
+void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
+                       hls_stream<vec_t<VEC_W>>& q_out,
+                       hls_stream<vec_t<VEC_W>>& k_in,
+                       hls_stream<vec_t<VEC_W>>& k_out,
+                       const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& cfg) {
+#pragma HLS INLINE
+    rope_s<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM, TREE_WIDTH>(q_in, q_out, k_in, k_out, cfg);
 }
 
 } // namespace hls

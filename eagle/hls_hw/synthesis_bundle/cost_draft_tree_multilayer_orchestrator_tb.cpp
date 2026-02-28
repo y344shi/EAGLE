@@ -904,7 +904,7 @@ void run_reference_replay(const CaseData& c, RuntimeState* s) {
         std::vector<float> initial_last_layer_scores(static_cast<size_t>(c.batch_size), 1.0f);
         std::vector<int64_t> initial_topk_indexs_prev(static_cast<size_t>(c.batch_size), 0);
 
-        cost_draft_tree_fused_step_hls(
+        e4d_fused(
             c.initial_topk_probas.data(),
             c.initial_topk_tokens.data(),
             initial_last_layer_scores.data(),
@@ -966,7 +966,7 @@ void run_reference_replay(const CaseData& c, RuntimeState* s) {
             goto reference_finalize;
         }
 
-        cdt_prepare_next_layer_inputs_hls(
+        cdt_prep_next(
             s->output_scores.data(),
             s->output_tokens.data(),
             s->output_hidden_states.data(),
@@ -1006,7 +1006,7 @@ void run_reference_replay(const CaseData& c, RuntimeState* s) {
 
         load_recurrent_topk_for_depth(c, d, curr_tree_width, s);
 
-        cost_draft_tree_fused_step_hls(
+        e4d_fused(
             s->step_topk_probas_sampling.data(),
             s->step_topk_tokens_sampling.data(),
             s->step_last_layer_scores.data(),
@@ -1066,7 +1066,7 @@ void run_reference_replay(const CaseData& c, RuntimeState* s) {
             break;
         }
 
-        cdt_prepare_next_layer_inputs_hls(
+        cdt_prep_next(
             s->output_scores.data(),
             s->output_tokens.data(),
             s->output_hidden_states.data(),
@@ -1100,7 +1100,7 @@ void run_orchestrator_under_test(const CaseData& c,
     std::vector<vec_t<VEC_W>> hbm_k = a.hbm_k;
     std::vector<vec_t<VEC_W>> hbm_v = a.hbm_v;
 
-    cost_draft_tree_multilayer_orchestrator_hls(
+    eagle4_draft(
         c.tree_depth,
         c.curr_depth_start,
         c.policy_next_tree_width.data(),
@@ -1199,7 +1199,7 @@ bool run_slm_depth_parity(const CaseData& c,
         std::vector<float> initial_last_layer_scores(static_cast<size_t>(c.batch_size), 1.0f);
         std::vector<int64_t> initial_topk_indexs_prev(static_cast<size_t>(c.batch_size), 0);
 
-        cost_draft_tree_fused_step_hls(
+        e4d_fused(
             c.initial_topk_probas.data(),
             c.initial_topk_tokens.data(),
             initial_last_layer_scores.data(),
@@ -1258,7 +1258,7 @@ bool run_slm_depth_parity(const CaseData& c,
             return true;
         }
 
-        cdt_prepare_next_layer_inputs_hls(
+        cdt_prep_next(
             s.output_scores.data(),
             s.output_tokens.data(),
             s.output_hidden_states.data(),
@@ -1284,7 +1284,7 @@ bool run_slm_depth_parity(const CaseData& c,
         std::fill(slm_topk_probas.begin(), slm_topk_probas.end(), 0.0f);
         std::fill(slm_topk_tokens.begin(), slm_topk_tokens.end(), 0);
 
-        cdt_run_eagle4_slm_topk_hls(
+        e4_slm_topk(
             s.step_input_hidden_states.data(),
             c.batch_size,
             curr_tree_width,
@@ -1338,7 +1338,7 @@ bool run_slm_depth_parity(const CaseData& c,
         }
 
         load_recurrent_topk_for_depth(c, d, curr_tree_width, &s);
-        cost_draft_tree_fused_step_hls(
+        e4d_fused(
             s.step_topk_probas_sampling.data(),
             s.step_topk_tokens_sampling.data(),
             s.step_last_layer_scores.data(),
@@ -1394,7 +1394,7 @@ bool run_slm_depth_parity(const CaseData& c,
         if (d + 1 >= c.tree_depth || stop_signal || next_tree_width <= 0) {
             break;
         }
-        cdt_prepare_next_layer_inputs_hls(
+        cdt_prep_next(
             s.output_scores.data(),
             s.output_tokens.data(),
             s.output_hidden_states.data(),

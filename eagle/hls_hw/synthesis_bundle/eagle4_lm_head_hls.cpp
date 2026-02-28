@@ -1,4 +1,4 @@
-#include "C:\Users\mark1\Desktop\projects\EAGLE-4\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\..\eagle4_lm_head_hls.hpp"
+#include "eagle4_lm_head_hls.hpp"
 #include <cmath>
 
 namespace tmac {
@@ -8,7 +8,7 @@ namespace hls {
 constexpr int kLmTcQpackFactor = 8;   // int4 values per int32
 constexpr int kLmTcVocab       = 32000; // typical vocab size
 
-float eagle4_fp16_to_float(uint16_t h) {
+float e4_f16(uint16_t h) {
     uint32_t sign = (h >> 15) & 0x1u;
     uint32_t exp = (h >> 10) & 0x1Fu;
     uint32_t mant = h & 0x3FFu;
@@ -35,7 +35,7 @@ float eagle4_fp16_to_float(uint16_t h) {
     return out;
 }
 
-int eagle4_lowest_slot(const float* scores, int topk) {
+int e4_min_slot(const float* scores, int topk) {
     int min_pos = 0;
     float min_val = scores[0];
     for (int i = 1; i < topk; ++i) {
@@ -48,7 +48,7 @@ int eagle4_lowest_slot(const float* scores, int topk) {
     return min_pos;
 }
 
-void eagle4_lm_down_project(
+void e4_lm_down(
     const float logits_hidden[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax],
     const uint16_t* down_proj_weight,  // fp16, [rank, hidden_dim]
     float low_rank[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmRankMax],                   // [rank]
@@ -63,7 +63,7 @@ void eagle4_lm_down_project(
             float acc = 0.0f;
             for (int h = 0; h < hidden_dim; ++h) {
 #pragma HLS loop_tripcount min=kEagle4LmHiddenMax max=kEagle4LmHiddenMax avg=kEagle4LmHiddenMax
-                const float w = eagle4_fp16_to_float(down_proj_weight[row_base + static_cast<size_t>(h)]);
+                const float w = e4_f16(down_proj_weight[row_base + static_cast<size_t>(h)]);
                 acc += logits_hidden[t][h] * w;
             }
             low_rank[t][r] = acc;
@@ -71,7 +71,7 @@ void eagle4_lm_down_project(
     }
 }
 
-void eagle4_lm_candidate_logits_row4(
+void e4_lm_cand4(
     const float low_rank[TREE_WIDTH][kEagle4LmRankMax],  // [TREE_WIDTH, rank]
     const int32_t* qweight_row_major,    // [vocab, rank/8]
     const uint16_t* scales_row_major,    // fp16, [rank/group_size, vocab]
@@ -112,7 +112,7 @@ void eagle4_lm_candidate_logits_row4(
 #pragma HLS loop_tripcount min=kLmTcQpackFactor max=kLmTcQpackFactor avg=kLmTcQpackFactor
                 const int k = k_base + j;
                 const int g = (g_idx != nullptr) ? g_idx[k] : (k / group_size);
-                const float scale = eagle4_fp16_to_float(
+                const float scale = e4_f16(
                     scales_row_major[static_cast<size_t>(g) * static_cast<size_t>(vocab) + o]);
 
                 int zero = 8;
@@ -137,7 +137,7 @@ void eagle4_lm_candidate_logits_row4(
             }
 
             if (keep_topk) {
-                const int min_pos = eagle4_lowest_slot(topk_scores[t], topk);
+                const int min_pos = e4_min_slot(topk_scores[t], topk);
                 if (acc > topk_scores[t][min_pos]) {
                     topk_scores[t][min_pos] = acc;
                     topk_indices[t][min_pos] = o;
@@ -147,7 +147,7 @@ void eagle4_lm_candidate_logits_row4(
     }
 }
 
-void eagle4_lm_gather_dot_fp16(
+void e4_lm_gdot(
     const float hidden[TREE_WIDTH][kEagle4LmHiddenMax],  // [TREE_WIDTH, hidden_dim]
     const uint16_t* lm_head_weight,      // fp16, [vocab, hidden_dim]
     const int candidate_indices[TREE_WIDTH][kEagle4LmTopKMax],  // [TREE_WIDTH, num_candidates]
@@ -163,7 +163,7 @@ void eagle4_lm_gather_dot_fp16(
             float acc = 0.0f;
             for (int h = 0; h < hidden_dim; ++h) {
 #pragma HLS loop_tripcount min=kEagle4LmHiddenMax max=kEagle4LmHiddenMax avg=kEagle4LmHiddenMax
-                const float w = eagle4_fp16_to_float(lm_head_weight[row_base + static_cast<size_t>(h)]);
+                const float w = e4_f16(lm_head_weight[row_base + static_cast<size_t>(h)]);
                 acc += hidden[t][h] * w;
             }
             gathered_logits[t][c] = acc;
@@ -174,7 +174,7 @@ void eagle4_lm_gather_dot_fp16(
 // Per-token softmax over gathered logits, producing probabilities for all topk candidates.
 // This is the Gap-2 fix: replaces best_of_candidates with softmax probabilities
 // that feed into the tree expansion fused step.
-void eagle4_lm_softmax_topk(
+void e4_lm_softmax(
     const int candidate_indices[TREE_WIDTH][kEagle4LmTopKMax],   // [TREE_WIDTH, topk]
     const float gathered_logits[TREE_WIDTH][kEagle4LmTopKMax],   // [TREE_WIDTH, topk]
     int num_candidates,

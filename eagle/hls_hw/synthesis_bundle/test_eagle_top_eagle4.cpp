@@ -241,7 +241,7 @@ int run_smoke(int seed) {
         embed_stream.write(ec);
     }
 
-    eagle_tier1_top_eagle4_l0(hidden_stream, embed_stream, reasoning_out, logits_out,
+    e4_t1_l0(hidden_stream, embed_stream, reasoning_out, logits_out,
                               w_q.data(), s_q.data(), w_k.data(), s_k.data(), w_v.data(), s_v.data(),
                               w_o.data(), s_o.data(), w_gate.data(), s_gate.data(), w_up.data(), s_up.data(),
                               w_down.data(), s_down.data(), hidden_norm.data(), embed_norm.data(),
@@ -437,7 +437,7 @@ int main(int argc, char** argv) {
         RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM> rope_cfg{};
         fill_rope_cfg<HEAD_DIM>(rope_cfg, inv_freq, t);
 
-        eagle_tier1_top_eagle4_l0(hidden_stream, embed_stream, reasoning_stream, logits_stream,
+        e4_t1_l0(hidden_stream, embed_stream, reasoning_stream, logits_stream,
                                   w_q.data(), s_q.data(), w_k.data(), s_k.data(), w_v.data(), s_v.data(),
                                   w_o.data(), s_o.data(), w_gate.data(), s_gate.data(), w_up.data(), s_up.data(),
                                   w_down.data(), s_down.data(), hidden_norm.data(), embed_norm.data(),

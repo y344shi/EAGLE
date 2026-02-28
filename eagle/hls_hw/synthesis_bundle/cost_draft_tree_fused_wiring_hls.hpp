@@ -32,7 +32,7 @@ constexpr int kTcInitScratchSize = kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK; // 
 // 1) score/sort + parent pick + hidden gather,
 // 2) cumulative state update (cumu_tokens, prev/next/side_indexs, work/sort_scores).
 // KV management uses contiguous HBM ancestor-chain; no tree-mask or controller needed.
-void cost_draft_tree_fused_step_hls(
+void e4d_fused(
     // Score inputs
     const float* topk_probas_sampling,      // [batch, tree_width * node_top_k]
     const int64_t* topk_tokens_sampling,    // [batch, tree_width * node_top_k]
@@ -108,7 +108,7 @@ void cost_draft_tree_fused_step_hls(
 #pragma HLS DATAFLOW
 
     // Stage 1: score/sort + parent selection + hidden gather.
-    cost_draft_tree_layer_score_hls_with_tokens(
+    cdt_score_tok(
         topk_probas_sampling,
         topk_tokens_sampling,
         last_layer_scores,
@@ -131,7 +131,7 @@ void cost_draft_tree_fused_step_hls(
         nullptr);   // output_tokens not needed (no controller)
 
     // Stage 2: update cumulative draft state.
-    cost_draft_tree_update_state_hls(
+    cdt_update(
         topk_probas_sampling,
         s_remapped_topk_tokens,
         s_sort_layer_scores,
@@ -235,7 +235,7 @@ struct CdtFixedWidthPolicyHls {
 
 // Select top-k from logits and output softmax probabilities for those winners.
 // If candidate_indices is provided, winner indices are remapped to real vocab token IDs.
-void cdt_softmax_topk_from_logits_hls(
+void cdt_topk_logits(
     const float* logits,                 // [batch, logits_width]
     const int64_t* candidate_indices,    // [batch, logits_width] optional
     int batch_size,
@@ -346,7 +346,7 @@ topk_batch_loop:
     }
 }
 
-void cdt_copy_frontier_for_next_depth_hls(
+void cdt_copy_frontier(
     const int64_t* frontier_src,  // [batch, max_tree_width]
     int batch_size,
     int max_tree_width,
@@ -372,7 +372,7 @@ copy_frontier_loop_b:
 // Wire per-layer outputs into the next layer's inputs.
 // Selects first next_tree_width entries from node_top_k outputs and
 // feeds selected hidden states and global indices back into the next SLM call.
-void cdt_prepare_next_layer_inputs_hls(
+void cdt_prep_next(
     const float* output_scores,           // [batch, node_top_k]
     const int64_t* output_tokens,         // [batch, node_top_k]
     const float* output_hidden_states,    // [batch, node_top_k, hidden]
@@ -443,7 +443,7 @@ next_layer_batch_loop:
 
 // Run EAGLE4 SLM forward + LM-head top-k for one draft depth.
 // The SLM path owns top-k candidate generation; outputs are packed to fused-step layout.
-void cdt_run_eagle4_slm_topk_hls(
+void e4_slm_topk(
     const float* input_hidden_states,          // packed [batch, tree_width, hidden]
     int batch_size,
     int tree_width,
@@ -538,7 +538,7 @@ slm_batch_loop:
 #pragma HLS BIND_STORAGE variable = candidate_indices type = ram_2p impl = bram
 #pragma HLS BIND_STORAGE variable = gathered_logits type = ram_2p impl = bram
 
-        eagle_tier1_lm_top_eagle4(
+        e4_lm_top(
             hidden_in_stream,
             embed_in_stream,
             &best_id,
@@ -600,7 +600,7 @@ slm_batch_loop:
 //     1) run one fused tree step with tree_width=1,
 //     2) call width policy for depth-0 and seed the first recurrent frontier.
 //   recurrent loop per depth:
-//     1) run EAGLE4 SLM forward + LM-head top-k (`eagle_tier1_lm_top_eagle4`),
+//     1) run EAGLE4 SLM forward + LM-head top-k (`e4_lm_top`),
 //     2) run one fused tree step (score + update),
 //     3) wire fused outputs into next-layer inputs (hidden recurrence + index carry),
 //     4) repeat until tree_depth or stop.
@@ -612,7 +612,7 @@ slm_batch_loop:
 //   If use_policy_schedule=true and schedule arrays are non-null, depth-wise policy comes from:
 //     policy_next_tree_width[depth], policy_next_verify_num[depth], policy_stop_signal[depth].
 //   Otherwise, fixed policy is used: keep curr_tree_width/curr_verify_num and never stop.
-void cdt_apply_policy_schedule_hls(
+void cdt_apply_policy(
     int depth,
     int batch_size,
     int curr_tree_width,
@@ -656,7 +656,7 @@ void cdt_apply_policy_schedule_hls(
     }
 }
 
-void cost_draft_tree_multilayer_orchestrator_impl_hls(
+void eagle4_draft_impl(
     int tree_depth,
     int curr_depth_start,
 
@@ -846,7 +846,7 @@ void cost_draft_tree_multilayer_orchestrator_impl_hls(
                 s_initial_topk_tokens[i] = initial_topk_tokens[i];
             }
         } else {
-            cdt_softmax_topk_from_logits_hls(
+            cdt_topk_logits(
                 initial_logits,
                 initial_candidate_indices,
                 batch_size,
@@ -870,7 +870,7 @@ void cost_draft_tree_multilayer_orchestrator_impl_hls(
 
         // InitialLoop Stage-0 parity:
         // topk from previous-verify logits updates cumulative state with tree_width=1.
-        cost_draft_tree_fused_step_hls(
+        e4d_fused(
             s_initial_topk_probas,
             s_initial_topk_tokens,
             initial_last_layer_scores,
@@ -944,7 +944,7 @@ void cost_draft_tree_multilayer_orchestrator_impl_hls(
         int next_tree_width = curr_tree_width;
         int next_verify_num = curr_verify_num;
         bool stop_signal = false;
-        cdt_apply_policy_schedule_hls(
+        cdt_apply_policy(
             0,
             batch_size,
             1,
@@ -974,7 +974,7 @@ void cost_draft_tree_multilayer_orchestrator_impl_hls(
         }
 
         // Stage-1 parity: select first tree_width frontier for the first recurrent SLM forward.
-        cdt_prepare_next_layer_inputs_hls(
+        cdt_prep_next(
             output_scores,
             output_tokens,
             output_hidden_states,
@@ -1004,7 +1004,7 @@ orchestrator_depth_loop:
         int next_verify_num = curr_verify_num;
         bool stop_signal = false;
         if (!run_initial_loop) {
-            cdt_apply_policy_schedule_hls(
+            cdt_apply_policy(
                 d,
                 batch_size,
                 curr_tree_width,
@@ -1029,7 +1029,7 @@ orchestrator_depth_loop:
 
         // Stage A/B: SLM forward and LM-head top-k for current frontier.
         const int current_depth = curr_depth_start + d;
-        cdt_run_eagle4_slm_topk_hls(
+        e4_slm_topk(
             step_input_hidden_states,
             batch_size,
             curr_tree_width,
@@ -1056,7 +1056,7 @@ orchestrator_depth_loop:
             step_topk_tokens_sampling);
 
         // Stage C: fused score/update for one depth.
-        cost_draft_tree_fused_step_hls(
+        e4d_fused(
             step_topk_probas_sampling,
             step_topk_tokens_sampling,
             step_last_layer_scores,
@@ -1131,7 +1131,7 @@ orchestrator_depth_loop:
 
         ++depth_done;
         if (run_initial_loop) {
-            cdt_apply_policy_schedule_hls(
+            cdt_apply_policy(
                 d,
                 batch_size,
                 curr_tree_width,
@@ -1161,7 +1161,7 @@ orchestrator_depth_loop:
         }
 
         // Stage D: recurrence wiring for next SLM call.
-        cdt_prepare_next_layer_inputs_hls(
+        cdt_prep_next(
             output_scores,
             output_tokens,
             output_hidden_states,
@@ -1196,7 +1196,7 @@ orchestrator_finalize:
 } // namespace tmac
 
 extern "C" {
-void cost_draft_tree_multilayer_orchestrator_hls(
+void eagle4_draft(
     int tree_depth,
     int curr_depth_start,
     const int* policy_next_tree_width,
@@ -1363,7 +1363,7 @@ void cost_draft_tree_multilayer_orchestrator_hls(
 #pragma HLS INTERFACE s_axilite port=initial_logits_width bundle=control
 #pragma HLS INTERFACE s_axilite port=return bundle=control
 
-    tmac::hls::cost_draft_tree_multilayer_orchestrator_impl_hls(
+    tmac::hls::eagle4_draft_impl(
         tree_depth,
         curr_depth_start,
         policy_next_tree_width,
