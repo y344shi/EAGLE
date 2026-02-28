@@ -1,11 +1,14 @@
-#define TMAC_CDT_ORCH_TB_INJECT_TOPK
 #include "cost_draft_tree_fused_wiring_hls.hpp"
 #include "cost_draft_tree_tb_case_io.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <string>
 #include <vector>
@@ -16,6 +19,7 @@ namespace {
 
 constexpr float kDefaultEps = 1e-5f;
 constexpr int kMaskFieldCount = 10;
+constexpr int kGroupSize = 128;
 
 enum MaskFieldIndex {
     kMaskIoTreeWidth = 0,
@@ -61,6 +65,14 @@ struct CaseData {
     float eps_rel = kDefaultEps;
     std::string gt_mode = "synthetic";
     std::string policy_mode = "dynamic";
+    std::string capture_backend;
+    std::string golden_tensor_root;
+    std::string packed_dir;
+    std::string prefix_hbm_dtype;
+    std::string prefix_hbm_k_file;
+    std::string prefix_hbm_v_file;
+    int prefix_hbm_token_count = 0;
+    int prefix_hbm_elems_per_token = 0;
 
     std::vector<int64_t> step_input_tokens_init;
     std::vector<float> step_input_hidden_states_init;
@@ -140,6 +152,36 @@ struct RuntimeState {
     bool stopped_early = false;
 };
 
+struct SlmArtifacts {
+    std::vector<pack512> w_q;
+    std::vector<float> s_q;
+    std::vector<pack512> w_k;
+    std::vector<float> s_k;
+    std::vector<pack512> w_v;
+    std::vector<float> s_v;
+    std::vector<pack512> w_o;
+    std::vector<float> s_o;
+    std::vector<pack512> w_gate;
+    std::vector<float> gate_scales;
+    std::vector<pack512> w_up;
+    std::vector<float> up_scales;
+    std::vector<pack512> w_down;
+    std::vector<float> down_scales;
+    std::vector<float> hidden_norm_gamma;
+    std::vector<float> embed_norm_gamma;
+    std::vector<float> post_attn_norm_gamma;
+    std::vector<float> final_norm_gamma;
+    std::vector<uint16_t> efficient_lm_head_down_proj_weight;
+    std::vector<int32_t> efficient_lm_head_qweight_row_major;
+    std::vector<uint16_t> efficient_lm_head_scales_row_major;
+    std::vector<int32_t> efficient_lm_head_qzeros;
+    std::vector<int32_t> efficient_lm_head_g_idx;
+    std::vector<uint16_t> lm_head_weight;
+    std::vector<vec_t<VEC_W>> hbm_k;
+    std::vector<vec_t<VEC_W>> hbm_v;
+    std::vector<RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>> rope_cfg_table;
+};
+
 inline int clamp_int(int x, int lo, int hi) {
     if (x < lo) return lo;
     if (x > hi) return hi;
@@ -180,6 +222,105 @@ bool parse_cli(int argc, char** argv, CliOptions* opts, std::string* err_msg) {
     }
     return true;
 }
+
+template <typename T>
+std::vector<T> load_bin(const std::filesystem::path& path) {
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f) return {};
+    const std::streamsize sz = f.tellg();
+    f.seekg(0, std::ios::beg);
+    std::vector<T> out(static_cast<size_t>(sz / sizeof(T)));
+    if (!f.read(reinterpret_cast<char*>(out.data()), sz)) return {};
+    return out;
+}
+
+float fp16_to_float(uint16_t h) {
+    uint32_t sign = (h >> 15) & 0x1u;
+    uint32_t exp = (h >> 10) & 0x1Fu;
+    uint32_t mant = h & 0x3FFu;
+    uint32_t f = 0;
+    if (exp == 0) {
+        if (mant == 0) {
+            f = sign << 31;
+        } else {
+            exp = 1;
+            while ((mant & 0x400u) == 0) {
+                mant <<= 1;
+                exp--;
+            }
+            mant &= 0x3FFu;
+            f = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13);
+        }
+    } else if (exp == 31) {
+        f = (sign << 31) | 0x7F800000u | (mant << 13);
+    } else {
+        f = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13);
+    }
+    float out;
+    std::memcpy(&out, &f, sizeof(float));
+    return out;
+}
+
+std::vector<float> load_fp16(const std::filesystem::path& path) {
+    auto raw = load_bin<uint16_t>(path);
+    std::vector<float> out(raw.size());
+    for (size_t i = 0; i < raw.size(); ++i) out[i] = fp16_to_float(raw[i]);
+    return out;
+}
+
+std::vector<float> build_llama3_inv_freq(int head_dim) {
+    constexpr float kRopeTheta = 500000.0f;
+    constexpr float kScalingFactor = 8.0f;
+    constexpr float kLowFreqFactor = 1.0f;
+    constexpr float kHighFreqFactor = 4.0f;
+    constexpr float kOrigMaxPos = 8192.0f;
+    constexpr float kTwoPi = 6.2831853071795864769f;
+
+    std::vector<float> inv_freq(static_cast<size_t>(head_dim / 2));
+    const float low_freq_wavelen = kOrigMaxPos / kLowFreqFactor;
+    const float high_freq_wavelen = kOrigMaxPos / kHighFreqFactor;
+    for (int i = 0; i < head_dim / 2; ++i) {
+        const float inv = 1.0f / std::pow(kRopeTheta, (2.0f * i) / head_dim);
+        const float wave_len = kTwoPi / inv;
+        float out = inv;
+        if (wave_len > low_freq_wavelen) {
+            out = inv / kScalingFactor;
+        } else if (wave_len >= high_freq_wavelen) {
+            const float smooth =
+                (kOrigMaxPos / wave_len - kLowFreqFactor) /
+                (kHighFreqFactor - kLowFreqFactor);
+            out = (1.0f - smooth) * (inv / kScalingFactor) + smooth * inv;
+        }
+        inv_freq[static_cast<size_t>(i)] = out;
+    }
+    return inv_freq;
+}
+
+template <int HEAD_DIM_>
+void fill_rope_cfg(
+    RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM_>& cfg,
+    const std::vector<float>& inv_freq,
+    int pos) {
+    for (int i = 0; i < HEAD_DIM_ / 2; ++i) {
+        const float freq = static_cast<float>(pos) * inv_freq[static_cast<size_t>(i)];
+        cfg.cos_vals[i] = std::cos(freq);
+        cfg.sin_vals[i] = std::sin(freq);
+    }
+}
+
+bool read_optional_string_scalar(const tb_case_io::RawCaseMap& kv,
+                                 const std::string& key,
+                                 std::string* out) {
+    const auto it = kv.find(key);
+    if (it == kv.end() || it->second.empty()) {
+        return false;
+    }
+    *out = it->second[0];
+    return true;
+}
+
+bool nearly_equal(float a, float b, float eps_abs, float eps_rel);
+bool mask_enabled(const std::vector<int>& mask, int idx);
 
 bool load_case_file(const std::string& path, CaseData* out, std::string* err_msg) {
     using namespace tmac::hls::tb_case_io;
@@ -231,6 +372,21 @@ bool load_case_file(const std::string& path, CaseData* out, std::string* err_msg
     if (it_policy != kv.end() && !it_policy->second.empty()) {
         out->policy_mode = it_policy->second[0];
     }
+    read_optional_string_scalar(kv, "capture_backend", &out->capture_backend);
+    read_optional_string_scalar(kv, "golden_tensor_root", &out->golden_tensor_root);
+    read_optional_string_scalar(kv, "packed_dir", &out->packed_dir);
+    read_optional_string_scalar(kv, "prefix_hbm_dtype", &out->prefix_hbm_dtype);
+    read_optional_string_scalar(kv, "prefix_hbm_k_file", &out->prefix_hbm_k_file);
+    read_optional_string_scalar(kv, "prefix_hbm_v_file", &out->prefix_hbm_v_file);
+
+    std::vector<int> prefix_token_count;
+    std::vector<int> prefix_elems_per_token;
+    if (!read_int_array(kv, "prefix_hbm_token_count", 1, &prefix_token_count, err_msg, false) ||
+        !read_int_array(kv, "prefix_hbm_elems_per_token", 1, &prefix_elems_per_token, err_msg, false)) {
+        return false;
+    }
+    if (!prefix_token_count.empty()) out->prefix_hbm_token_count = prefix_token_count[0];
+    if (!prefix_elems_per_token.empty()) out->prefix_hbm_elems_per_token = prefix_elems_per_token[0];
 
     const size_t tree_n = static_cast<size_t>(out->batch_size) * out->max_tree_width;
     const size_t hidden_n = tree_n * out->hidden_size;
@@ -470,6 +626,157 @@ bool validate_case(const CaseData& c, std::string* err_msg) {
     if (static_cast<int>(c.expected_mask_recurrent_depth.size()) != c.tree_depth) {
         *err_msg = "expected_mask_recurrent_depth size mismatch";
         return false;
+    }
+    if (!c.capture_backend.empty() &&
+        c.capture_backend != "classic_eagle" &&
+        c.capture_backend != "eagle4_classic") {
+        *err_msg = "unsupported capture_backend in case: " + c.capture_backend;
+        return false;
+    }
+    if (!c.capture_backend.empty()) {
+        if (c.golden_tensor_root.empty() || c.packed_dir.empty() ||
+            c.prefix_hbm_dtype.empty() || c.prefix_hbm_k_file.empty() ||
+            c.prefix_hbm_v_file.empty()) {
+            *err_msg = "classic-eagle case is missing artifact path metadata";
+            return false;
+        }
+        if (c.prefix_hbm_dtype != "fp16") {
+            *err_msg = "only fp16 prefix_hbm_dtype is supported";
+            return false;
+        }
+        if (c.prefix_hbm_token_count != c.prefix_len) {
+            *err_msg = "prefix_hbm_token_count must equal prefix_len";
+            return false;
+        }
+        if (c.prefix_hbm_elems_per_token != NUM_KV_HEADS * HEAD_DIM) {
+            *err_msg = "prefix_hbm_elems_per_token does not match NUM_KV_HEADS*HEAD_DIM";
+            return false;
+        }
+    }
+    return true;
+}
+
+size_t expected_pack_count(int in_dim, int out_dim) {
+    return (static_cast<size_t>(in_dim) * static_cast<size_t>(out_dim)) / 128;
+}
+
+size_t expected_scale_count(int in_dim, int out_dim) {
+    return static_cast<size_t>(in_dim / kGroupSize) * static_cast<size_t>(out_dim);
+}
+
+bool load_prefix_hbm_sidecar(const std::filesystem::path& case_dir,
+                             const CaseData& c,
+                             std::vector<vec_t<VEC_W>>* hbm_k,
+                             std::vector<vec_t<VEC_W>>* hbm_v,
+                             std::string* err_msg) {
+    const std::filesystem::path k_path = case_dir / c.prefix_hbm_k_file;
+    const std::filesystem::path v_path = case_dir / c.prefix_hbm_v_file;
+    auto raw_k = load_bin<uint16_t>(k_path);
+    auto raw_v = load_bin<uint16_t>(v_path);
+    const size_t elems_per_token = static_cast<size_t>(c.prefix_hbm_elems_per_token);
+    const size_t expected_raw = static_cast<size_t>(c.prefix_hbm_token_count) * elems_per_token;
+    if (raw_k.size() != expected_raw || raw_v.size() != expected_raw) {
+        *err_msg = "prefix KV sidecar size mismatch";
+        return false;
+    }
+    const size_t vecs_per_token = elems_per_token / VEC_W;
+    const size_t total_tokens =
+        static_cast<size_t>(c.prefix_len + (c.curr_depth_start + c.tree_depth) * c.max_tree_width);
+    hbm_k->assign(total_tokens * vecs_per_token, vec_t<VEC_W>{});
+    hbm_v->assign(total_tokens * vecs_per_token, vec_t<VEC_W>{});
+
+    for (int tok = 0; tok < c.prefix_hbm_token_count; ++tok) {
+        const size_t raw_tok_base = static_cast<size_t>(tok) * elems_per_token;
+        const size_t vec_tok_base = static_cast<size_t>(tok) * vecs_per_token;
+        for (size_t vv = 0; vv < vecs_per_token; ++vv) {
+            vec_t<VEC_W> kv;
+            vec_t<VEC_W> vv_out;
+            for (int lane = 0; lane < VEC_W; ++lane) {
+                kv[lane] = fp16_to_float(raw_k[raw_tok_base + vv * VEC_W + static_cast<size_t>(lane)]);
+                vv_out[lane] = fp16_to_float(raw_v[raw_tok_base + vv * VEC_W + static_cast<size_t>(lane)]);
+            }
+            (*hbm_k)[vec_tok_base + vv] = kv;
+            (*hbm_v)[vec_tok_base + vv] = vv_out;
+        }
+    }
+    return true;
+}
+
+bool load_slm_artifacts(const std::filesystem::path& case_dir,
+                        const CaseData& c,
+                        SlmArtifacts* a,
+                        std::string* err_msg) {
+    const std::filesystem::path packed_dir = c.packed_dir;
+    const std::filesystem::path golden_root = c.golden_tensor_root;
+    const std::filesystem::path norm_dir = golden_root / "hls_4bit" / "weights_all_4bit";
+    const std::filesystem::path lm_dir = golden_root / "hls_4bit" / "lm_head";
+
+    a->w_q = load_bin<pack512>(packed_dir / "q_proj_weights_swizzled.bin");
+    a->s_q = load_bin<float>(packed_dir / "q_proj_scales_swizzled.bin");
+    a->w_k = load_bin<pack512>(packed_dir / "k_proj_weights_swizzled.bin");
+    a->s_k = load_bin<float>(packed_dir / "k_proj_scales_swizzled.bin");
+    a->w_v = load_bin<pack512>(packed_dir / "v_proj_weights_swizzled.bin");
+    a->s_v = load_bin<float>(packed_dir / "v_proj_scales_swizzled.bin");
+    a->w_o = load_bin<pack512>(packed_dir / "o_proj_weights_swizzled.bin");
+    a->s_o = load_bin<float>(packed_dir / "o_proj_scales_swizzled.bin");
+    a->w_gate = load_bin<pack512>(packed_dir / "gate_proj_weights_swizzled.bin");
+    a->gate_scales = load_bin<float>(packed_dir / "gate_proj_scales_swizzled.bin");
+    a->w_up = load_bin<pack512>(packed_dir / "up_proj_weights_swizzled.bin");
+    a->up_scales = load_bin<float>(packed_dir / "up_proj_scales_swizzled.bin");
+    a->w_down = load_bin<pack512>(packed_dir / "down_proj_weights_swizzled.bin");
+    a->down_scales = load_bin<float>(packed_dir / "down_proj_scales_swizzled.bin");
+
+    a->hidden_norm_gamma = load_fp16(norm_dir / "hidden_norm.fp16.bin");
+    a->embed_norm_gamma = load_fp16(norm_dir / "input_layernorm.fp16.bin");
+    a->post_attn_norm_gamma = load_fp16(norm_dir / "post_attention_layernorm.fp16.bin");
+    a->final_norm_gamma = load_fp16(norm_dir / "final_norm.fp16.bin");
+
+    a->efficient_lm_head_down_proj_weight =
+        load_bin<uint16_t>(lm_dir / "efficient_lm_head_down_proj_weight.fp16.bin");
+    a->efficient_lm_head_qweight_row_major =
+        load_bin<int32_t>(lm_dir / "efficient_lm_head_qweight_row_major.bin");
+    a->efficient_lm_head_scales_row_major =
+        load_bin<uint16_t>(lm_dir / "efficient_lm_head_scales_row_major.bin");
+    a->efficient_lm_head_qzeros = load_bin<int32_t>(lm_dir / "efficient_lm_head_qzeros.bin");
+    a->efficient_lm_head_g_idx = load_bin<int32_t>(lm_dir / "efficient_lm_head_g_idx.bin");
+    a->lm_head_weight = load_bin<uint16_t>(lm_dir / "lm_head_weight.fp16.bin");
+
+    const bool weights_ok =
+        a->w_q.size() == expected_pack_count(QKV_INPUT, HIDDEN) &&
+        a->w_k.size() == expected_pack_count(QKV_INPUT, NUM_KV_HEADS * HEAD_DIM) &&
+        a->w_v.size() == expected_pack_count(QKV_INPUT, NUM_KV_HEADS * HEAD_DIM) &&
+        a->w_o.size() == expected_pack_count(HIDDEN, HIDDEN) &&
+        a->w_gate.size() == expected_pack_count(HIDDEN, INTERMEDIATE) &&
+        a->w_up.size() == expected_pack_count(HIDDEN, INTERMEDIATE) &&
+        a->w_down.size() == expected_pack_count(INTERMEDIATE, DOWN_OUTPUT) &&
+        a->s_q.size() == expected_scale_count(QKV_INPUT, HIDDEN) &&
+        a->s_k.size() == expected_scale_count(QKV_INPUT, NUM_KV_HEADS * HEAD_DIM) &&
+        a->s_v.size() == expected_scale_count(QKV_INPUT, NUM_KV_HEADS * HEAD_DIM) &&
+        a->s_o.size() == expected_scale_count(HIDDEN, HIDDEN) &&
+        a->gate_scales.size() == expected_scale_count(HIDDEN, INTERMEDIATE) &&
+        a->up_scales.size() == expected_scale_count(HIDDEN, INTERMEDIATE) &&
+        a->down_scales.size() == expected_scale_count(INTERMEDIATE, DOWN_OUTPUT);
+    if (!weights_ok || a->hidden_norm_gamma.size() < HIDDEN || a->embed_norm_gamma.size() < HIDDEN ||
+        a->post_attn_norm_gamma.size() < HIDDEN || a->final_norm_gamma.size() < HIDDEN ||
+        a->efficient_lm_head_down_proj_weight.empty() ||
+        a->efficient_lm_head_qweight_row_major.empty() ||
+        a->efficient_lm_head_scales_row_major.empty() ||
+        a->lm_head_weight.empty()) {
+        *err_msg = "missing or invalid packed weight artifacts";
+        return false;
+    }
+
+    if (!load_prefix_hbm_sidecar(case_dir, c, &a->hbm_k, &a->hbm_v, err_msg)) {
+        return false;
+    }
+
+    a->rope_cfg_table.assign(
+        static_cast<size_t>(std::max(kCdtControllerMaxDepth, c.curr_depth_start + c.tree_depth)),
+        RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>{});
+    const std::vector<float> inv_freq = build_llama3_inv_freq(HEAD_DIM);
+    for (size_t d = 0; d < a->rope_cfg_table.size(); ++d) {
+        fill_rope_cfg<HEAD_DIM>(
+            a->rope_cfg_table[d], inv_freq, c.prefix_len + static_cast<int>(d));
     }
     return true;
 }
@@ -786,26 +1093,12 @@ reference_finalize:
     s->stopped_early = stopped;
 }
 
-void run_orchestrator_under_test(const CaseData& c, RuntimeState* s) {
+void run_orchestrator_under_test(const CaseData& c,
+                                 const SlmArtifacts& a,
+                                 RuntimeState* s) {
     init_runtime(c, s);
-
-    std::vector<pack512> dummy_pack(1);
-    std::vector<float> dummy_scale(1, 1.0f);
-    std::vector<uint16_t> dummy_u16(1, 0);
-    std::vector<int32_t> dummy_i32(1, 0);
-    std::vector<vec_t<VEC_W>> dummy_vec(1);
-    RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM> rope_cfg{};
-
-    CdtOrchTbTopkProvider provider;
-    provider.recurrent_topk_probas = c.recurrent_topk_probas.data();
-    provider.recurrent_topk_tokens = c.recurrent_topk_tokens.data();
-    provider.depth_count = c.tree_depth;
-    provider.batch_size = c.batch_size;
-    provider.max_tree_width = c.max_tree_width;
-    provider.node_top_k = c.node_top_k;
-    provider.curr_depth_start = c.curr_depth_start;
-
-    cdt_set_orch_tb_topk_provider(&provider);
+    std::vector<vec_t<VEC_W>> hbm_k = a.hbm_k;
+    std::vector<vec_t<VEC_W>> hbm_v = a.hbm_v;
 
     cost_draft_tree_multilayer_orchestrator_hls(
         c.tree_depth,
@@ -821,26 +1114,26 @@ void run_orchestrator_under_test(const CaseData& c, RuntimeState* s) {
         s->step_topk_indexs_prev.data(),
         s->step_topk_probas_sampling.data(),
         s->step_topk_tokens_sampling.data(),
-        dummy_pack.data(), dummy_scale.data(),
-        dummy_pack.data(), dummy_scale.data(),
-        dummy_pack.data(), dummy_scale.data(),
-        dummy_pack.data(), dummy_scale.data(),
-        dummy_pack.data(), dummy_scale.data(),
-        dummy_pack.data(), dummy_scale.data(),
-        dummy_pack.data(), dummy_scale.data(),
-        dummy_scale.data(),
-        dummy_scale.data(),
-        dummy_scale.data(),
-        dummy_scale.data(),
-        &rope_cfg,
-        dummy_vec.data(),
-        dummy_vec.data(),
-        dummy_u16.data(),
-        dummy_i32.data(),
-        dummy_u16.data(),
-        dummy_i32.data(),
-        dummy_i32.data(),
-        dummy_u16.data(),
+        a.w_q.data(), a.s_q.data(),
+        a.w_k.data(), a.s_k.data(),
+        a.w_v.data(), a.s_v.data(),
+        a.w_o.data(), a.s_o.data(),
+        a.w_gate.data(), a.gate_scales.data(),
+        a.w_up.data(), a.up_scales.data(),
+        a.w_down.data(), a.down_scales.data(),
+        a.hidden_norm_gamma.data(),
+        a.embed_norm_gamma.data(),
+        a.post_attn_norm_gamma.data(),
+        a.final_norm_gamma.data(),
+        a.rope_cfg_table.data(),
+        hbm_k.data(),
+        hbm_v.data(),
+        a.efficient_lm_head_down_proj_weight.data(),
+        a.efficient_lm_head_qweight_row_major.data(),
+        a.efficient_lm_head_scales_row_major.data(),
+        a.efficient_lm_head_qzeros.data(),
+        a.efficient_lm_head_g_idx.data(),
+        a.lm_head_weight.data(),
         c.efficient_lm_rank,
         c.efficient_lm_vocab_size,
         c.prefix_len,
@@ -882,8 +1175,243 @@ void run_orchestrator_under_test(const CaseData& c, RuntimeState* s) {
         c.initial_topk_probas.data(),
         c.initial_topk_tokens.data(),
         c.initial_hidden_states.data());
+}
 
-    cdt_set_orch_tb_topk_provider(nullptr);
+bool run_slm_depth_parity(const CaseData& c,
+                          const SlmArtifacts& a,
+                          std::string* err_msg) {
+    RuntimeState s;
+    init_runtime(c, &s);
+    std::vector<vec_t<VEC_W>> hbm_k = a.hbm_k;
+    std::vector<vec_t<VEC_W>> hbm_v = a.hbm_v;
+
+    int curr_tree_width = clamp_int(s.io_tree_width, 0, c.max_tree_width);
+    curr_tree_width = clamp_int(curr_tree_width, 0, c.node_top_k);
+    int curr_verify_num = clamp_int(s.io_verify_num, 1, c.max_verify_num);
+    int curr_cumu_count = clamp_int(s.io_cumu_count, 0, c.max_node_count);
+    int loop_start_depth = 0;
+
+    int parent_indices_accum[kCdtControllerMaxDepth * TREE_WIDTH];
+    std::fill(std::begin(parent_indices_accum), std::end(parent_indices_accum), 0);
+    std::vector<int64_t> parent_scratch(static_cast<size_t>(c.batch_size * c.node_top_k), -1);
+
+    if (c.enable_initial_loop) {
+        std::vector<float> initial_last_layer_scores(static_cast<size_t>(c.batch_size), 1.0f);
+        std::vector<int64_t> initial_topk_indexs_prev(static_cast<size_t>(c.batch_size), 0);
+
+        cost_draft_tree_fused_step_hls(
+            c.initial_topk_probas.data(),
+            c.initial_topk_tokens.data(),
+            initial_last_layer_scores.data(),
+            c.initial_hidden_states.data(),
+            c.hot_token_id.data(),
+            static_cast<int64_t>(c.hot_token_id.size()),
+            c.use_hot_token_id,
+            initial_topk_indexs_prev.data(),
+            c.batch_size,
+            c.node_top_k,
+            1,
+            c.hidden_size,
+            curr_cumu_count,
+            curr_verify_num,
+            c.curr_depth_start + 1,
+            c.max_node_count,
+            c.max_verify_num,
+            s.cumu_tokens.data(),
+            s.cumu_scores.data(),
+            s.cumu_deltas.data(),
+            s.prev_indexs.data(),
+            s.next_indexs.data(),
+            s.side_indexs.data(),
+            s.output_scores.data(),
+            s.output_tokens.data(),
+            s.work_scores.data(),
+            s.sort_scores.data(),
+            s.output_hidden_states.data(),
+            s.cache_topk_indices.data(),
+            s.dbg_curr_layer_scores.data(),
+            s.dbg_sort_layer_scores.data(),
+            s.dbg_sort_layer_indices.data(),
+            parent_scratch.data(),
+            s.dbg_remapped_topk_tokens.data());
+
+        for (int t = 0; t < TREE_WIDTH; ++t) {
+            int parent_slot = 0;
+            if (t < c.node_top_k) {
+                const int64_t v = parent_scratch[static_cast<size_t>(t)];
+                parent_slot = (v >= 0 && v < c.max_tree_width) ? static_cast<int>(v) : 0;
+            }
+            parent_indices_accum[c.curr_depth_start * TREE_WIDTH + t] = parent_slot;
+        }
+
+        curr_cumu_count = std::min(c.max_node_count, curr_cumu_count + c.node_top_k);
+
+        int next_tree_width = curr_tree_width;
+        int next_verify_num = curr_verify_num;
+        bool stop_signal = false;
+        schedule_for_depth(
+            c, 0, 1, curr_verify_num, &next_tree_width, &next_verify_num, &stop_signal);
+        curr_tree_width = next_tree_width;
+        curr_verify_num = next_verify_num;
+
+        if (c.tree_depth <= 1 || stop_signal || next_tree_width <= 0) {
+            return true;
+        }
+
+        cdt_prepare_next_layer_inputs_hls(
+            s.output_scores.data(),
+            s.output_tokens.data(),
+            s.output_hidden_states.data(),
+            s.cache_topk_indices.data(),
+            c.batch_size,
+            c.node_top_k,
+            c.hidden_size,
+            next_tree_width,
+            c.max_tree_width,
+            s.step_input_tokens.data(),
+            s.step_last_layer_scores.data(),
+            s.step_input_hidden_states.data(),
+            s.step_topk_indexs_prev.data());
+        loop_start_depth = 1;
+    }
+
+    std::vector<float> slm_topk_probas(static_cast<size_t>(c.batch_size * c.max_tree_width * c.node_top_k), 0.0f);
+    std::vector<int64_t> slm_topk_tokens(static_cast<size_t>(c.batch_size * c.max_tree_width * c.node_top_k), 0);
+
+    for (int d = loop_start_depth; d < c.tree_depth; ++d) {
+        if (curr_tree_width <= 0) break;
+        const int current_depth = c.curr_depth_start + d;
+        std::fill(slm_topk_probas.begin(), slm_topk_probas.end(), 0.0f);
+        std::fill(slm_topk_tokens.begin(), slm_topk_tokens.end(), 0);
+
+        cdt_run_eagle4_slm_topk_hls(
+            s.step_input_hidden_states.data(),
+            c.batch_size,
+            curr_tree_width,
+            c.hidden_size,
+            c.node_top_k,
+            a.w_q.data(), a.s_q.data(), a.w_k.data(), a.s_k.data(), a.w_v.data(), a.s_v.data(),
+            a.w_o.data(), a.s_o.data(), a.w_gate.data(), a.gate_scales.data(),
+            a.w_up.data(), a.up_scales.data(), a.w_down.data(), a.down_scales.data(),
+            a.hidden_norm_gamma.data(), a.embed_norm_gamma.data(),
+            a.post_attn_norm_gamma.data(), a.final_norm_gamma.data(),
+            a.rope_cfg_table[static_cast<size_t>(current_depth)],
+            hbm_k.data(),
+            hbm_v.data(),
+            a.efficient_lm_head_down_proj_weight.data(),
+            a.efficient_lm_head_qweight_row_major.data(),
+            a.efficient_lm_head_scales_row_major.data(),
+            a.efficient_lm_head_qzeros.data(),
+            a.efficient_lm_head_g_idx.data(),
+            a.lm_head_weight.data(),
+            c.efficient_lm_rank,
+            c.efficient_lm_vocab_size,
+            c.prefix_len,
+            current_depth,
+            parent_indices_accum,
+            s.step_input_hidden_states.data(),
+            slm_topk_probas.data(),
+            slm_topk_tokens.data());
+
+        if (mask_enabled(c.expected_mask_recurrent_depth, d)) {
+            const size_t depth_base =
+                static_cast<size_t>(d) * c.batch_size * c.max_tree_width * c.node_top_k;
+            const int used = c.batch_size * curr_tree_width * c.node_top_k;
+            for (int i = 0; i < used; ++i) {
+                const float exp_p = c.recurrent_topk_probas[depth_base + static_cast<size_t>(i)];
+                const int64_t exp_t = c.recurrent_topk_tokens[depth_base + static_cast<size_t>(i)];
+                if (!nearly_equal(slm_topk_probas[static_cast<size_t>(i)], exp_p, c.eps_abs, c.eps_rel)) {
+                    *err_msg = "slm topk prob mismatch at depth " + std::to_string(d) +
+                               " index " + std::to_string(i) + " got=" +
+                               std::to_string(slm_topk_probas[static_cast<size_t>(i)]) +
+                               " expected=" + std::to_string(exp_p);
+                    return false;
+                }
+                if (slm_topk_tokens[static_cast<size_t>(i)] != exp_t) {
+                    *err_msg = "slm topk token mismatch at depth " + std::to_string(d) +
+                               " index " + std::to_string(i) + " got=" +
+                               std::to_string(slm_topk_tokens[static_cast<size_t>(i)]) +
+                               " expected=" + std::to_string(exp_t);
+                    return false;
+                }
+            }
+        }
+
+        load_recurrent_topk_for_depth(c, d, curr_tree_width, &s);
+        cost_draft_tree_fused_step_hls(
+            s.step_topk_probas_sampling.data(),
+            s.step_topk_tokens_sampling.data(),
+            s.step_last_layer_scores.data(),
+            s.step_input_hidden_states.data(),
+            c.hot_token_id.data(),
+            static_cast<int64_t>(c.hot_token_id.size()),
+            c.use_hot_token_id,
+            s.step_topk_indexs_prev.data(),
+            c.batch_size,
+            c.node_top_k,
+            curr_tree_width,
+            c.hidden_size,
+            curr_cumu_count,
+            curr_verify_num,
+            c.enable_initial_loop ? (c.curr_depth_start + d + 1) : (c.curr_depth_start + d),
+            c.max_node_count,
+            c.max_verify_num,
+            s.cumu_tokens.data(),
+            s.cumu_scores.data(),
+            s.cumu_deltas.data(),
+            s.prev_indexs.data(),
+            s.next_indexs.data(),
+            s.side_indexs.data(),
+            s.output_scores.data(),
+            s.output_tokens.data(),
+            s.work_scores.data(),
+            s.sort_scores.data(),
+            s.output_hidden_states.data(),
+            s.cache_topk_indices.data(),
+            s.dbg_curr_layer_scores.data(),
+            s.dbg_sort_layer_scores.data(),
+            s.dbg_sort_layer_indices.data(),
+            parent_scratch.data(),
+            s.dbg_remapped_topk_tokens.data());
+
+        if (current_depth >= 0 && current_depth < kCdtControllerMaxDepth) {
+            for (int t = 0; t < TREE_WIDTH; ++t) {
+                int parent_slot = 0;
+                if (t < c.node_top_k) {
+                    const int64_t v = parent_scratch[static_cast<size_t>(t)];
+                    parent_slot = (v >= 0 && v < c.max_tree_width) ? static_cast<int>(v) : 0;
+                }
+                parent_indices_accum[current_depth * TREE_WIDTH + t] = parent_slot;
+            }
+        }
+
+        curr_cumu_count = std::min(c.max_node_count, curr_cumu_count + curr_tree_width * c.node_top_k);
+        int next_tree_width = curr_tree_width;
+        int next_verify_num = curr_verify_num;
+        bool stop_signal = false;
+        schedule_for_depth(
+            c, d, curr_tree_width, curr_verify_num, &next_tree_width, &next_verify_num, &stop_signal);
+        if (d + 1 >= c.tree_depth || stop_signal || next_tree_width <= 0) {
+            break;
+        }
+        cdt_prepare_next_layer_inputs_hls(
+            s.output_scores.data(),
+            s.output_tokens.data(),
+            s.output_hidden_states.data(),
+            s.cache_topk_indices.data(),
+            c.batch_size,
+            c.node_top_k,
+            c.hidden_size,
+            next_tree_width,
+            c.max_tree_width,
+            s.step_input_tokens.data(),
+            s.step_last_layer_scores.data(),
+            s.step_input_hidden_states.data(),
+            s.step_topk_indexs_prev.data());
+        curr_tree_width = next_tree_width;
+        curr_verify_num = next_verify_num;
+    }
+    return true;
 }
 
 bool nearly_equal(float a, float b, float eps_abs, float eps_rel) {
@@ -955,12 +1483,17 @@ bool mask_enabled(const std::vector<int>& mask, int idx) {
     return mask[static_cast<size_t>(idx)] != 0;
 }
 
-bool run_and_compare(const CaseData& c) {
+bool run_and_compare(const CaseData& c,
+                     const SlmArtifacts& artifacts,
+                     std::string* err_msg) {
     RuntimeState ref_state;
     RuntimeState uut_state;
 
+    if (!run_slm_depth_parity(c, artifacts, err_msg)) {
+        return false;
+    }
     run_reference_replay(c, &ref_state);
-    run_orchestrator_under_test(c, &uut_state);
+    run_orchestrator_under_test(c, artifacts, &uut_state);
 
     const bool is_constant_policy = (c.policy_mode == "constant");
     const int default_executed_depths = is_constant_policy ? c.tree_depth : ref_state.executed_depths;
@@ -1087,6 +1620,7 @@ int main(int argc, char** argv) {
         std::cout << "[DRY-RUN] parsed orchestrator case"
                   << " gt_mode=" << c.gt_mode
                   << " policy_mode=" << c.policy_mode
+                  << " capture_backend=" << (c.capture_backend.empty() ? "none" : c.capture_backend)
                   << " dims(B,topk,hidden,depth)="
                   << c.batch_size << "," << c.node_top_k << "," << c.hidden_size << ","
                   << c.tree_depth
@@ -1098,7 +1632,27 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if (!run_and_compare(c)) {
+    if (opts.case_file.empty()) {
+        std::cerr << "[FAIL] --case-file is required for non-dry-run orchestrator parity checks\n";
+        return 1;
+    }
+    if (c.capture_backend != "classic_eagle" && c.capture_backend != "eagle4_classic") {
+        std::cerr << "[FAIL] non-dry-run orchestrator parity now requires an eagle4_classic artifact-backed case\n";
+        return 1;
+    }
+
+    SlmArtifacts artifacts;
+    const std::filesystem::path case_dir =
+        std::filesystem::absolute(std::filesystem::path(opts.case_file)).parent_path();
+    if (!load_slm_artifacts(case_dir, c, &artifacts, &err_msg)) {
+        std::cerr << "[FAIL] " << err_msg << "\n";
+        return 1;
+    }
+
+    if (!run_and_compare(c, artifacts, &err_msg)) {
+        if (!err_msg.empty()) {
+            std::cerr << "[FAIL] " << err_msg << "\n";
+        }
         std::cerr << "[FAIL] cost_draft_tree_multilayer_orchestrator_tb\n";
         return 1;
     }

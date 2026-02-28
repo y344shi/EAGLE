@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import argparse
 import random
+import shutil
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
+
+import numpy as np
 
 DEFAULT_SEARCH_DIRS = [
     Path("/home/y344shi/workspace/eagle4_adaptation/sglang-eagle4/capture/cases"),
@@ -73,6 +76,16 @@ def _get_floats(kv: Dict[str, List[str]], key: str, required: bool = True) -> Li
     return [float(x) for x in kv[key]]
 
 
+def _get_strings(
+    kv: Dict[str, List[str]], key: str, required: bool = True
+) -> List[str]:
+    if key not in kv:
+        if required:
+            raise KeyError(f"missing key: {key}")
+        return []
+    return list(kv[key])
+
+
 def _slice_batch(flat: List, batch_idx: int, batch_size: int, per_batch: int) -> List:
     if batch_size <= 0:
         return []
@@ -107,6 +120,46 @@ def _find_case(search_dirs: List[Path], name: str) -> Optional[Path]:
         if p.exists() and p.is_file():
             return p
     return None
+
+
+def _load_fp16_bin(path: Path) -> np.ndarray:
+    if not path.exists():
+        raise FileNotFoundError(path)
+    return np.fromfile(path, dtype=np.float16).astype(np.float32)
+
+
+def _load_i32_bin(path: Path) -> np.ndarray:
+    if not path.exists():
+        raise FileNotFoundError(path)
+    return np.fromfile(path, dtype=np.int32)
+
+
+def _resolve_artifact_path(base_dir: Path, value: str) -> Path:
+    p = Path(value)
+    if p.is_absolute():
+        return p
+    return (base_dir / p).resolve()
+
+
+def _softmax_topk_from_stage(
+    gathered_logits: np.ndarray,
+    candidate_indices: np.ndarray,
+    batch_size: int,
+    node_top_k: int,
+) -> tuple[List[float], List[int]]:
+    if gathered_logits.size % batch_size != 0 or candidate_indices.size % batch_size != 0:
+        raise ValueError("candidate/gathered logits size mismatch for batch reshape")
+    width = gathered_logits.size // batch_size
+    gathered = gathered_logits.reshape(batch_size, width)
+    candidates = candidate_indices.reshape(batch_size, width)
+    gathered = gathered - gathered.max(axis=1, keepdims=True)
+    probs = np.exp(gathered)
+    probs /= probs.sum(axis=1, keepdims=True)
+
+    topk_idx = np.argsort(-probs, axis=1)[:, :node_top_k]
+    topk_probs = np.take_along_axis(probs, topk_idx, axis=1)
+    topk_tokens = np.take_along_axis(candidates, topk_idx, axis=1)
+    return topk_probs.reshape(-1).astype(np.float32).tolist(), topk_tokens.reshape(-1).astype(np.int64).tolist()
 
 
 def _simulate_expected_scalars(
@@ -206,6 +259,331 @@ def main() -> None:
     if e2e_case_path is not None and e2e_case_path.exists():
         try:
             e2e = _parse_key_count_file(e2e_case_path)
+            capture_backend = _get_strings(e2e, "capture_backend", required=False)
+            if capture_backend and capture_backend[0] in ("eagle4_classic", "classic_eagle"):
+                meta = _get_ints(e2e, "meta", required=True)
+                if len(meta) < 19:
+                    raise ValueError("classic-eagle e2e meta must contain at least 19 ints")
+
+                batch_size = meta[0]
+                node_top_k = meta[1]
+                hidden_size = meta[2]
+                tree_depth = meta[3]
+                curr_depth_start = meta[4]
+                prefix_len = meta[5]
+                max_node_count = meta[6]
+                max_verify_num = meta[7]
+                max_tree_width = meta[8]
+                init_tree_width = meta[9]
+                init_verify_num = meta[10]
+                init_cumu_count = meta[11]
+                enable_initial_loop = meta[12]
+                hot_vocab_size = meta[13]
+                use_hot_token_id = meta[14]
+                efficient_lm_rank = meta[15]
+                efficient_lm_vocab_size = meta[16]
+                max_seq_tokens = meta[17]
+                seed = meta[18]
+
+                if batch_size != 1:
+                    raise ValueError("classic-eagle case precondition failed: batch_size must be 1")
+                if tree_depth <= 1:
+                    raise ValueError("classic-eagle case precondition failed: tree_depth must be > 1")
+                if enable_initial_loop == 0:
+                    raise ValueError(
+                        "classic-eagle case precondition failed: enable_initial_loop must be 1"
+                    )
+
+                eps_abs_vals = _get_floats(e2e, "eps_abs", required=False)
+                eps_rel_vals = _get_floats(e2e, "eps_rel", required=False)
+                eps_abs = eps_abs_vals[0] if eps_abs_vals else args.eps_abs
+                eps_rel = eps_rel_vals[0] if eps_rel_vals else args.eps_rel
+
+                golden_tensor_root_vals = _get_strings(
+                    e2e, "golden_tensor_root", required=True
+                )
+                if len(golden_tensor_root_vals) != 1 or not golden_tensor_root_vals[0]:
+                    raise ValueError("classic-eagle e2e is missing golden_tensor_root")
+                golden_tensor_root = _resolve_artifact_path(
+                    e2e_case_path.parent, golden_tensor_root_vals[0]
+                )
+                packed_dir = (golden_tensor_root.parent / "packed_all").resolve()
+                tensor_dir = golden_tensor_root / "cpmcu_tensors"
+
+                prefix_hbm_dtype = _get_strings(e2e, "prefix_hbm_dtype", required=True)
+                if prefix_hbm_dtype != ["fp16"]:
+                    raise ValueError(
+                        f"classic-eagle e2e prefix_hbm_dtype must be fp16, got={prefix_hbm_dtype}"
+                    )
+                prefix_hbm_k_file = _get_strings(e2e, "prefix_hbm_k_file", required=True)
+                prefix_hbm_v_file = _get_strings(e2e, "prefix_hbm_v_file", required=True)
+                prefix_hbm_token_count = _get_ints(e2e, "prefix_hbm_token_count", required=True)
+                prefix_hbm_elems_per_token = _get_ints(
+                    e2e, "prefix_hbm_elems_per_token", required=True
+                )
+                if (
+                    len(prefix_hbm_k_file) != 1
+                    or len(prefix_hbm_v_file) != 1
+                    or len(prefix_hbm_token_count) != 1
+                    or len(prefix_hbm_elems_per_token) != 1
+                ):
+                    raise ValueError("classic-eagle prefix_hbm_* field arity mismatch")
+                if prefix_hbm_token_count[0] != prefix_len:
+                    raise ValueError(
+                        f"classic-eagle prefix token count mismatch: got={prefix_hbm_token_count[0]} expected={prefix_len}"
+                    )
+
+                prefix_k_src = _resolve_artifact_path(
+                    e2e_case_path.parent, prefix_hbm_k_file[0]
+                )
+                prefix_v_src = _resolve_artifact_path(
+                    e2e_case_path.parent, prefix_hbm_v_file[0]
+                )
+                if not prefix_k_src.exists() or not prefix_v_src.exists():
+                    raise FileNotFoundError(
+                        f"classic-eagle prefix sidecar missing: {prefix_k_src} / {prefix_v_src}"
+                    )
+
+                tensor_007 = tensor_dir / "tensor_007_EAGLE_INPUT_prev_hidden_ALL.bin"
+                initial_hidden_raw = _load_fp16_bin(tensor_007)
+                if initial_hidden_raw.size < batch_size * hidden_size:
+                    raise ValueError(
+                        f"tensor_007 too small: got={initial_hidden_raw.size} need>={batch_size * hidden_size}"
+                    )
+                initial_hidden_states = (
+                    initial_hidden_raw[: batch_size * hidden_size].astype(np.float32).tolist()
+                )
+
+                initial_topk_probas = _get_floats(
+                    e2e, "initial_topk_probas", required=False
+                )
+                initial_topk_tokens = _get_i64s(
+                    e2e, "initial_topk_tokens", required=False
+                )
+                out_n = batch_size * node_top_k
+                if len(initial_topk_probas) != out_n or len(initial_topk_tokens) != out_n:
+                    tensor_133 = tensor_dir / "tensor_133_EAGLE_LM_candidate_indices.bin"
+                    tensor_134 = tensor_dir / "tensor_134_EAGLE_LM_gathered_logits.bin"
+                    initial_topk_probas, initial_topk_tokens = _softmax_topk_from_stage(
+                        _load_fp16_bin(tensor_134), _load_i32_bin(tensor_133), batch_size, node_top_k
+                    )
+                    if len(initial_topk_probas) != out_n or len(initial_topk_tokens) != out_n:
+                        raise ValueError("failed to reconstruct initial_topk_* from stage dumps")
+
+                hot_token_id = _get_i64s(e2e, "hot_token_id", required=False)
+                if not hot_token_id:
+                    hot_token_id = list(range(max(1, hot_vocab_size)))
+                if len(hot_token_id) != hot_vocab_size:
+                    raise ValueError("classic-eagle hot_token_id size mismatch")
+
+                policy_next_tree_width = _get_ints(
+                    e2e, "policy_next_tree_width", required=True
+                )
+                policy_next_verify_num = _get_ints(
+                    e2e, "policy_next_verify_num", required=True
+                )
+                policy_stop_signal = _get_ints(
+                    e2e, "policy_stop_signal", required=True
+                )
+                if (
+                    len(policy_next_tree_width) != tree_depth
+                    or len(policy_next_verify_num) != tree_depth
+                    or len(policy_stop_signal) != tree_depth
+                ):
+                    raise ValueError("classic-eagle policy_* size mismatch")
+
+                tree_n = batch_size * max_tree_width
+                hidden_n = tree_n * hidden_size
+                per_depth_topk = batch_size * max_tree_width * node_top_k
+                recurrent_n = tree_depth * per_depth_topk
+                node_n = batch_size * max_node_count
+                work_n = batch_size * (max_verify_num + node_top_k)
+                sort_n = batch_size * max_verify_num
+
+                recurrent_topk_probas = _get_floats(
+                    e2e, "recurrent_topk_probas", required=True
+                )
+                recurrent_topk_tokens = _get_i64s(
+                    e2e, "recurrent_topk_tokens", required=True
+                )
+                if (
+                    len(recurrent_topk_probas) != recurrent_n
+                    or len(recurrent_topk_tokens) != recurrent_n
+                ):
+                    raise ValueError("classic-eagle recurrent_topk_* size mismatch")
+
+                strict_recurrent_depth = _get_ints(
+                    e2e, "expected_mask_recurrent_depth", required=False
+                )
+                if not strict_recurrent_depth:
+                    strict_recurrent_depth = [0] * tree_depth
+                if len(strict_recurrent_depth) != tree_depth:
+                    raise ValueError(
+                        "classic-eagle expected_mask_recurrent_depth size mismatch"
+                    )
+
+                expected_io_tree_width = _get_ints(
+                    e2e, "expected_io_tree_width", required=True
+                )
+                expected_io_verify_num = _get_ints(
+                    e2e, "expected_io_verify_num", required=True
+                )
+                expected_io_cumu_count = _get_ints(
+                    e2e, "expected_io_cumu_count", required=True
+                )
+                expected_executed_depths = _get_ints(
+                    e2e, "expected_executed_depths", required=True
+                )
+                expected_stopped_early = _get_ints(
+                    e2e, "expected_stopped_early", required=True
+                )
+                if (
+                    len(expected_io_tree_width) != 1
+                    or len(expected_io_verify_num) != 1
+                    or len(expected_io_cumu_count) != 1
+                    or len(expected_executed_depths) != 1
+                    or len(expected_stopped_early) != 1
+                ):
+                    raise ValueError("classic-eagle expected scalar fields size mismatch")
+
+                expected_mask_fields = _get_ints(
+                    e2e, "expected_mask_fields", required=False
+                )
+                if not expected_mask_fields:
+                    expected_mask_fields = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
+                if len(expected_mask_fields) != 10:
+                    raise ValueError("classic-eagle expected_mask_fields size mismatch")
+
+                step_input_tokens_init = [0] * tree_n
+                step_last_layer_scores_init = [0.0] * tree_n
+                step_topk_indexs_prev_init = [0] * tree_n
+                step_input_hidden_states_init = [0.0] * hidden_n
+                active_width = min(init_tree_width, max_tree_width, node_top_k)
+                for t in range(active_width):
+                    step_input_tokens_init[t] = initial_topk_tokens[t]
+                    step_last_layer_scores_init[t] = initial_topk_probas[t]
+                    step_topk_indexs_prev_init[t] = t
+                    dst_base = t * hidden_size
+                    step_input_hidden_states_init[
+                        dst_base : dst_base + hidden_size
+                    ] = initial_hidden_states[:hidden_size]
+
+                init_legacy_cumu_tokens = [-777] * node_n
+                init_legacy_cumu_scores = [-3.0] * node_n
+                init_legacy_cumu_deltas = [-1] * node_n
+                init_legacy_prev_indexs = [-1] * node_n
+                init_legacy_next_indexs = [-1] * node_n
+                init_legacy_side_indexs = [-1] * node_n
+                init_legacy_output_scores = [-4.0] * out_n
+                init_legacy_output_tokens = [-1] * out_n
+                init_legacy_work_scores = [-6.0] * work_n
+                init_legacy_sort_scores = [-2.0] * sort_n
+                expected_cumu_tokens = [-1] * node_n
+                expected_cumu_scores = [0.0] * node_n
+                expected_cumu_deltas = [-1] * node_n
+                expected_output_scores = [0.0] * out_n
+                expected_output_tokens = [-1] * out_n
+
+                out_path = args.output.resolve()
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                prefix_k_dst = out_path.parent / "cost_draft_tree_multilayer_orchestrator_prefix_k_layer0.fp16.bin"
+                prefix_v_dst = out_path.parent / "cost_draft_tree_multilayer_orchestrator_prefix_v_layer0.fp16.bin"
+                shutil.copyfile(prefix_k_src, prefix_k_dst)
+                shutil.copyfile(prefix_v_src, prefix_v_dst)
+
+                with out_path.open("w", encoding="utf-8") as f:
+                    f.write("# cost_draft_tree multilayer orchestrator case v2 eagle4-classic\n")
+                    _write_line(
+                        f,
+                        "meta",
+                        [
+                            batch_size,
+                            node_top_k,
+                            hidden_size,
+                            tree_depth,
+                            curr_depth_start,
+                            prefix_len,
+                            max_node_count,
+                            max_verify_num,
+                            max_tree_width,
+                            init_tree_width,
+                            init_verify_num,
+                            init_cumu_count,
+                            enable_initial_loop,
+                            hot_vocab_size,
+                            use_hot_token_id,
+                            efficient_lm_rank,
+                            efficient_lm_vocab_size,
+                            max_seq_tokens,
+                            seed,
+                        ],
+                    )
+                    _write_float_line(f, "eps_abs", [eps_abs])
+                    _write_float_line(f, "eps_rel", [eps_rel])
+                    _write_line(f, "gt_mode", ["mixed"])
+                    _write_line(f, "policy_mode", ["constant"])
+                    _write_line(f, "capture_backend", ["eagle4_classic"])
+                    _write_line(f, "golden_tensor_root", [str(golden_tensor_root)])
+                    _write_line(f, "packed_dir", [str(packed_dir)])
+                    _write_line(f, "prefix_hbm_dtype", ["fp16"])
+                    _write_line(f, "prefix_hbm_k_file", [prefix_k_dst.name])
+                    _write_line(f, "prefix_hbm_v_file", [prefix_v_dst.name])
+                    _write_line(f, "prefix_hbm_token_count", [prefix_len])
+                    _write_line(
+                        f,
+                        "prefix_hbm_elems_per_token",
+                        [prefix_hbm_elems_per_token[0]],
+                    )
+                    _write_line(f, "step_input_tokens_init", step_input_tokens_init)
+                    _write_float_line(
+                        f, "step_input_hidden_states_init", step_input_hidden_states_init
+                    )
+                    _write_float_line(
+                        f, "step_last_layer_scores_init", step_last_layer_scores_init
+                    )
+                    _write_line(
+                        f, "step_topk_indexs_prev_init", step_topk_indexs_prev_init
+                    )
+                    _write_line(f, "hot_token_id", hot_token_id)
+                    _write_float_line(f, "initial_hidden_states", initial_hidden_states)
+                    _write_float_line(f, "initial_topk_probas", initial_topk_probas)
+                    _write_line(f, "initial_topk_tokens", initial_topk_tokens)
+                    _write_line(f, "policy_next_tree_width", policy_next_tree_width)
+                    _write_line(f, "policy_next_verify_num", policy_next_verify_num)
+                    _write_line(f, "policy_stop_signal", policy_stop_signal)
+                    _write_float_line(f, "recurrent_topk_probas", recurrent_topk_probas)
+                    _write_line(f, "recurrent_topk_tokens", recurrent_topk_tokens)
+                    _write_line(
+                        f, "expected_mask_recurrent_depth", strict_recurrent_depth
+                    )
+                    _write_line(f, "init_legacy_cumu_tokens", init_legacy_cumu_tokens)
+                    _write_float_line(f, "init_legacy_cumu_scores", init_legacy_cumu_scores)
+                    _write_line(f, "init_legacy_cumu_deltas", init_legacy_cumu_deltas)
+                    _write_line(f, "init_legacy_prev_indexs", init_legacy_prev_indexs)
+                    _write_line(f, "init_legacy_next_indexs", init_legacy_next_indexs)
+                    _write_line(f, "init_legacy_side_indexs", init_legacy_side_indexs)
+                    _write_float_line(
+                        f, "init_legacy_output_scores", init_legacy_output_scores
+                    )
+                    _write_line(f, "init_legacy_output_tokens", init_legacy_output_tokens)
+                    _write_float_line(f, "init_legacy_work_scores", init_legacy_work_scores)
+                    _write_float_line(f, "init_legacy_sort_scores", init_legacy_sort_scores)
+                    _write_line(f, "expected_io_tree_width", expected_io_tree_width)
+                    _write_line(f, "expected_io_verify_num", expected_io_verify_num)
+                    _write_line(f, "expected_io_cumu_count", expected_io_cumu_count)
+                    _write_line(f, "expected_executed_depths", expected_executed_depths)
+                    _write_line(f, "expected_stopped_early", expected_stopped_early)
+                    _write_line(f, "expected_cumu_tokens", expected_cumu_tokens)
+                    _write_float_line(f, "expected_cumu_scores", expected_cumu_scores)
+                    _write_line(f, "expected_cumu_deltas", expected_cumu_deltas)
+                    _write_float_line(f, "expected_output_scores", expected_output_scores)
+                    _write_line(f, "expected_output_tokens", expected_output_tokens)
+                    _write_line(f, "expected_mask_fields", expected_mask_fields)
+
+                print(f"Wrote orchestrator case from EAGLE-4 classic capture: {out_path}")
+                print(f"E2E source: {e2e_case_path}")
+                return
+
             meta = _get_ints(e2e, "meta", required=True)
             if len(meta) < 19:
                 raise ValueError("e2e meta must contain at least 19 ints")

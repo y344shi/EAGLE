@@ -280,3 +280,6 @@ void eagle_tier1_top_eagle4_l0(
     rms_norm_stream<HIDDEN, TREE_WIDTH>(s_to_logits_raw, logits_norm_out_stream, final_norm_gamma, RMS_EPS);
     stream_add<VEC_W>(s_for_reasoning, s_post_attn_residual_for_add, reasoning_out_stream, NUM_CHUNKS);
 }
+
+} // namespace hls
+} // namespace tmac

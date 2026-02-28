@@ -557,71 +557,6 @@ slm_batch_loop:
     }
 }
 
-#ifdef TMAC_CDT_ORCH_TB_INJECT_TOPK
-// Test-only recurrent top-k injector for multilayer orchestrator TB.
-// When enabled, recurrent depths can bypass the SLM path and consume caller-supplied
-// top-k tensors, while production builds remain unchanged.
-struct CdtOrchTbTopkProvider {
-    const float* recurrent_topk_probas = nullptr;    // [depth, batch, max_tree_width * node_top_k]
-    const int64_t* recurrent_topk_tokens = nullptr;  // [depth, batch, max_tree_width * node_top_k]
-    int depth_count = 0;
-    int batch_size = 0;
-    int max_tree_width = 0;
-    int node_top_k = 0;
-    int curr_depth_start = 0;
-};
-
-inline CdtOrchTbTopkProvider* cdt_orch_tb_topk_provider = nullptr;
-
-inline void cdt_set_orch_tb_topk_provider(CdtOrchTbTopkProvider* provider) {
-    cdt_orch_tb_topk_provider = provider;
-}
-
-inline bool cdt_try_load_orch_tb_topk(
-    int current_depth,
-    int batch_size,
-    int curr_tree_width,
-    int node_top_k,
-    float* topk_probas_sampling_out,
-    int64_t* topk_tokens_sampling_out) {
-#pragma HLS INLINE
-    if (topk_probas_sampling_out == nullptr || topk_tokens_sampling_out == nullptr) {
-        return false;
-    }
-    CdtOrchTbTopkProvider* provider = cdt_orch_tb_topk_provider;
-    if (provider == nullptr || provider->recurrent_topk_probas == nullptr ||
-        provider->recurrent_topk_tokens == nullptr) {
-        return false;
-    }
-    if (batch_size <= 0 || curr_tree_width <= 0 || node_top_k <= 0) {
-        return false;
-    }
-    if (provider->batch_size < batch_size || provider->max_tree_width < curr_tree_width ||
-        provider->node_top_k < node_top_k) {
-        return false;
-    }
-
-    const int rel_depth = current_depth - provider->curr_depth_start;
-    if (rel_depth < 0 || rel_depth >= provider->depth_count) {
-        return false;
-    }
-
-    const int per_batch = provider->max_tree_width * provider->node_top_k;
-copy_injected_topk_loop_b:
-    for (int b = 0; b < batch_size; ++b) {
-copy_injected_topk_loop_t:
-        for (int t = 0; t < curr_tree_width * node_top_k; ++t) {
-#pragma HLS PIPELINE II = 1
-            const int src = rel_depth * (provider->batch_size * per_batch) + b * per_batch + t;
-            const int dst = b * (curr_tree_width * node_top_k) + t;
-            topk_probas_sampling_out[dst] = provider->recurrent_topk_probas[src];
-            topk_tokens_sampling_out[dst] = provider->recurrent_topk_tokens[src];
-        }
-    }
-    return true;
-}
-#endif
-
 // Multi-layer orchestrator:
 //   optional InitialLoop (PyTorch draft_InitialLoop parity):
 //     0) from previous-verify logits -> softmax+top-k (or caller-provided initial top-k),
@@ -715,7 +650,7 @@ inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
     const float* embed_norm_gamma,
     const float* post_attn_norm_gamma,
     const float* final_norm_gamma,
-    const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>* rope_cfg,
+    const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>* rope_cfg_table,
     vec_t<VEC_W>* hbm_k,
     vec_t<VEC_W>* hbm_v,
     const uint16_t* efficient_lm_head_down_proj_weight,
@@ -810,7 +745,7 @@ inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
         w_v == nullptr || s_v == nullptr || w_o == nullptr || s_o == nullptr ||
         w_gate == nullptr || gate_scales == nullptr || w_up == nullptr || up_scales == nullptr ||
         w_down == nullptr || down_scales == nullptr || hidden_norm_gamma == nullptr ||
-        embed_norm_gamma == nullptr || post_attn_norm_gamma == nullptr || rope_cfg == nullptr ||
+        embed_norm_gamma == nullptr || post_attn_norm_gamma == nullptr || rope_cfg_table == nullptr ||
         final_norm_gamma == nullptr || hbm_k == nullptr || hbm_v == nullptr ||
         efficient_lm_head_down_proj_weight == nullptr ||
         efficient_lm_head_qweight_row_major == nullptr ||
@@ -1045,19 +980,6 @@ orchestrator_depth_loop:
 
         // Stage A/B: SLM forward and LM-head top-k for current frontier.
         const int current_depth = curr_depth_start + d;
-#ifdef TMAC_CDT_ORCH_TB_INJECT_TOPK
-        // In TB injection mode we avoid linking the SLM fallback path entirely.
-        const bool used_injected_topk = cdt_try_load_orch_tb_topk(
-            current_depth,
-            batch_size,
-            curr_tree_width,
-            node_top_k,
-            step_topk_probas_sampling,
-            step_topk_tokens_sampling);
-        if (!used_injected_topk) {
-            return;
-        }
-#else
         cdt_run_eagle4_slm_topk_hls(
             step_input_hidden_states,
             batch_size,
@@ -1067,7 +989,7 @@ orchestrator_depth_loop:
             w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales, w_up, up_scales,
             w_down, down_scales,
             hidden_norm_gamma, embed_norm_gamma, post_attn_norm_gamma, final_norm_gamma,
-            *rope_cfg,
+            rope_cfg_table[current_depth],
             hbm_k, hbm_v,
             efficient_lm_head_down_proj_weight,
             efficient_lm_head_qweight_row_major,
@@ -1083,7 +1005,6 @@ orchestrator_depth_loop:
             step_input_hidden_states,
             step_topk_probas_sampling,
             step_topk_tokens_sampling);
-#endif
 
         // Stage C: fused score/update for one depth.
         cost_draft_tree_fused_step_hls(
@@ -1247,7 +1168,7 @@ extern "C" void cost_draft_tree_multilayer_orchestrator_hls(
     const float* embed_norm_gamma,
     const float* post_attn_norm_gamma,
     const float* final_norm_gamma,
-    const tmac::hls::RopeConfig<tmac::hls::NUM_HEADS, tmac::hls::NUM_KV_HEADS, tmac::hls::HEAD_DIM>* rope_cfg,
+    const tmac::hls::RopeConfig<tmac::hls::NUM_HEADS, tmac::hls::NUM_KV_HEADS, tmac::hls::HEAD_DIM>* rope_cfg_table,
     tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_k,
     tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_v,
     const uint16_t* efficient_lm_head_down_proj_weight,
@@ -1327,7 +1248,7 @@ extern "C" void cost_draft_tree_multilayer_orchestrator_hls(
 #pragma HLS INTERFACE m_axi port=embed_norm_gamma offset=slave bundle=gmem7
 #pragma HLS INTERFACE m_axi port=post_attn_norm_gamma offset=slave bundle=gmem7
 #pragma HLS INTERFACE m_axi port=final_norm_gamma offset=slave bundle=gmem7
-#pragma HLS INTERFACE m_axi port=rope_cfg offset=slave bundle=gmem_cfg
+#pragma HLS INTERFACE m_axi port=rope_cfg_table offset=slave bundle=gmem_cfg
 #pragma HLS INTERFACE m_axi port=hbm_k offset=slave bundle=gmem8
 #pragma HLS INTERFACE m_axi port=hbm_v offset=slave bundle=gmem9
 
@@ -1409,7 +1330,7 @@ extern "C" void cost_draft_tree_multilayer_orchestrator_hls(
         embed_norm_gamma,
         post_attn_norm_gamma,
         final_norm_gamma,
-        rope_cfg,
+        rope_cfg_table,
         hbm_k,
         hbm_v,
         efficient_lm_head_down_proj_weight,
