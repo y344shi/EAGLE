@@ -75,7 +75,7 @@ void cost_draft_tree_update_state_hls(
 
 batch_loop:
     for (int b = 0; b < batch_size; ++b) {
-#pragma HLS loop_tripcount min=kCdtUpdateTcBatch max=kCdtUpdateTcBatch
+#pragma HLS loop_tripcount min=kCdtUpdateTcBatch max=kCdtUpdateTcBatch avg=kCdtUpdateTcBatch
         const int topk_offset = b * num_new_tokens;
         const int parent_offset = b * node_top_k;
         const int topk_indexs_offset = b * tree_width;
@@ -87,7 +87,7 @@ batch_loop:
         // 1) Update output_scores and output_tokens.
     output_topk_loop:
         for (int i = 0; i < node_top_k; ++i) {
-#pragma HLS loop_tripcount min=kCdtUpdateTcTopK max=kCdtUpdateTcTopK
+#pragma HLS loop_tripcount min=kCdtUpdateTcTopK max=kCdtUpdateTcTopK avg=kCdtUpdateTcTopK
 #pragma HLS PIPELINE II = 1
             output_scores[output_offset + i] = sorted_scores[topk_offset + i];
 
@@ -108,7 +108,7 @@ batch_loop:
         const int start = cumu_count;
     update_new_nodes_loop:
         for (int i = 0; i < num_new_tokens; ++i) {
-#pragma HLS loop_tripcount min=kCdtUpdateTcTotalTopK max=kCdtUpdateTcTotalTopK
+#pragma HLS loop_tripcount min=kCdtUpdateTcTotalTopK max=kCdtUpdateTcTotalTopK avg=kCdtUpdateTcTotalTopK
 #pragma HLS PIPELINE II = 1
             const int global_idx = start + i;
             if (global_idx < max_node_count) {
@@ -130,7 +130,7 @@ batch_loop:
         // 3) Update parent next pointers.
     update_parent_next_loop:
         for (int i = 0; i < tree_width; ++i) {
-#pragma HLS loop_tripcount min=kCdtUpdateTcTreeWidth max=kCdtUpdateTcTreeWidth
+#pragma HLS loop_tripcount min=kCdtUpdateTcTreeWidth max=kCdtUpdateTcTreeWidth avg=kCdtUpdateTcTreeWidth
 #pragma HLS PIPELINE II = 1
             const int64_t parent_global_idx = topk_indexs[topk_indexs_offset + i];
             if (parent_global_idx >= 0 && parent_global_idx < max_node_count) {
@@ -142,13 +142,13 @@ batch_loop:
         const int work_size_0 = cdt_update_min(verify_num, cumu_count);
     work_scores_old_loop:
         for (int i = 0; i < work_size_0; ++i) {
-#pragma HLS loop_tripcount min=1 max=kCdtUpdateTcMaxVerifyNum
+#pragma HLS loop_tripcount min=1 max=kCdtUpdateTcMaxVerifyNum avg=(1+kCdtUpdateTcMaxVerifyNum)/2
 #pragma HLS PIPELINE II = 1
             work_scores[work_offset + i] = sort_scores[verify_offset + i];
         }
     work_scores_new_loop:
         for (int i = 0; i < node_top_k; ++i) {
-#pragma HLS loop_tripcount min=kCdtUpdateTcTopK max=kCdtUpdateTcTopK
+#pragma HLS loop_tripcount min=kCdtUpdateTcTopK max=kCdtUpdateTcTopK avg=kCdtUpdateTcTopK
 #pragma HLS PIPELINE II = 1
             work_scores[work_offset + work_size_0 + i] = output_scores[output_offset + i];
         }
@@ -169,7 +169,7 @@ batch_loop:
         int ib = 0;
     merge_loop:
         for (int i = 0; i < work_size_1; ++i) {
-#pragma HLS loop_tripcount min=1 max=kCdtUpdateTcMaxVerifyNum
+#pragma HLS loop_tripcount min=1 max=kCdtUpdateTcMaxVerifyNum avg=(1+kCdtUpdateTcMaxVerifyNum)/2
 //#pragma HLS PIPELINE II = 1
             const bool has_a = (ia < work_size_0);
             const bool has_b = (ib < num_new_tokens);
@@ -187,7 +187,7 @@ batch_loop:
 
     write_sort_scores_loop:
         for (int i = 0; i < work_size_1; ++i) {
-#pragma HLS loop_tripcount min=1 max=kCdtUpdateTcMaxVerifyNum
+#pragma HLS loop_tripcount min=1 max=kCdtUpdateTcMaxVerifyNum avg=(1+kCdtUpdateTcMaxVerifyNum)/2
 #pragma HLS PIPELINE II = 1
             sort_scores[verify_offset + i] = merged_top[i];
         }

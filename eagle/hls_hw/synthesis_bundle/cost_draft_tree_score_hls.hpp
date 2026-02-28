@@ -22,13 +22,13 @@ void cdt_bitonic_sort_64(float scores[kCdtSortWidth],
 #pragma HLS INLINE
 bitonic_size:
     for (int size = 2; size <= kCdtSortWidth; size <<= 1) {
-#pragma HLS loop_tripcount min=6 max=6
+#pragma HLS loop_tripcount min=6 max=6 avg=6
     bitonic_stride:
         for (int stride = size >> 1; stride > 0; stride >>= 1) {
-#pragma HLS loop_tripcount min=1 max=6
+#pragma HLS loop_tripcount min=1 max=6 avg=(1+6)/2
         bitonic_tid:
             for (int tid = 0; tid < kCdtSortWidth / 2; ++tid) {
-#pragma HLS loop_tripcount min=kCdtSortWidth/2 max=kCdtSortWidth/2
+#pragma HLS loop_tripcount min=kCdtSortWidth/2 max=kCdtSortWidth/2 avg=kCdtSortWidth/2
 #pragma HLS PIPELINE II = 1
                 const int i = ((tid / stride) * (stride * 2)) + (tid % stride);
                 const int j = i + stride;
@@ -98,7 +98,7 @@ void cost_draft_tree_layer_score_hls_core(
 
 batch_loop:
     for (int b = 0; b < batch_size; ++b) {
-#pragma HLS loop_tripcount min=kCdtScoreTcBatch max=kCdtScoreTcBatch
+#pragma HLS loop_tripcount min=kCdtScoreTcBatch max=kCdtScoreTcBatch avg=kCdtScoreTcBatch
         float s_scores[kCdtSortWidth];
         int64_t s_indices[kCdtSortWidth];
         int64_t s_tokens[kCdtSortWidth];
@@ -116,7 +116,7 @@ batch_loop:
 
     score_loop:
         for (int tid = 0; tid < total_topk; ++tid) {
-#pragma HLS loop_tripcount min=kCdtScoreTcTotalTopK max=kCdtScoreTcTotalTopK
+#pragma HLS loop_tripcount min=kCdtScoreTcTotalTopK max=kCdtScoreTcTotalTopK avg=kCdtScoreTcTotalTopK
 #pragma HLS PIPELINE II = 1
             const int parent_node_idx = tid / node_top_k;
             const int flat_idx = b * total_topk + tid;
@@ -141,7 +141,7 @@ batch_loop:
 
     write_sorted_loop:
         for (int tid = 0; tid < total_topk; ++tid) {
-#pragma HLS loop_tripcount min=kCdtScoreTcTotalTopK max=kCdtScoreTcTotalTopK
+#pragma HLS loop_tripcount min=kCdtScoreTcTotalTopK max=kCdtScoreTcTotalTopK avg=kCdtScoreTcTotalTopK
 #pragma HLS PIPELINE II = 1
             sort_layer_scores[b * total_topk + tid] = s_scores[tid];
             sort_layer_indices[b * total_topk + tid] = s_indices[tid];
@@ -159,7 +159,7 @@ batch_loop:
 
     gather_hidden_loop:
         for (int k = 0; k < node_top_k; ++k) {
-#pragma HLS loop_tripcount min=kCdtScoreTcTopK max=kCdtScoreTcTopK
+#pragma HLS loop_tripcount min=kCdtScoreTcTopK max=kCdtScoreTcTopK avg=kCdtScoreTcTopK
             int64_t parent_idx = parent_indices_in_layer[b * node_top_k + k];
             if (parent_idx < 0) parent_idx = 0;
             if (parent_idx >= tree_width) parent_idx = tree_width - 1;
@@ -171,7 +171,7 @@ batch_loop:
 
         copy_hidden_dim:
             for (int h = 0; h < hidden_size; ++h) {
-#pragma HLS loop_tripcount min=kCdtScoreTcHidden max=kCdtScoreTcHidden
+#pragma HLS loop_tripcount min=kCdtScoreTcHidden max=kCdtScoreTcHidden avg=kCdtScoreTcHidden
 #pragma HLS PIPELINE II = 1
                 output_hidden_states[dst_base + h] = input_hidden_states[src_base + h];
             }

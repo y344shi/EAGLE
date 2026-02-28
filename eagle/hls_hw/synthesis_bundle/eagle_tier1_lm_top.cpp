@@ -8,9 +8,9 @@ void sink_reasoning_stream(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& reas
                            float* reasoning_state_out) {
 #pragma HLS INLINE off
     for (int t = 0; t < tmac::hls::TREE_WIDTH; ++t) {
-#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH
+#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH avg=tmac::hls::TREE_WIDTH
         for (int i = 0; i < tmac::hls::HIDDEN / tmac::hls::VEC_W; ++i) {
-#pragma HLS loop_tripcount min=tmac::hls::HIDDEN/tmac::hls::VEC_W max=tmac::hls::HIDDEN/tmac::hls::VEC_W
+#pragma HLS loop_tripcount min=tmac::hls::HIDDEN/tmac::hls::VEC_W max=tmac::hls::HIDDEN/tmac::hls::VEC_W avg=tmac::hls::HIDDEN/tmac::hls::VEC_W
 #pragma HLS PIPELINE II=1
             auto v = reasoning_stream.read();
             for (int j = 0; j < tmac::hls::VEC_W; ++j) {
@@ -26,9 +26,9 @@ void collect_logits_stream(
     float logits_hidden[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax]) {
 #pragma HLS INLINE off
     for (int t = 0; t < tmac::hls::TREE_WIDTH; t++) {
-#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH
+#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH avg=tmac::hls::TREE_WIDTH
         for (int i = 0; i < tmac::hls::HIDDEN / tmac::hls::VEC_W; ++i) {
-#pragma HLS loop_tripcount min=tmac::hls::HIDDEN/tmac::hls::VEC_W max=tmac::hls::HIDDEN/tmac::hls::VEC_W
+#pragma HLS loop_tripcount min=tmac::hls::HIDDEN/tmac::hls::VEC_W max=tmac::hls::HIDDEN/tmac::hls::VEC_W avg=tmac::hls::HIDDEN/tmac::hls::VEC_W
     #pragma HLS PIPELINE II=1
             auto v = logits_stream.read();
             for (int j = 0; j < tmac::hls::VEC_W; ++j) {
@@ -260,9 +260,9 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
     // Output: TREE_WIDTH * topk entries, laid out [t0_c0, t0_c1, ..., t1_c0, t1_c1, ...]
     if (candidate_indices_out != nullptr) {
         for (int t = 0; t < tmac::hls::TREE_WIDTH; ++t) {
-#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH
+#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH avg=tmac::hls::TREE_WIDTH
             for (int i = 0; i < topk; ++i) {
-#pragma HLS loop_tripcount min=tmac::hls::kEagle4LmTopKMax max=tmac::hls::kEagle4LmTopKMax
+#pragma HLS loop_tripcount min=tmac::hls::kEagle4LmTopKMax max=tmac::hls::kEagle4LmTopKMax avg=tmac::hls::kEagle4LmTopKMax
 #pragma HLS PIPELINE II=1
                 candidate_indices_out[t * topk + i] = topk_tokens[t][i];
             }
@@ -270,9 +270,9 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
     }
     if (gathered_logits_out != nullptr) {
         for (int t = 0; t < tmac::hls::TREE_WIDTH; ++t) {
-#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH
+#pragma HLS loop_tripcount min=tmac::hls::TREE_WIDTH max=tmac::hls::TREE_WIDTH avg=tmac::hls::TREE_WIDTH
             for (int i = 0; i < topk; ++i) {
-#pragma HLS loop_tripcount min=tmac::hls::kEagle4LmTopKMax max=tmac::hls::kEagle4LmTopKMax
+#pragma HLS loop_tripcount min=tmac::hls::kEagle4LmTopKMax max=tmac::hls::kEagle4LmTopKMax avg=tmac::hls::kEagle4LmTopKMax
 #pragma HLS PIPELINE II=1
                 gathered_logits_out[t * topk + i] = topk_probas[t][i];
             }

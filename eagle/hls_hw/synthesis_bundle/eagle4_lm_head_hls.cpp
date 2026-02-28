@@ -39,7 +39,7 @@ int eagle4_lowest_slot(const float* scores, int topk) {
     int min_pos = 0;
     float min_val = scores[0];
     for (int i = 1; i < topk; ++i) {
-#pragma HLS loop_tripcount min=1 max=kEagle4LmTopKMax
+#pragma HLS loop_tripcount min=1 max=kEagle4LmTopKMax avg=(1+kEagle4LmTopKMax)/2
         if (scores[i] < min_val) {
             min_val = scores[i];
             min_pos = i;
@@ -56,13 +56,13 @@ void eagle4_lm_down_project(
     int rank) {
 
     for (int r = 0; r < rank; ++r) {
-#pragma HLS loop_tripcount min=kEagle4LmRankMax max=kEagle4LmRankMax
+#pragma HLS loop_tripcount min=kEagle4LmRankMax max=kEagle4LmRankMax avg=kEagle4LmRankMax
         const size_t row_base = static_cast<size_t>(r) * static_cast<size_t>(hidden_dim);
         for (int t = 0; t < TREE_WIDTH; t++) {
-#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
             float acc = 0.0f;
             for (int h = 0; h < hidden_dim; ++h) {
-#pragma HLS loop_tripcount min=kEagle4LmHiddenMax max=kEagle4LmHiddenMax
+#pragma HLS loop_tripcount min=kEagle4LmHiddenMax max=kEagle4LmHiddenMax avg=kEagle4LmHiddenMax
                 const float w = eagle4_fp16_to_float(down_proj_weight[row_base + static_cast<size_t>(h)]);
                 acc += logits_hidden[t][h] * w;
             }
@@ -91,9 +91,9 @@ void eagle4_lm_candidate_logits_row4(
 
     if (keep_topk) {
         for (int t = 0; t < TREE_WIDTH; ++t) {
-#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
             for (int i = 0; i < topk; ++i) {
-#pragma HLS loop_tripcount min=1 max=kEagle4LmTopKMax
+#pragma HLS loop_tripcount min=1 max=kEagle4LmTopKMax avg=(1+kEagle4LmTopKMax)/2
                 topk_indices[t][i] = -1;
                 topk_scores[t][i] = -std::numeric_limits<float>::infinity();
             }
@@ -101,15 +101,15 @@ void eagle4_lm_candidate_logits_row4(
     }
 
     for (int o = 0; o < vocab; ++o) {
-#pragma HLS loop_tripcount min=kLmTcVocab max=kLmTcVocab
+#pragma HLS loop_tripcount min=kLmTcVocab max=kLmTcVocab avg=kLmTcVocab
         // Dequantize weights for this vocab entry (shared across all tree candidates)
         float dequant_w[kEagle4LmRankMax];
         for (int p = 0; p < in_packs; ++p) {
-#pragma HLS loop_tripcount min=kEagle4LmRankMax/8 max=kEagle4LmRankMax/8
+#pragma HLS loop_tripcount min=kEagle4LmRankMax/8 max=kEagle4LmRankMax/8 avg=kEagle4LmRankMax/8
             const int k_base = p * 8;
             const int32_t packed = qweight_row_major[static_cast<size_t>(o) * static_cast<size_t>(in_packs) + p];
             for (int j = 0; j < 8; ++j) {
-#pragma HLS loop_tripcount min=kLmTcQpackFactor max=kLmTcQpackFactor
+#pragma HLS loop_tripcount min=kLmTcQpackFactor max=kLmTcQpackFactor avg=kLmTcQpackFactor
                 const int k = k_base + j;
                 const int g = (g_idx != nullptr) ? g_idx[k] : (k / group_size);
                 const float scale = eagle4_fp16_to_float(
@@ -129,10 +129,10 @@ void eagle4_lm_candidate_logits_row4(
 
         // Compute dot product for each tree candidate
         for (int t = 0; t < TREE_WIDTH; ++t) {
-#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
             float acc = 0.0f;
             for (int k = 0; k < rank; ++k) {
-#pragma HLS loop_tripcount min=kEagle4LmRankMax max=kEagle4LmRankMax
+#pragma HLS loop_tripcount min=kEagle4LmRankMax max=kEagle4LmRankMax avg=kEagle4LmRankMax
                 acc += dequant_w[k] * low_rank[t][k];
             }
 
@@ -155,14 +155,14 @@ void eagle4_lm_gather_dot_fp16(
     int hidden_dim,
     int num_candidates) {
     for (int t = 0; t < TREE_WIDTH; ++t) {
-#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
         for (int c = 0; c < num_candidates; ++c) {
-#pragma HLS loop_tripcount min=kEagle4LmTopKMax max=kEagle4LmTopKMax
+#pragma HLS loop_tripcount min=kEagle4LmTopKMax max=kEagle4LmTopKMax avg=kEagle4LmTopKMax
             const int tok = candidate_indices[t][c];
             const size_t row_base = static_cast<size_t>(tok) * static_cast<size_t>(hidden_dim);
             float acc = 0.0f;
             for (int h = 0; h < hidden_dim; ++h) {
-#pragma HLS loop_tripcount min=kEagle4LmHiddenMax max=kEagle4LmHiddenMax
+#pragma HLS loop_tripcount min=kEagle4LmHiddenMax max=kEagle4LmHiddenMax avg=kEagle4LmHiddenMax
                 const float w = eagle4_fp16_to_float(lm_head_weight[row_base + static_cast<size_t>(h)]);
                 acc += hidden[t][h] * w;
             }
@@ -186,11 +186,11 @@ void eagle4_lm_softmax_topk(
     float global_best_val = -std::numeric_limits<float>::infinity();
 
     for (int t = 0; t < TREE_WIDTH; ++t) {
-#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
         // Find max for numerical stability
         float max_val = -std::numeric_limits<float>::infinity();
         for (int c = 0; c < num_candidates; ++c) {
-#pragma HLS loop_tripcount min=1 max=kEagle4LmTopKMax
+#pragma HLS loop_tripcount min=kEagle4LmTopKMax max=kEagle4LmTopKMax avg=kEagle4LmTopKMax
             if (gathered_logits[t][c] > max_val) {
                 max_val = gathered_logits[t][c];
             }
@@ -199,7 +199,7 @@ void eagle4_lm_softmax_topk(
         // Compute exp(logit - max) and sum
         float sum_exp = 0.0f;
         for (int c = 0; c < num_candidates; ++c) {
-#pragma HLS loop_tripcount min=1 max=kEagle4LmTopKMax
+#pragma HLS loop_tripcount min=kEagle4LmTopKMax max=kEagle4LmTopKMax avg=kEagle4LmTopKMax
             float e = std::exp(gathered_logits[t][c] - max_val);
             topk_probas_out[t][c] = e;
             sum_exp += e;
@@ -208,7 +208,7 @@ void eagle4_lm_softmax_topk(
         // Normalize to probabilities and copy token IDs
         float inv_sum = (sum_exp > 0.0f) ? (1.0f / sum_exp) : 0.0f;
         for (int c = 0; c < num_candidates; ++c) {
-#pragma HLS loop_tripcount min=1 max=kEagle4LmTopKMax
+#pragma HLS loop_tripcount min=kEagle4LmTopKMax max=kEagle4LmTopKMax avg=kEagle4LmTopKMax
             topk_probas_out[t][c] *= inv_sum;
             topk_tokens_out[t][c] = candidate_indices[t][c];
         }
@@ -218,7 +218,7 @@ void eagle4_lm_softmax_topk(
             global_best_val = max_val;
             // Find which candidate has max_val
             for (int c = 0; c < num_candidates; ++c) {
-#pragma HLS loop_tripcount min=1 max=kEagle4LmTopKMax
+#pragma HLS loop_tripcount min=kEagle4LmTopKMax max=kEagle4LmTopKMax avg=kEagle4LmTopKMax
                 if (gathered_logits[t][c] == max_val) {
                     global_best_tok = candidate_indices[t][c];
                     break;

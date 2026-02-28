@@ -84,7 +84,7 @@ void fused_online_attention_pwl(hls_stream<vec_t<VEC_W>>& q_stream,
 
 load_q:
     for (int i = 0; i < vec_chunks; ++i) {
-#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W
+#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W avg=HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II = 1
         vec_t<VEC_W> chunk = q_stream.read();
         for (int j = 0; j < VEC_W; ++j) {
@@ -108,7 +108,7 @@ token_loop:
         if (t < seq_len) {
 dot_and_load:
             for (int i = 0; i < vec_chunks; ++i) {
-#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W
+#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W avg=HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II = 2
                 vec_t<VEC_W> k_chunk = k_hist.read();
                 vec_t<VEC_W> v_chunk = v_hist.read();
@@ -122,7 +122,7 @@ dot_and_load:
         } else {
 pad_token:
             for (int i = 0; i < HEAD_DIM; ++i) {
-#pragma HLS loop_tripcount min=HEAD_DIM max=HEAD_DIM
+#pragma HLS loop_tripcount min=HEAD_DIM max=HEAD_DIM avg=HEAD_DIM
 #pragma HLS PIPELINE II = 1
                 v_local[i] = 0.0f;
             }
@@ -140,7 +140,7 @@ pad_token:
 
 update_ctx:
         for (int i = 0; i < vec_chunks; ++i) {
-#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W
+#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W avg=HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II = 1
             for (int j = 0; j < VEC_W; ++j) {
 #pragma HLS UNROLL
@@ -157,7 +157,7 @@ update_ctx:
 
 write_ctx:
     for (int i = 0; i < vec_chunks; ++i) {
-#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W
+#pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W avg=HEAD_DIM/VEC_W
 #pragma HLS PIPELINE II = 1
         vec_t<VEC_W> out_chunk{};
         for (int j = 0; j < VEC_W; ++j) {

@@ -160,7 +160,7 @@ void dense_projection_production(hls_stream<vec_t<VEC_W>>& a_stream,
 
     // init accumulators
     for (int b = 0; b < 4; ++b) {
-#pragma HLS loop_tripcount min=kDpNumAccBanks max=kDpNumAccBanks
+#pragma HLS loop_tripcount min=kDpNumAccBanks max=kDpNumAccBanks avg=kDpNumAccBanks
         for (int i = 0; i < OUT_W; ++i) {
 #pragma HLS UNROLL
             acc_banks[b][i] = 0.0f;
@@ -170,7 +170,7 @@ void dense_projection_production(hls_stream<vec_t<VEC_W>>& a_stream,
     vec_t<VEC_W> current_input_chunk{};
     // flattened loop over all input scalars
     for (int k = 0; k < INPUT_DIM; ++k) {
-#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM
+#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM avg=INPUT_DIM
 #pragma HLS PIPELINE II = 1
         if ((k & (VEC_W - 1)) == 0) {
             current_input_chunk = a_stream.read();
@@ -184,7 +184,7 @@ void dense_projection_production(hls_stream<vec_t<VEC_W>>& a_stream,
     // reduce banks and stream out
     const int out_chunks = OUT_W / VEC_W;
     for (int oc = 0; oc < out_chunks; ++oc) {
-#pragma HLS loop_tripcount min=OUT_W/VEC_W max=OUT_W/VEC_W
+#pragma HLS loop_tripcount min=OUT_W/VEC_W max=OUT_W/VEC_W avg=OUT_W/VEC_W
         vec_t<VEC_W> out_vec;
         for (int j = 0; j < VEC_W; ++j) {
 #pragma HLS UNROLL
@@ -236,10 +236,10 @@ void dense_projection_production_scaled(hls_stream<vec_t<VEC_W>>& a_stream,
     vec_t<VEC_W> current_input_chunk;
 ingest_a_loop:
     for (int k = 0; k < INPUT_DIM; k += VEC_W) {
-#pragma HLS loop_tripcount min=INPUT_DIM/VEC_W max=INPUT_DIM/VEC_W
+#pragma HLS loop_tripcount min=INPUT_DIM/VEC_W max=INPUT_DIM/VEC_W avg=INPUT_DIM/VEC_W
         current_input_chunk = a_stream.read();
         for (int j = 0; j < VEC_W; ++j) {
-#pragma HLS loop_tripcount min=VEC_W max=VEC_W
+#pragma HLS loop_tripcount min=VEC_W max=VEC_W avg=VEC_W
 #pragma HLS PIPELINE II=1
             a_buffer[k + j] = current_input_chunk[j];
         }
@@ -250,12 +250,12 @@ ingest_a_loop:
 
 tile_loop:
     for (int t = 0; t < TILES; ++t) {
-#pragma HLS loop_tripcount min=TILES max=TILES
+#pragma HLS loop_tripcount min=TILES max=TILES avg=TILES
     init_acc_loop:
         for (int b = 0; b < 4; ++b) {
-#pragma HLS loop_tripcount min=kDpNumAccBanks max=kDpNumAccBanks
+#pragma HLS loop_tripcount min=kDpNumAccBanks max=kDpNumAccBanks avg=kDpNumAccBanks
             for (int i = 0; i < TILE; ++i) {
-#pragma HLS loop_tripcount min=TILE max=TILE
+#pragma HLS loop_tripcount min=TILE max=TILE avg=TILE
 #pragma HLS UNROLL factor=VEC_W
                 acc_banks[b][i] = 0.0f;
             }
@@ -263,16 +263,16 @@ tile_loop:
 
     load_weights_loop:
         for (int k = 0; k < INPUT_DIM; ++k) {
-#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM
+#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM avg=INPUT_DIM
 #pragma HLS PIPELINE II=1
             weights_tile_bram[k] = weights[t * INPUT_DIM + k];
         }
 
     load_scales_loop:
         for (int g = 0; g < NUM_GROUPS; ++g) {
-#pragma HLS loop_tripcount min=NUM_GROUPS max=NUM_GROUPS
+#pragma HLS loop_tripcount min=NUM_GROUPS max=NUM_GROUPS avg=NUM_GROUPS
             for (int l = 0; l < TILE; ++l) {
-#pragma HLS loop_tripcount min=TILE max=TILE
+#pragma HLS loop_tripcount min=TILE max=TILE avg=TILE
 #pragma HLS PIPELINE II=1
                 // HBM address: scales are grouped, then tiled, then by lane
                 int hbm_addr = (g * TILES + t) * TILE + l;
@@ -283,10 +283,10 @@ tile_loop:
         // --- B: COMPUTE for the current tile using on-chip data ---
     compute_group_loop:
         for (int g = 0; g < NUM_GROUPS; ++g) {
-#pragma HLS loop_tripcount min=NUM_GROUPS max=NUM_GROUPS
+#pragma HLS loop_tripcount min=NUM_GROUPS max=NUM_GROUPS avg=NUM_GROUPS
         compute_k_in_group_loop:
             for (int kg = 0; kg < GROUP_SIZE; ++kg) {
-#pragma HLS loop_tripcount min=GROUP_SIZE max=GROUP_SIZE
+#pragma HLS loop_tripcount min=GROUP_SIZE max=GROUP_SIZE avg=GROUP_SIZE
 #pragma HLS PIPELINE II=1
             const int k = g * GROUP_SIZE + kg;
             const float a_scalar = a_buffer[k]; // Read from on-chip buffer
@@ -302,7 +302,7 @@ tile_loop:
 
         compute_lane_loop:
             for (int lane = 0; lane < TILE; ++lane) {
-#pragma HLS loop_tripcount min=TILE max=TILE
+#pragma HLS loop_tripcount min=TILE max=TILE avg=TILE
 #pragma HLS UNROLL factor=VEC_W
                 const uint8_t w_raw = get_w4_raw(w_pkt, lane);
                 const float scale_val = scales_tile_bram[g][lane];
@@ -321,7 +321,7 @@ tile_loop:
 
     store_oc_loop:
         for (int oc = 0; oc < TILE / VEC_W; ++oc) {
-#pragma HLS loop_tripcount min=TILE/VEC_W max=TILE/VEC_W
+#pragma HLS loop_tripcount min=TILE/VEC_W max=TILE/VEC_W avg=TILE/VEC_W
 #pragma HLS PIPELINE II=1
             vec_t<VEC_W> out_vec;
         store_j_loop:
@@ -383,12 +383,12 @@ void dense_projection_production_scaled_batched(hls_stream<vec_t<VEC_W>>& a_stre
     vec_t<VEC_W> current_input_chunk;
 ingest_a_loop:
     for (int b = 0; b < BATCH_SIZE; b++) {
-#pragma HLS loop_tripcount min=BATCH_SIZE max=BATCH_SIZE
+#pragma HLS loop_tripcount min=BATCH_SIZE max=BATCH_SIZE avg=BATCH_SIZE
         for (int k = 0; k < INPUT_DIM; k += VEC_W) {
-#pragma HLS loop_tripcount min=INPUT_DIM/VEC_W max=INPUT_DIM/VEC_W
+#pragma HLS loop_tripcount min=INPUT_DIM/VEC_W max=INPUT_DIM/VEC_W avg=INPUT_DIM/VEC_W
             current_input_chunk = a_stream.read();
             for (int j = 0; j < VEC_W; ++j) {
-#pragma HLS loop_tripcount min=VEC_W max=VEC_W
+#pragma HLS loop_tripcount min=VEC_W max=VEC_W avg=VEC_W
     #pragma HLS PIPELINE II=1
                 a_buffer[b][k + j] = current_input_chunk[j];
             }
@@ -400,21 +400,21 @@ ingest_a_loop:
 
 tile_loop:
 for (int t = 0; t < TILES; ++t) {
-#pragma HLS loop_tripcount min=TILES max=TILES
+#pragma HLS loop_tripcount min=TILES max=TILES avg=TILES
 
 load_weights_loop:
     for (int k = 0; k < INPUT_DIM; ++k) {
-#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM
+#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM avg=INPUT_DIM
 #pragma HLS PIPELINE II=1
         weights_tile_bram[k] = weights[t * INPUT_DIM + k];
     }
 
     load_scales_loop:
     for (int g = 0; g < NUM_GROUPS; ++g) {
-#pragma HLS loop_tripcount min=NUM_GROUPS max=NUM_GROUPS
+#pragma HLS loop_tripcount min=NUM_GROUPS max=NUM_GROUPS avg=NUM_GROUPS
 //#pragma HLS PIPELINE II=1
         for (int l = 0; l < TILE; ++l) {
-#pragma HLS loop_tripcount min=TILE max=TILE
+#pragma HLS loop_tripcount min=TILE max=TILE avg=TILE
 //#pragma HLS UNROLL
             // HBM address: scales are grouped, then tiled, then by lane
             int hbm_addr = (g * TILES + t) * TILE + l;
@@ -427,7 +427,7 @@ load_weights_loop:
         // --- B: COMPUTE for the current tile using on-chip data ---
 compute_b_loop:
     for (int b = 0; b < BATCH_SIZE; b++) {
-#pragma HLS loop_tripcount min=BATCH_SIZE max=BATCH_SIZE
+#pragma HLS loop_tripcount min=BATCH_SIZE max=BATCH_SIZE avg=BATCH_SIZE
     // Reset accumulators for each (tile, batch) pair so that batch b=1 does not
     // inherit residual values from batch b=0.
     init_acc_loop_b:
@@ -440,7 +440,7 @@ compute_b_loop:
         }
     compute_k_loop:
         for (int k = 0; k < INPUT_DIM; ++k) {
-#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM
+#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM avg=INPUT_DIM
 #pragma HLS PIPELINE II=1
             const float a_scalar = a_buffer[b][k]; // Read from on-chip buffer
             const int group = k / GROUP_SIZE;
@@ -496,10 +496,10 @@ compute_b_loop:
     // Emit output in batch-contiguous order: all of batch 0, then batch 1, etc.
 emit_batch_loop:
     for (int b = 0; b < BATCH_SIZE; b++) {
-#pragma HLS loop_tripcount min=BATCH_SIZE max=BATCH_SIZE
+#pragma HLS loop_tripcount min=BATCH_SIZE max=BATCH_SIZE avg=BATCH_SIZE
     emit_out_loop:
         for (int oc = 0; oc < OUT_DIM / VEC_W; ++oc) {
-#pragma HLS loop_tripcount min=OUT_DIM/VEC_W max=OUT_DIM/VEC_W
+#pragma HLS loop_tripcount min=OUT_DIM/VEC_W max=OUT_DIM/VEC_W avg=OUT_DIM/VEC_W
 #pragma HLS PIPELINE II=1
             vec_t<VEC_W> out_vec;
         emit_j_loop:
@@ -539,7 +539,7 @@ void dense_projection_production_scaled_raw(hls_stream<vec_t<VEC_W>>& a_stream,
 #pragma HLS ARRAY_PARTITION variable = acc_banks cyclic factor = 16 dim = 2
 
     for (int b = 0; b < 4; ++b) {
-#pragma HLS loop_tripcount min=kDpNumAccBanks max=kDpNumAccBanks
+#pragma HLS loop_tripcount min=kDpNumAccBanks max=kDpNumAccBanks avg=kDpNumAccBanks
         for (int i = 0; i < OUT_W; ++i) {
 #pragma HLS UNROLL
             acc_banks[b][i] = 0.0f;
@@ -548,7 +548,7 @@ void dense_projection_production_scaled_raw(hls_stream<vec_t<VEC_W>>& a_stream,
 
     vec_t<VEC_W> current_input_chunk{};
     for (int k = 0; k < INPUT_DIM; ++k) {
-#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM
+#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM avg=INPUT_DIM
 #pragma HLS PIPELINE II = 1
         if ((k & (VEC_W - 1)) == 0) {
             current_input_chunk = a_stream.read();
@@ -563,7 +563,7 @@ void dense_projection_production_scaled_raw(hls_stream<vec_t<VEC_W>>& a_stream,
         build_lut_raw16(a_scaled, lut_raw16);
 
         for (int lane = 0; lane < OUT_W; ++lane) {
-#pragma HLS loop_tripcount min=OUT_W max=OUT_W
+#pragma HLS loop_tripcount min=OUT_W max=OUT_W avg=OUT_W
 #pragma HLS UNROLL factor = 16
             const uint8_t w_raw = get_w4_raw(w_pkt, lane);
             float prod = lut_raw16[w_raw];
@@ -575,7 +575,7 @@ void dense_projection_production_scaled_raw(hls_stream<vec_t<VEC_W>>& a_stream,
 
     const int out_chunks = OUT_W / VEC_W;
     for (int oc = 0; oc < out_chunks; ++oc) {
-#pragma HLS loop_tripcount min=OUT_W/VEC_W max=OUT_W/VEC_W
+#pragma HLS loop_tripcount min=OUT_W/VEC_W max=OUT_W/VEC_W avg=OUT_W/VEC_W
         vec_t<VEC_W> out_vec;
         for (int j = 0; j < VEC_W; ++j) {
 #pragma HLS UNROLL

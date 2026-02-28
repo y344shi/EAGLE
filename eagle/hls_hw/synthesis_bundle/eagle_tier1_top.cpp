@@ -15,13 +15,13 @@ static_assert(HIDDEN == NUM_HEADS * HEAD_DIM, "HIDDEN must equal NUM_HEADS * HEA
 void distribute_q_heads(hls_stream<vec_t<VEC_W>>& s_q_rot, hls_stream<vec_t<VEC_W>> q_head_streams[TREE_WIDTH][NUM_HEADS]) {
 #pragma HLS INLINE off
 for (int t = 0; t < TREE_WIDTH; t++) {
-#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
 head_loop:
     for (int h = 0; h < NUM_HEADS; ++h) {
-#pragma HLS loop_tripcount min=NUM_HEADS max=NUM_HEADS
+#pragma HLS loop_tripcount min=NUM_HEADS max=NUM_HEADS avg=NUM_HEADS
     vec_loop:
         for (int i = 0; i < VECS_PER_Q; ++i) {
-#pragma HLS loop_tripcount min=VECS_PER_Q max=VECS_PER_Q
+#pragma HLS loop_tripcount min=VECS_PER_Q max=VECS_PER_Q avg=VECS_PER_Q
 #pragma HLS PIPELINE II = 1
             q_head_streams[t][h].write(s_q_rot.read());
         }
@@ -44,7 +44,7 @@ void broadcast_kv_heads(
     #pragma HLS LOOP_TRIPCOUNT min=1 avg=MAX_CTX/2 max=MAX_CTX
         kv_vec_loop:
             for (int v = 0; v < VECS_PER_KV_TOKEN; ++v) {
-    #pragma HLS loop_tripcount min=VECS_PER_KV_TOKEN max=VECS_PER_KV_TOKEN
+    #pragma HLS loop_tripcount min=VECS_PER_KV_TOKEN max=VECS_PER_KV_TOKEN avg=VECS_PER_KV_TOKEN
     #pragma HLS PIPELINE II = 1
                 int kvh = v / VECS_PER_Q;
                 vec_t<VEC_W> ek = s_k_hist_raw[t].read();
@@ -94,13 +94,13 @@ for (int t = 0; t < TREE_WIDTH; t++) {
 void collect_ctx(hls_stream<vec_t<VEC_W>>& s_context, hls_stream<vec_t<VEC_W>> ctx_head_streams[TREE_WIDTH][NUM_HEADS]) {
 #pragma HLS INLINE off
     for (int t = 0; t < TREE_WIDTH; t++) {
-#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
     head_loop:
         for (int i = 0; i < NUM_HEADS; i++) {
-#pragma HLS loop_tripcount min=NUM_HEADS max=NUM_HEADS
+#pragma HLS loop_tripcount min=NUM_HEADS max=NUM_HEADS avg=NUM_HEADS
         vec_loop:
             for (int j = 0; j < VECS_PER_Q; ++j) {
-#pragma HLS loop_tripcount min=VECS_PER_Q max=VECS_PER_Q
+#pragma HLS loop_tripcount min=VECS_PER_Q max=VECS_PER_Q avg=VECS_PER_Q
     #pragma HLS PIPELINE II = 1
                 s_context.write(ctx_head_streams[t][i].read());
             }
@@ -115,16 +115,16 @@ void concat_embed_hidden(hls_stream<vec_t<VEC_W>>& s_embed_norm,
     constexpr int VECS_PER_H = HIDDEN / VEC_W;
 token_cat_loop:
     for (int t = 0; t < TREE_WIDTH; ++t) {
-#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
 embed_loop:
         for (int i = 0; i < VECS_PER_H; ++i) {
-#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W
+#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W avg=HIDDEN/VEC_W
 #pragma HLS PIPELINE II = 1
         s_attn_cat.write(s_embed_norm.read());
     }
 hidden_loop:
         for (int i = 0; i < VECS_PER_H; ++i) {
-#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W
+#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W avg=HIDDEN/VEC_W
 #pragma HLS PIPELINE II = 1
         s_attn_cat.write(s_hidden_norm.read());
         }
@@ -138,16 +138,16 @@ void split_down_2hs(hls_stream<vec_t<VEC_W>>& s_down_2hs,
     constexpr int VECS_PER_H = HIDDEN / VEC_W;
 token_split_loop:
     for (int t = 0; t < TREE_WIDTH; ++t) {
-#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
 to_logits_loop:
         for (int i = 0; i < VECS_PER_H; ++i) {
-#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W
+#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W avg=HIDDEN/VEC_W
 #pragma HLS PIPELINE II = 1
         s_to_logits.write(s_down_2hs.read());
     }
 reasoning_loop:
         for (int i = 0; i < VECS_PER_H; ++i) {
-#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W
+#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W avg=HIDDEN/VEC_W
 #pragma HLS PIPELINE II = 1
         s_for_reasoning.write(s_down_2hs.read());
         }
