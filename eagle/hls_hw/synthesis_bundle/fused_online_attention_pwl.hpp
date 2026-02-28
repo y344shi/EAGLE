@@ -65,12 +65,12 @@ inline float exp_softmax_pwl(float x) {
 // - K/V history is streamed token-by-token.
 // - Score, online softmax state, and context update are fused in one pass.
 template <int HEAD_DIM>
-void fused_online_attention_pwl(hls_stream<vec_t<VEC_W>>& q_stream,
-                              hls_stream<vec_t<VEC_W>>& k_hist,
-                              hls_stream<vec_t<VEC_W>>& v_hist,
-                              hls_stream<vec_t<VEC_W>>& context_out,
-                              int seq_len,
-                              int padded_len = -1) {
+void attn_pwl(hls_stream<vec_t<VEC_W>>& q_stream,
+              hls_stream<vec_t<VEC_W>>& k_hist,
+              hls_stream<vec_t<VEC_W>>& v_hist,
+              hls_stream<vec_t<VEC_W>>& context_out,
+              int seq_len,
+              int padded_len = -1) {
     static_assert(HEAD_DIM % VEC_W == 0, "HEAD_DIM must align to VEC_W");
 
     const int total_len = (padded_len > 0) ? padded_len : seq_len;
@@ -166,6 +166,17 @@ write_ctx:
         }
         context_out.write(out_chunk);
     }
+}
+
+template <int HEAD_DIM>
+void fused_online_attention_pwl(hls_stream<vec_t<VEC_W>>& q_stream,
+                                hls_stream<vec_t<VEC_W>>& k_hist,
+                                hls_stream<vec_t<VEC_W>>& v_hist,
+                                hls_stream<vec_t<VEC_W>>& context_out,
+                                int seq_len,
+                                int padded_len = -1) {
+#pragma HLS INLINE
+    attn_pwl<HEAD_DIM>(q_stream, k_hist, v_hist, context_out, seq_len, padded_len);
 }
 
 } // namespace hls

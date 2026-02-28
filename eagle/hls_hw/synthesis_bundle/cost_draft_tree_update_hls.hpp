@@ -30,7 +30,7 @@ inline int64_t cdt_safe_index_i64(int64_t idx, int64_t low, int64_t high, int64_
 }
 
 // HLS mapping for update_cumu_draft_state kernel path.
-void cost_draft_tree_update_state_hls(
+void cdt_update(
     const float* topk_probas,         // [batch_size, tree_width * node_top_k]
     const int64_t* topk_tokens,       // [batch_size, tree_width * node_top_k]
     const float* sorted_scores,       // [batch_size, tree_width * node_top_k]

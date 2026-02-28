@@ -339,10 +339,10 @@ tile_loop:
 
 
 template <int SCALE_EXP, int BATCH_SIZE = 1, int INPUT_DIM, int OUT_DIM = 128, int GROUP_SIZE = 128, bool ENABLE_TMAC = false>
-void dense_projection_production_scaled_batched(hls_stream<vec_t<VEC_W>>& a_stream,
-                                        hls_stream<vec_t<VEC_W>>& c_stream,
-                                        const pack512* weights,
-                                        const float* scales) {
+void dproj_b(hls_stream<vec_t<VEC_W>>& a_stream,
+             hls_stream<vec_t<VEC_W>>& c_stream,
+             const pack512* weights,
+             const float* scales) {
 #pragma HLS INTERFACE axis port = a_stream
 #pragma HLS INTERFACE axis port = c_stream
 #pragma HLS INTERFACE m_axi port = weights offset = slave bundle = gmem0 depth = 1024
@@ -510,6 +510,16 @@ emit_batch_loop:
             c_stream.write(out_vec);
         }
     }
+}
+
+template <int SCALE_EXP, int BATCH_SIZE = 1, int INPUT_DIM, int OUT_DIM = 128, int GROUP_SIZE = 128, bool ENABLE_TMAC = false>
+void dense_projection_production_scaled_batched(hls_stream<vec_t<VEC_W>>& a_stream,
+                                                hls_stream<vec_t<VEC_W>>& c_stream,
+                                                const pack512* weights,
+                                                const float* scales) {
+#pragma HLS INLINE
+    dproj_b<SCALE_EXP, BATCH_SIZE, INPUT_DIM, OUT_DIM, GROUP_SIZE, ENABLE_TMAC>(
+        a_stream, c_stream, weights, scales);
 }
 
 

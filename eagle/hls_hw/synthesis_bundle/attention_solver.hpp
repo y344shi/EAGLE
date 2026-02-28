@@ -18,12 +18,12 @@ using tmac::hls::hls_stream;
 // HEAD_DIM must be divisible by VEC_W.
 template <int HEAD_DIM>
 // Optional padded_len lets us mirror Marlin's padded decode length; masked tokens contribute zero.
-void attention_solver(hls_stream<vec_t<VEC_W>>& q_stream,     // one head query
-                      hls_stream<vec_t<VEC_W>>& k_hist,       // history K
-                      hls_stream<vec_t<VEC_W>>& v_hist,       // history V
-                      hls_stream<vec_t<VEC_W>>& context_out,  // context
-                      int seq_len,
-                      int padded_len = -1) {
+void attn_sol(hls_stream<vec_t<VEC_W>>& q_stream,     // one head query
+              hls_stream<vec_t<VEC_W>>& k_hist,       // history K
+              hls_stream<vec_t<VEC_W>>& v_hist,       // history V
+              hls_stream<vec_t<VEC_W>>& context_out,  // context
+              int seq_len,
+              int padded_len = -1) {
 #pragma HLS INTERFACE axis port = q_stream
 #pragma HLS INTERFACE axis port = k_hist
 #pragma HLS INTERFACE axis port = v_hist
@@ -126,6 +126,17 @@ void attention_solver(hls_stream<vec_t<VEC_W>>& q_stream,     // one head query
         }
         context_out.write(out_chunk);
     }
+}
+
+template <int HEAD_DIM>
+void attention_solver(hls_stream<vec_t<VEC_W>>& q_stream,
+                      hls_stream<vec_t<VEC_W>>& k_hist,
+                      hls_stream<vec_t<VEC_W>>& v_hist,
+                      hls_stream<vec_t<VEC_W>>& context_out,
+                      int seq_len,
+                      int padded_len = -1) {
+#pragma HLS INLINE
+    attn_sol<HEAD_DIM>(q_stream, k_hist, v_hist, context_out, seq_len, padded_len);
 }
 
 } // namespace hls

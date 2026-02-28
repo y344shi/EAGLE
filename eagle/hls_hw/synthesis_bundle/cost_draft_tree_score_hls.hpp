@@ -68,7 +68,7 @@ inline int64_t cdt_hot_token_lookup(
 // 1) remap sampled tokens through hot_token_id,
 // 2) expose remapped per-candidate tokens,
 // 3) emit top-k output tokens by sorted score index.
-void cost_draft_tree_layer_score_hls_core(
+void cdt_score_core(
     const float* topk_probas_sampling,   // [batch_size, tree_width * node_top_k]
     const int64_t* topk_tokens_sampling, // [batch_size, tree_width * node_top_k] (optional)
     const float* last_layer_scores,      // [batch_size, tree_width]
@@ -180,7 +180,7 @@ batch_loop:
 }
 
 // Backward-compatible API used by the existing testbench/flow.
-void cost_draft_tree_layer_score_hls(
+void cdt_score(
     const float* topk_probas_sampling,   // [batch_size, tree_width * node_top_k]
     const float* last_layer_scores,      // [batch_size, tree_width]
     const float* input_hidden_states,    // [batch_size, tree_width, hidden_size]
@@ -196,7 +196,7 @@ void cost_draft_tree_layer_score_hls(
     int64_t* parent_indices_in_layer,    // [batch_size, node_top_k]
     float* output_hidden_states          // [batch_size, node_top_k, hidden_size]
 ) {
-    cost_draft_tree_layer_score_hls_core(
+    cdt_score_core(
         topk_probas_sampling,
         nullptr,
         last_layer_scores,
@@ -220,7 +220,7 @@ void cost_draft_tree_layer_score_hls(
 }
 
 // New API for multi-candidate adaptation: carries token path and optional hot-token remap.
-void cost_draft_tree_layer_score_hls_with_tokens(
+void cdt_score_tok(
     const float* topk_probas_sampling,   // [batch_size, tree_width * node_top_k]
     const int64_t* topk_tokens_sampling, // [batch_size, tree_width * node_top_k]
     const float* last_layer_scores,      // [batch_size, tree_width]
@@ -242,7 +242,7 @@ void cost_draft_tree_layer_score_hls_with_tokens(
     int64_t* remapped_topk_tokens_sampling, // [batch_size, tree_width * node_top_k]
     int64_t* output_tokens               // [batch_size, node_top_k]
 ) {
-    cost_draft_tree_layer_score_hls_core(
+    cdt_score_core(
         topk_probas_sampling,
         topk_tokens_sampling,
         last_layer_scores,

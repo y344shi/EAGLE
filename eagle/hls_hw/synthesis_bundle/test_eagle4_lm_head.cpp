@@ -97,11 +97,66 @@ bool gather_dot_from_lm_head_file(
         }
         float acc = 0.0f;
         for (int h = 0; h < hidden_dim; ++h) {
-            acc += hidden[h] * tmac::hls::eagle4_fp16_to_float(row_fp16[static_cast<size_t>(h)]);
+            acc += hidden[h] * tmac::hls::e4_f16(row_fp16[static_cast<size_t>(h)]);
         }
         (*gathered_out)[i] = acc;
     }
     return true;
+}
+
+void run_e4_lm_down_flat(
+    const float* hidden,
+    const uint16_t* down_proj,
+    float* low_rank,
+    int hidden_dim,
+    int rank) {
+    float hidden_buf[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax] = {};
+    float low_rank_buf[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmRankMax] = {};
+    for (int h = 0; h < hidden_dim; ++h) {
+        hidden_buf[0][h] = hidden[h];
+    }
+    tmac::hls::e4_lm_down(hidden_buf, down_proj, low_rank_buf, hidden_dim, rank);
+    for (int r = 0; r < rank; ++r) {
+        low_rank[r] = low_rank_buf[0][r];
+    }
+}
+
+void run_e4_lm_cand4_flat(
+    const float* low_rank,
+    const int32_t* qweight_row_major,
+    const uint16_t* scales_row_major,
+    const int32_t* qzeros_packed,
+    const int32_t* g_idx,
+    int rank,
+    int vocab,
+    int group_size,
+    float* logits_out,
+    int topk,
+    int* topk_indices,
+    float* topk_scores) {
+    float low_rank_buf[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmRankMax] = {};
+    int topk_idx_buf[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax] = {};
+    float topk_scores_buf[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax] = {};
+    for (int r = 0; r < rank; ++r) {
+        low_rank_buf[0][r] = low_rank[r];
+    }
+    tmac::hls::e4_lm_cand4(
+        low_rank_buf,
+        qweight_row_major,
+        scales_row_major,
+        qzeros_packed,
+        g_idx,
+        rank,
+        vocab,
+        group_size,
+        logits_out,
+        topk,
+        topk_idx_buf,
+        topk_scores_buf);
+    for (int i = 0; i < topk; ++i) {
+        topk_indices[i] = topk_idx_buf[0][i];
+        topk_scores[i] = topk_scores_buf[0][i];
+    }
 }
 
 int run_smoke(int seed) {
@@ -172,8 +227,8 @@ int run_smoke(int seed) {
     std::vector<float> logits(vocab, 0.0f);
     std::vector<int> topk_idx(topk, -1);
     std::vector<float> topk_scores(topk, -std::numeric_limits<float>::infinity());
-    tmac::hls::eagle4_lm_down_project(hidden_v.data(), down_proj.data(), low_rank.data(), hidden, rank);
-    tmac::hls::eagle4_lm_candidate_logits_row4(
+    run_e4_lm_down_flat(hidden_v.data(), down_proj.data(), low_rank.data(), hidden, rank);
+    run_e4_lm_cand4_flat(
         low_rank.data(), qweight.data(), scales.data(), qzeros.data(), nullptr, rank, vocab, group, logits.data(), topk,
         topk_idx.data(), topk_scores.data());
 
@@ -315,19 +370,19 @@ int main(int argc, char** argv) {
 
     std::vector<float> hidden(hidden_dim, 0.0f);
     for (int i = 0; i < hidden_dim; ++i) {
-        hidden[i] = tmac::hls::eagle4_fp16_to_float(hidden_fp16[static_cast<size_t>(use_tok) * hidden_dim + i]);
+        hidden[i] = tmac::hls::e4_f16(hidden_fp16[static_cast<size_t>(use_tok) * hidden_dim + i]);
     }
 
     std::vector<float> low_rank_ref(rank, 0.0f);
     for (int i = 0; i < rank; ++i) {
         low_rank_ref[i] =
-            tmac::hls::eagle4_fp16_to_float(low_rank_ref_fp16[static_cast<size_t>(use_tok) * rank + i]);
+            tmac::hls::e4_f16(low_rank_ref_fp16[static_cast<size_t>(use_tok) * rank + i]);
     }
 
     std::vector<float> candidate_ref(vocab, 0.0f);
     for (int i = 0; i < vocab; ++i) {
         candidate_ref[i] =
-            tmac::hls::eagle4_fp16_to_float(candidate_ref_fp16[static_cast<size_t>(use_tok) * vocab + i]);
+            tmac::hls::e4_f16(candidate_ref_fp16[static_cast<size_t>(use_tok) * vocab + i]);
     }
 
     std::vector<int> candidate_idx_gold(num_candidates, 0);
@@ -338,7 +393,7 @@ int main(int argc, char** argv) {
     std::vector<float> gathered_ref(num_candidates, 0.0f);
     for (int i = 0; i < num_candidates; ++i) {
         gathered_ref[i] =
-            tmac::hls::eagle4_fp16_to_float(gathered_ref_fp16[static_cast<size_t>(use_tok) * num_candidates + i]);
+            tmac::hls::e4_f16(gathered_ref_fp16[static_cast<size_t>(use_tok) * num_candidates + i]);
     }
 
     const int vocab_packed = (vocab + 7) / 8;
@@ -352,8 +407,8 @@ int main(int argc, char** argv) {
     std::vector<int> topk_idx(num_candidates, -1);
     std::vector<float> topk_scores(num_candidates, -std::numeric_limits<float>::infinity());
 
-    tmac::hls::eagle4_lm_down_project(hidden.data(), down_proj_fp16.data(), low_rank.data(), hidden_dim, rank);
-    tmac::hls::eagle4_lm_candidate_logits_row4(
+    run_e4_lm_down_flat(hidden.data(), down_proj_fp16.data(), low_rank.data(), hidden_dim, rank);
+    run_e4_lm_cand4_flat(
         low_rank.data(), qweight_row.data(), scales_row_fp16.data(), qzeros_ptr, gidx_ptr, rank, vocab, group_size,
         candidate_logits.data(), num_candidates, topk_idx.data(), topk_scores.data());
 

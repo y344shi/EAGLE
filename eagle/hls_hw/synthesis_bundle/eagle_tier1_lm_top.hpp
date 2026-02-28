@@ -73,38 +73,38 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
 //   3) candidate scoring via GPTQ row-major (per token)
 //   4) gather-dot over lm_head.weight for selected candidates (per token)
 //   5) softmax over gathered logits -> topk probabilities (per token)
-void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_in_stream,
-                               hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& embed_in_stream,
-                               int* best_id,
-                               float* best_score,
-                               const tmac::hls::pack512* w_q,     const float* s_q,
-                               const tmac::hls::pack512* w_k,     const float* s_k,
-                               const tmac::hls::pack512* w_v,     const float* s_v,
-                               const tmac::hls::pack512* w_o,     const float* s_o,
-                               const tmac::hls::pack512* w_gate,  const float* gate_scales,
-                               const tmac::hls::pack512* w_up,    const float* up_scales,
-                               const tmac::hls::pack512* w_down,  const float* down_scales,
-                               const float* hidden_norm_gamma,
-                               const float* embed_norm_gamma,
-                               const float* post_attn_norm_gamma,
-                               const float* final_norm_gamma,
-                               const tmac::hls::RopeConfig<tmac::hls::NUM_HEADS, tmac::hls::NUM_KV_HEADS, tmac::hls::HEAD_DIM>& rope_cfg,
-                               tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_k,
-                               tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_v,
-                               const uint16_t* efficient_lm_head_down_proj_weight, // fp16 [rank, hidden]
-                               const int32_t* efficient_lm_head_qweight_row_major, // int32 [vocab, rank/8]
-                               const uint16_t* efficient_lm_head_scales_row_major, // fp16 [rank/group, vocab]
-                               const int32_t* efficient_lm_head_qzeros,            // packed int32 [rank/group, ceil(vocab/8)] or nullptr
-                               const int32_t* efficient_lm_head_g_idx,             // optional [rank]
-                               const uint16_t* lm_head_weight,                      // fp16 [vocab, hidden]
-                               int efficient_lm_rank,
-                               int efficient_lm_vocab_size,
-                               int efficient_lm_num_candidates,
-                               float* reasoning_state_out,                          // [TREE_WIDTH * HIDDEN]
-                               int* candidate_indices_out,      // [TREE_WIDTH * num_candidates] token IDs
-                               float* gathered_logits_out,      // [TREE_WIDTH * num_candidates] softmax probabilities
-                               int prefix_len,
-                               int current_depth,
-                               const int* parent_indices_per_layer);
+void e4_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_in_stream,
+               hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& embed_in_stream,
+               int* best_id,
+               float* best_score,
+               const tmac::hls::pack512* w_q,     const float* s_q,
+               const tmac::hls::pack512* w_k,     const float* s_k,
+               const tmac::hls::pack512* w_v,     const float* s_v,
+               const tmac::hls::pack512* w_o,     const float* s_o,
+               const tmac::hls::pack512* w_gate,  const float* gate_scales,
+               const tmac::hls::pack512* w_up,    const float* up_scales,
+               const tmac::hls::pack512* w_down,  const float* down_scales,
+               const float* hidden_norm_gamma,
+               const float* embed_norm_gamma,
+               const float* post_attn_norm_gamma,
+               const float* final_norm_gamma,
+               const tmac::hls::RopeConfig<tmac::hls::NUM_HEADS, tmac::hls::NUM_KV_HEADS, tmac::hls::HEAD_DIM>& rope_cfg,
+               tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_k,
+               tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_v,
+               const uint16_t* efficient_lm_head_down_proj_weight, // fp16 [rank, hidden]
+               const int32_t* efficient_lm_head_qweight_row_major, // int32 [vocab, rank/8]
+               const uint16_t* efficient_lm_head_scales_row_major, // fp16 [rank/group, vocab]
+               const int32_t* efficient_lm_head_qzeros,            // packed int32 [rank/group, ceil(vocab/8)] or nullptr
+               const int32_t* efficient_lm_head_g_idx,             // optional [rank]
+               const uint16_t* lm_head_weight,                      // fp16 [vocab, hidden]
+               int efficient_lm_rank,
+               int efficient_lm_vocab_size,
+               int efficient_lm_num_candidates,
+               float* reasoning_state_out,                          // [TREE_WIDTH * HIDDEN]
+               int* candidate_indices_out,      // [TREE_WIDTH * num_candidates] token IDs
+               float* gathered_logits_out,      // [TREE_WIDTH * num_candidates] softmax probabilities
+               int prefix_len,
+               int current_depth,
+               const int* parent_indices_per_layer = nullptr);
 
 #endif // TMAC_EAGLE_TIER1_LM_TOP_HPP

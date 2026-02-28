@@ -412,7 +412,7 @@ static HlsOutput run_hls_kernel(const KernelCase& tc) {
         out.remapped_topk_tokens_sampling.assign(topk_count, -1);
         out.output_tokens.assign(topk_choice_count, -1);
 
-        tmac::hls::cost_draft_tree_layer_score_hls_with_tokens(
+        tmac::hls::cdt_score_tok(
             tc.topk_probas_sampling.data(),
             tc.topk_tokens_sampling.data(),
             tc.last_layer_scores.data(),
@@ -434,7 +434,7 @@ static HlsOutput run_hls_kernel(const KernelCase& tc) {
             out.remapped_topk_tokens_sampling.data(),
             out.output_tokens.data());
     } else {
-        tmac::hls::cost_draft_tree_layer_score_hls(
+        tmac::hls::cdt_score(
             tc.topk_probas_sampling.data(),
             tc.last_layer_scores.data(),
             tc.input_hidden_states.data(),

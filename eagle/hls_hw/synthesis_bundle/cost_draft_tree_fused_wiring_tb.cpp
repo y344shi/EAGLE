@@ -150,7 +150,7 @@ static void run_reference_pipeline(
     std::vector<int64_t> stage_remapped_tokens(cfg.batch_size * total_topk, -1);
     std::vector<int64_t> stage_output_tokens(cfg.batch_size * cfg.node_top_k, -1);
 
-    tmac::hls::cost_draft_tree_layer_score_hls_with_tokens(
+    tmac::hls::cdt_score_tok(
         topk_probas.data(),
         topk_tokens.data(),
         last_layer_scores.data(),
@@ -172,7 +172,7 @@ static void run_reference_pipeline(
         stage_remapped_tokens.data(),
         stage_output_tokens.data());
 
-    tmac::hls::cost_draft_tree_update_state_hls(
+    tmac::hls::cdt_update(
         topk_probas.data(),
         stage_remapped_tokens.data(),
         stage_sort.data(),
@@ -511,7 +511,7 @@ static bool run_fused_test(const TestCfg& cfg,
         &ref_dbg_parent,
         &ref_dbg_remap);
 
-    tmac::hls::cost_draft_tree_fused_step_hls(
+    tmac::hls::e4d_fused(
         in.topk_probas.data(),
         in.topk_tokens.data(),
         in.last_layer_scores.data(),
@@ -727,7 +727,7 @@ static bool run_fused_multidepth_candidate_test(const TestCfg& base_cfg,
             &ref_dbg_parent,
             &ref_dbg_remap);
 
-        tmac::hls::cost_draft_tree_fused_step_hls(
+        tmac::hls::e4d_fused(
             step_topk_probas.data(),
             step_topk_tokens.data(),
             step_last_layer_scores.data(),

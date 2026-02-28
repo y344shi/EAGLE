@@ -12,10 +12,10 @@ using tmac::hls::hls_stream;
 
 // Streaming RMSNorm: assumes gamma length = hidden_dim; eps fixed.
 template <int HIDDEN_DIM, int TREE_WIDTH> // tree width either 1, 2, 4, 8?
-void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
-                     hls_stream<vec_t<VEC_W>>& out_stream,
-                     const float* gamma,
-                     float eps = 1e-6f) {
+void rms_s(hls_stream<vec_t<VEC_W>>& in_stream,
+           hls_stream<vec_t<VEC_W>>& out_stream,
+           const float* gamma,
+           float eps = 1e-6f) {
 #pragma HLS INTERFACE axis port = in_stream
 #pragma HLS INTERFACE axis port = out_stream
 #pragma HLS INTERFACE s_axilite port = gamma bundle = control
@@ -72,6 +72,15 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
             out_stream.write(out);
         }
     }
+}
+
+template <int HIDDEN_DIM, int TREE_WIDTH>
+void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
+                     hls_stream<vec_t<VEC_W>>& out_stream,
+                     const float* gamma,
+                     float eps = 1e-6f) {
+#pragma HLS INLINE
+    rms_s<HIDDEN_DIM, TREE_WIDTH>(in_stream, out_stream, gamma, eps);
 }
 
 } // namespace hls

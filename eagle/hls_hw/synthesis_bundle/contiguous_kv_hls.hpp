@@ -25,7 +25,7 @@ constexpr int kContiguousKvTreeWidth = 4;
 // Write kContiguousKvTreeWidth new K/V tokens to contiguous HBM.
 // ---------------------------------------------------------------------------
 template <int HEAD_DIM, int NUM_KV_HEADS>
-void contiguous_kv_write(
+void ckv_w(
     hls_stream<vec_t<VEC_W>>& k_in,   // post-RoPE K, kContiguousKvTreeWidth tokens token-major
     hls_stream<vec_t<VEC_W>>& v_in,   // V projection, kContiguousKvTreeWidth tokens token-major
     vec_t<VEC_W>* hbm_k,
@@ -63,7 +63,7 @@ write_token_loop:
 // Output per query: (prefix_len + current_depth + 1) tokens of KV history.
 // ---------------------------------------------------------------------------
 template <int HEAD_DIM, int NUM_KV_HEADS, int MAX_DEPTH>
-void contiguous_kv_gather(
+void ckv_g(
     const vec_t<VEC_W>* hbm_k,
     const vec_t<VEC_W>* hbm_v,
     int prefix_len,
@@ -141,7 +141,7 @@ self_token_loop:
 // then gathers prefix + ancestors + self for all kContiguousKvTreeWidth queries.
 // ---------------------------------------------------------------------------
 template <int HEAD_DIM, int NUM_KV_HEADS, int MAX_DEPTH>
-void contiguous_kv_write_and_gather(
+void ckv_wg(
     hls_stream<vec_t<VEC_W>>& k_in,
     hls_stream<vec_t<VEC_W>>& v_in,
     vec_t<VEC_W>* hbm_k,
@@ -155,14 +155,60 @@ void contiguous_kv_write_and_gather(
 ) {
 #pragma HLS INLINE off
     // Write first (so self-token is in HBM for gather phase 3).
-    contiguous_kv_write<HEAD_DIM, NUM_KV_HEADS>(
+    ckv_w<HEAD_DIM, NUM_KV_HEADS>(
         k_in, v_in, hbm_k, hbm_v,
         prefix_len + current_depth * max_tree_width);
 
     // Then gather.
-    contiguous_kv_gather<HEAD_DIM, NUM_KV_HEADS, MAX_DEPTH>(
+    ckv_g<HEAD_DIM, NUM_KV_HEADS, MAX_DEPTH>(
         hbm_k, hbm_v, prefix_len, current_depth,
         max_tree_width, parent_indices_per_layer, k_out, v_out);
+}
+
+template <int HEAD_DIM, int NUM_KV_HEADS>
+void contiguous_kv_write(
+    hls_stream<vec_t<VEC_W>>& k_in,
+    hls_stream<vec_t<VEC_W>>& v_in,
+    vec_t<VEC_W>* hbm_k,
+    vec_t<VEC_W>* hbm_v,
+    int write_base_token
+) {
+#pragma HLS INLINE
+    ckv_w<HEAD_DIM, NUM_KV_HEADS>(k_in, v_in, hbm_k, hbm_v, write_base_token);
+}
+
+template <int HEAD_DIM, int NUM_KV_HEADS, int MAX_DEPTH>
+void contiguous_kv_gather(
+    const vec_t<VEC_W>* hbm_k,
+    const vec_t<VEC_W>* hbm_v,
+    int prefix_len,
+    int current_depth,
+    int max_tree_width,
+    const int* parent_indices_per_layer,
+    hls_stream<vec_t<VEC_W>> k_out[kContiguousKvTreeWidth],
+    hls_stream<vec_t<VEC_W>> v_out[kContiguousKvTreeWidth]
+) {
+#pragma HLS INLINE
+    ckv_g<HEAD_DIM, NUM_KV_HEADS, MAX_DEPTH>(
+        hbm_k, hbm_v, prefix_len, current_depth, max_tree_width, parent_indices_per_layer, k_out, v_out);
+}
+
+template <int HEAD_DIM, int NUM_KV_HEADS, int MAX_DEPTH>
+void contiguous_kv_write_and_gather(
+    hls_stream<vec_t<VEC_W>>& k_in,
+    hls_stream<vec_t<VEC_W>>& v_in,
+    vec_t<VEC_W>* hbm_k,
+    vec_t<VEC_W>* hbm_v,
+    int prefix_len,
+    int current_depth,
+    int max_tree_width,
+    const int* parent_indices_per_layer,
+    hls_stream<vec_t<VEC_W>> k_out[kContiguousKvTreeWidth],
+    hls_stream<vec_t<VEC_W>> v_out[kContiguousKvTreeWidth]
+) {
+#pragma HLS INLINE
+    ckv_wg<HEAD_DIM, NUM_KV_HEADS, MAX_DEPTH>(
+        k_in, v_in, hbm_k, hbm_v, prefix_len, current_depth, max_tree_width, parent_indices_per_layer, k_out, v_out);
 }
 
 } // namespace hls

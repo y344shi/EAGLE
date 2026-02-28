@@ -576,7 +576,7 @@ static bool run_case_data(const TestCase& tc,
     const CaseConfig& cfg = tc.cfg;
     StateBuffers actual = tc.initial;
 
-    tmac::hls::cost_draft_tree_update_state_hls(
+    tmac::hls::cdt_update(
         tc.topk_probas.data(),
         tc.topk_tokens.data(),
         tc.sorted_scores.data(),
