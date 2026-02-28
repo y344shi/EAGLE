@@ -9,7 +9,7 @@ namespace hls {
 constexpr int kLmTcQpackFactor = 8;   // int4 values per int32
 constexpr int kLmTcVocab       = 32000; // typical vocab size
 
-float eagle4_fp16_to_float(uint16_t h) {
+float e4_f16(uint16_t h) {
     #pragma HLS INLINE
     
     half fp16_val;

@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CASE_DIR="${ROOT_DIR}"
 DRY_RUN_ONLY=0
+REPO_CASE_DIR="$(cd "${ROOT_DIR}/../../../capture/cases" 2>/dev/null && pwd || true)"
 
 usage() {
   cat <<USAGE
@@ -28,6 +29,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "${CASE_DIR}" == "${ROOT_DIR}" && -n "${REPO_CASE_DIR}" ]]; then
+  if [[ -s "${REPO_CASE_DIR}/cost_draft_tree_case_manifest.txt" ]]; then
+    CASE_DIR="${REPO_CASE_DIR}"
+  fi
+fi
+
 CXX="${CXX:-g++}"
 CXXFLAGS=(-std=c++17 -I.)
 
@@ -45,8 +52,18 @@ echo "[info] compiling dry-run checkers..."
 "${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_score_tb.cpp -o /tmp/cdt_score_tb_check
 "${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_update_tb.cpp -o /tmp/cdt_update_tb_check
 "${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_controller_tb.cpp -o /tmp/cdt_controller_tb_check
-"${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_fused_wiring_tb.cpp -o /tmp/cdt_fused_wiring_tb_check
-"${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_multilayer_orchestrator_tb.cpp -o /tmp/cdt_multilayer_orch_tb_check
+"${CXX}" "${CXXFLAGS[@]}" \
+  cost_draft_tree_fused_wiring_tb.cpp \
+  eagle_tier1_lm_top.cpp \
+  eagle_tier1_top.cpp \
+  eagle4_lm_head_hls.cpp \
+  -o /tmp/cdt_fused_wiring_tb_check
+"${CXX}" "${CXXFLAGS[@]}" \
+  cost_draft_tree_multilayer_orchestrator_tb.cpp \
+  eagle_tier1_lm_top.cpp \
+  eagle_tier1_top.cpp \
+  eagle4_lm_head_hls.cpp \
+  -o /tmp/cdt_multilayer_orch_tb_check
 
 declare -a SPECS=(
   "cost_draft_tree_score_case.txt|/tmp/cdt_score_tb_check"
