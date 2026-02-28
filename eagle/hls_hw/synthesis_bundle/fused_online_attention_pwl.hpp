@@ -109,7 +109,7 @@ token_loop:
 dot_and_load:
             for (int i = 0; i < vec_chunks; ++i) {
 #pragma HLS loop_tripcount min=HEAD_DIM/VEC_W max=HEAD_DIM/VEC_W
-#pragma HLS PIPELINE II = 1
+#pragma HLS PIPELINE II = 2
                 vec_t<VEC_W> k_chunk = k_hist.read();
                 vec_t<VEC_W> v_chunk = v_hist.read();
                 for (int j = 0; j < VEC_W; ++j) {

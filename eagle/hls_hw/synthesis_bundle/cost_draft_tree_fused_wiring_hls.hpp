@@ -594,7 +594,7 @@ slm_batch_loop:
     }
 }
 
-#ifdef TMAC_CDT_ORCH_TB_INJECT_TOPK
+//#ifdef TMAC_CDT_ORCH_TB_INJECT_TOPK
 // Test-only recurrent top-k injector for multilayer orchestrator TB.
 // When enabled, recurrent depths can bypass the SLM path and consume caller-supplied
 // top-k tensors, while production builds remain unchanged.
@@ -657,7 +657,7 @@ copy_injected_topk_loop_t:
     }
     return true;
 }
-#endif
+//#endif
 
 // Multi-layer orchestrator:
 //   optional InitialLoop (PyTorch draft_InitialLoop parity):
@@ -1380,7 +1380,7 @@ void cost_draft_tree_multilayer_orchestrator_hls(
 #pragma HLS INTERFACE m_axi port=embed_norm_gamma offset=slave bundle=gmem7
 #pragma HLS INTERFACE m_axi port=post_attn_norm_gamma offset=slave bundle=gmem7
 #pragma HLS INTERFACE m_axi port=final_norm_gamma offset=slave bundle=gmem7
-#pragma HLS INTERFACE m_axi port=rope_cfg offset=slave bundle=gmem_cfg
+//#pragma HLS INTERFACE m_axi port=rope_cfg offset=slave bundle=gmem_cfg
 #pragma HLS INTERFACE m_axi port=hbm_k offset=slave bundle=gmem8
 #pragma HLS INTERFACE m_axi port=hbm_v offset=slave bundle=gmem9
 

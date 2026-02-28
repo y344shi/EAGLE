@@ -23,6 +23,15 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
 #pragma HLS ARRAY_PARTITION variable=gamma type=cyclic factor=VEC_W dim=1
     static_assert(HIDDEN_DIM % VEC_W == 0, "HIDDEN_DIM must be divisible by VEC_W");
 
+    float gamma_local[HIDDEN_DIM];
+    #pragma HLS BIND_STORAGE variable = gamma_local type = ram_2p impl = bram
+    #pragma HLS ARRAY_PARTITION variable=gamma_local cyclic factor=VEC_W
+
+    for(int k=0; k < HIDDEN_DIM; k++) {
+        #pragma HLS PIPELINE II=1
+        gamma_local[k] = gamma[k];
+    }
+
     // rms norm each of TREE_WIDTH tokens
     for (int t = 0; t < TREE_WIDTH; t++) {
 #pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH
@@ -48,6 +57,8 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
         }
         
         float scale = ::hls::sqrt(sum_sq / HIDDEN_DIM + eps);
+        float inv_scale = 1.0f / scale;
+
         // Normalize and apply gamma
         for (int i = 0; i < HIDDEN_DIM / VEC_W; ++i) {
     #pragma HLS loop_tripcount min=HIDDEN_DIM/VEC_W max=HIDDEN_DIM/VEC_W
@@ -56,7 +67,7 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
             for (int j = 0; j < VEC_W; ++j) {
     #pragma HLS UNROLL
                 int idx = i * VEC_W + j;
-                out[j] = buf[idx] * gamma[idx] / scale;
+                out[j] = buf[idx] * gamma_local[idx] * inv_scale;
             }
             out_stream.write(out);
         }
