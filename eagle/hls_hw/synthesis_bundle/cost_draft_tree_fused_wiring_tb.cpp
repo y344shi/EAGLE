@@ -222,12 +222,12 @@ static bool parse_cli(int argc, char** argv, CliOptions* opts, std::string* err_
                 *err_msg = "--multi-depth-steps requires an integer";
                 return false;
             }
-            try {
+            //try {
                 opts->multi_depth_steps = std::stoi(argv[++i]);
-            } catch (...) {
-                *err_msg = "invalid integer for --multi-depth-steps";
-                return false;
-            }
+            //} catch (...) {
+            //    *err_msg = "invalid integer for --multi-depth-steps";
+            //    return false;
+            //}
             if (opts->multi_depth_steps <= 0) {
                 *err_msg = "--multi-depth-steps must be > 0";
                 return false;

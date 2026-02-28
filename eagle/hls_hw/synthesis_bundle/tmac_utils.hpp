@@ -66,6 +66,7 @@ using hls_stream = ::hls::stream<T>;
 namespace tmac {
 namespace hls {
 constexpr int VEC_W = 16;
+constexpr int TREE_WIDTH = 4;
 } // namespace hls
 } // namespace tmac
 

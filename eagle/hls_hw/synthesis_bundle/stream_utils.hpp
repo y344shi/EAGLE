@@ -12,6 +12,9 @@ using tmac::hls::VEC_W;
 using tmac::hls::vec_t;
 using tmac::hls::hls_stream;
 
+// Tripcount policy: typical element count for hidden-dim streams (TREE_WIDTH * HIDDEN / VEC_W).
+constexpr int kTcStreamElements = 1024;
+
 // Scale stream by scalar.
 template <int W>
 void stream_scale(hls_stream<vec_t<W>>& in,
@@ -20,6 +23,7 @@ void stream_scale(hls_stream<vec_t<W>>& in,
                   int elements) {
 #pragma HLS INLINE off
     for (int i = 0; i < elements; ++i) {
+#pragma HLS loop_tripcount min=kTcStreamElements max=kTcStreamElements avg=kTcStreamElements
 #pragma HLS PIPELINE II = 1
         vec_t<W> v = in.read();
         vec_t<W> r;
@@ -39,6 +43,7 @@ void stream_dup(hls_stream<vec_t<W>>& in,
                 int elements) {
 #pragma HLS INLINE off
     for (int i = 0; i < elements; ++i) {
+#pragma HLS loop_tripcount min=kTcStreamElements max=kTcStreamElements avg=kTcStreamElements
 #pragma HLS PIPELINE II = 1
         vec_t<W> v = in.read();
         out0.write(v);
@@ -55,6 +60,7 @@ void stream_trip(hls_stream<vec_t<W>>& in,
                  int elements) {
 #pragma HLS INLINE off
     for (int i = 0; i < elements; ++i) {
+#pragma HLS loop_tripcount min=kTcStreamElements max=kTcStreamElements avg=kTcStreamElements
 #pragma HLS PIPELINE II = 1
         vec_t<W> v = in.read();
         out0.write(v);
@@ -67,6 +73,7 @@ template <int W>
 void stream_head(hls_stream<vec_t<W>>& in, hls_stream<vec_t<W>> outs[32], int elements) {
 #pragma HLS INLINE off
     for (int i = 0; i < elements; ++i) {
+#pragma HLS loop_tripcount min=kTcStreamElements max=kTcStreamElements avg=kTcStreamElements
 #pragma HLS PIPELINE II = 1
         vec_t<W> v = in.read();
         for (int j = 0; j < 32; ++j) {
@@ -84,6 +91,7 @@ void stream_add(hls_stream<vec_t<W>>& in0,
                 int elements) {
 #pragma HLS INLINE off
     for (int i = 0; i < elements; ++i) {
+#pragma HLS loop_tripcount min=kTcStreamElements max=kTcStreamElements avg=kTcStreamElements
 #pragma HLS PIPELINE II = 1
         vec_t<W> a = in0.read();
         vec_t<W> b = in1.read();
@@ -104,6 +112,7 @@ void silu_mul_stream(hls_stream<vec_t<W>>& gate,
                      int elements) {
 #pragma HLS INLINE off
     for (int i = 0; i < elements; ++i) {
+#pragma HLS loop_tripcount min=kTcStreamElements max=kTcStreamElements avg=kTcStreamElements
 #pragma HLS PIPELINE II = 1
         vec_t<W> g = gate.read();
         vec_t<W> u = up.read();
@@ -124,6 +133,7 @@ void stream_passthrough(hls_stream<vec_t<W>>& in,
                         int elements) {
 #pragma HLS INLINE off
     for (int i = 0; i < elements; ++i) {
+#pragma HLS loop_tripcount min=kTcStreamElements max=kTcStreamElements avg=kTcStreamElements
 #pragma HLS PIPELINE II = 1
         out.write(in.read());
     }

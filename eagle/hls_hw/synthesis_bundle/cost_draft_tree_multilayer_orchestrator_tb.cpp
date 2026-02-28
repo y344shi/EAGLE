@@ -204,12 +204,12 @@ bool parse_cli(int argc, char** argv, CliOptions* opts, std::string* err_msg) {
                 *err_msg = "--seed requires an integer";
                 return false;
             }
-            try {
+            //try {
                 opts->seed = std::stoi(argv[++i]);
-            } catch (...) {
-                *err_msg = "invalid integer for --seed";
-                return false;
-            }
+            //} catch (...) {
+            //    *err_msg = "invalid integer for --seed";
+            //    return false;
+            //}
         } else if (arg == "--help" || arg == "-h") {
             std::cout
                 << "Usage: cost_draft_tree_multilayer_orchestrator_tb [--case-file <path>]"

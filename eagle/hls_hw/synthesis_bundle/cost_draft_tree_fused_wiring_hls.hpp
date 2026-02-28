@@ -16,11 +16,23 @@ namespace hls {
 constexpr int kCdtFusedMaxBatch = 128;
 constexpr int kCdtFusedMaxNodeTopK = 16;
 
+// Tripcount policy for HLS synthesis latency estimation.
+// Configuration: batch=1, node_top_k=8, depth=16, tree_width=TREE_WIDTH(4).
+constexpr int kTcBatch = 1;
+constexpr int kTcTopK = 8;
+constexpr int kTcDepth = 16;
+constexpr int kTcTotalTopK = TREE_WIDTH * kTcTopK;                       // 32
+constexpr int kTcMaxNodeCount = 128;
+constexpr int kTcMaxVerifyNum = 64;
+constexpr int kTcLogitsWidth = 1024;  // typical initial logits candidate count
+constexpr int kTcParentAccumSize = kCdtControllerMaxDepth * TREE_WIDTH;  // 256
+constexpr int kTcInitScratchSize = kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK; // 2048
+
 // Fused step wiring for one draft-tree layer in HLS:
 // 1) score/sort + parent pick + hidden gather,
 // 2) cumulative state update (cumu_tokens, prev/next/side_indexs, work/sort_scores).
 // KV management uses contiguous HBM ancestor-chain; no tree-mask or controller needed.
-inline void cost_draft_tree_fused_step_hls(
+void cost_draft_tree_fused_step_hls(
     // Score inputs
     const float* topk_probas_sampling,      // [batch, tree_width * node_top_k]
     const int64_t* topk_tokens_sampling,    // [batch, tree_width * node_top_k]
@@ -150,8 +162,10 @@ inline void cost_draft_tree_fused_step_hls(
         dbg_sort_layer_indices != nullptr || dbg_remapped_topk_tokens != nullptr) {
     dbg_flat_loop:
         for (int b = 0; b < batch_size; ++b) {
+#pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
         dbg_flat_inner:
             for (int t = 0; t < total_topk; ++t) {
+#pragma HLS loop_tripcount min=kTcTotalTopK max=kTcTotalTopK avg=kTcTotalTopK
 #pragma HLS PIPELINE II = 1
                 const int idx = b * total_topk + t;
                 if (dbg_curr_layer_scores != nullptr) {
@@ -173,8 +187,10 @@ inline void cost_draft_tree_fused_step_hls(
     if (dbg_parent_indices_in_layer != nullptr) {
     dbg_parent_loop:
         for (int b = 0; b < batch_size; ++b) {
+#pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
         dbg_parent_inner:
             for (int i = 0; i < node_top_k; ++i) {
+#pragma HLS loop_tripcount min=kTcTopK max=kTcTopK avg=kTcTopK
 #pragma HLS PIPELINE II = 1
                 dbg_parent_indices_in_layer[b * node_top_k + i] =
                     s_parent_indices_in_layer[b * node_top_k + i];
@@ -186,7 +202,7 @@ inline void cost_draft_tree_fused_step_hls(
 // Fixed tree-width policy helper for orchestrator usage.
 // The policy keeps tree_width/verify_num unchanged and never stops early.
 struct CdtFixedWidthPolicyHls {
-    inline void operator()(
+    void operator()(
         int depth,
         int batch_size,
         int curr_tree_width,
@@ -219,7 +235,7 @@ struct CdtFixedWidthPolicyHls {
 
 // Select top-k from logits and output softmax probabilities for those winners.
 // If candidate_indices is provided, winner indices are remapped to real vocab token IDs.
-inline void cdt_softmax_topk_from_logits_hls(
+void cdt_softmax_topk_from_logits_hls(
     const float* logits,                 // [batch, logits_width]
     const int64_t* candidate_indices,    // [batch, logits_width] optional
     int batch_size,
@@ -239,6 +255,7 @@ inline void cdt_softmax_topk_from_logits_hls(
 
 topk_batch_loop:
     for (int b = 0; b < batch_size; ++b) {
+#pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
         float best_logits[kCdtFusedMaxNodeTopK];
         int best_indices[kCdtFusedMaxNodeTopK];
 #pragma HLS ARRAY_PARTITION variable = best_logits complete
@@ -246,6 +263,7 @@ topk_batch_loop:
 
     topk_init_loop:
         for (int k = 0; k < node_top_k; ++k) {
+#pragma HLS loop_tripcount min=kTcTopK max=kTcTopK avg=kTcTopK
             best_logits[k] = -std::numeric_limits<float>::infinity();
             best_indices[k] = -1;
         }
@@ -253,6 +271,7 @@ topk_batch_loop:
         float max_logit = -std::numeric_limits<float>::infinity();
     topk_scan_loop:
         for (int i = 0; i < logits_width; ++i) {
+#pragma HLS loop_tripcount min=kTcLogitsWidth max=kTcLogitsWidth avg=kTcLogitsWidth
 #pragma HLS PIPELINE II = 1
             const float v = logits[b * logits_width + i];
             if (v > max_logit) {
@@ -263,6 +282,7 @@ topk_batch_loop:
             float min_val = best_logits[0];
         topk_find_min_loop:
             for (int k = 1; k < node_top_k; ++k) {
+#pragma HLS loop_tripcount min=kTcTopK-1 max=kTcTopK-1 avg=kTcTopK-1
                 if (best_logits[k] < min_val) {
                     min_val = best_logits[k];
                     min_pos = k;
@@ -276,10 +296,12 @@ topk_batch_loop:
 
     topk_sort_loop_i:
         for (int i = 0; i < node_top_k; ++i) {
+#pragma HLS loop_tripcount min=kTcTopK max=kTcTopK avg=kTcTopK
             int best_pos = i;
             float best_val = best_logits[i];
         topk_sort_loop_j:
             for (int j = i + 1; j < node_top_k; ++j) {
+#pragma HLS loop_tripcount min=1 max=kTcTopK-1 avg=(1+kTcTopK-1)/2
                 if (best_logits[j] > best_val) {
                     best_val = best_logits[j];
                     best_pos = j;
@@ -298,6 +320,7 @@ topk_batch_loop:
         float sum_exp = 0.0f;
     topk_sumexp_loop:
         for (int i = 0; i < logits_width; ++i) {
+#pragma HLS loop_tripcount min=kTcLogitsWidth max=kTcLogitsWidth avg=kTcLogitsWidth
 #pragma HLS PIPELINE II = 1
             sum_exp += std::exp(logits[b * logits_width + i] - max_logit);
         }
@@ -305,6 +328,7 @@ topk_batch_loop:
 
     topk_write_loop:
         for (int k = 0; k < node_top_k; ++k) {
+#pragma HLS loop_tripcount min=kTcTopK max=kTcTopK avg=kTcTopK
 #pragma HLS PIPELINE II = 1
             int idx = best_indices[k];
             if (idx < 0 || idx >= logits_width) {
@@ -322,7 +346,7 @@ topk_batch_loop:
     }
 }
 
-inline void cdt_copy_frontier_for_next_depth_hls(
+void cdt_copy_frontier_for_next_depth_hls(
     const int64_t* frontier_src,  // [batch, max_tree_width]
     int batch_size,
     int max_tree_width,
@@ -335,8 +359,10 @@ inline void cdt_copy_frontier_for_next_depth_hls(
 
 copy_frontier_loop_b:
     for (int b = 0; b < batch_size; ++b) {
+#pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
     copy_frontier_loop_i:
         for (int i = 0; i < max_tree_width; ++i) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
 #pragma HLS PIPELINE II = 1
             frontier_dst[b * max_tree_width + i] = frontier_src[b * max_tree_width + i];
         }
@@ -346,7 +372,7 @@ copy_frontier_loop_b:
 // Wire per-layer outputs into the next layer's inputs.
 // Selects first next_tree_width entries from node_top_k outputs and
 // feeds selected hidden states and global indices back into the next SLM call.
-inline void cdt_prepare_next_layer_inputs_hls(
+void cdt_prepare_next_layer_inputs_hls(
     const float* output_scores,           // [batch, node_top_k]
     const int64_t* output_tokens,         // [batch, node_top_k]
     const float* output_hidden_states,    // [batch, node_top_k, hidden]
@@ -375,8 +401,10 @@ inline void cdt_prepare_next_layer_inputs_hls(
 
 next_layer_batch_loop:
     for (int b = 0; b < batch_size; ++b) {
+#pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
     next_layer_slot_loop:
         for (int t = 0; t < use_width; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
             const int token_dst = b * use_width + t;
 
             int64_t prev_idx_v = -1;
@@ -396,6 +424,7 @@ next_layer_batch_loop:
                     (static_cast<int64_t>(b) * node_top_k + t) * hidden_size;
             next_layer_hidden_copy_loop:
                 for (int h = 0; h < hidden_size; ++h) {
+#pragma HLS loop_tripcount min=HIDDEN max=HIDDEN avg=HIDDEN
 #pragma HLS PIPELINE II = 1
                     next_input_hidden_states[hidden_dst_base + h] =
                         output_hidden_states[hidden_src_base + h];
@@ -403,6 +432,7 @@ next_layer_batch_loop:
             } else {
             next_layer_hidden_zero_loop:
                 for (int h = 0; h < hidden_size; ++h) {
+#pragma HLS loop_tripcount min=HIDDEN max=HIDDEN avg=HIDDEN
 #pragma HLS PIPELINE II = 1
                     next_input_hidden_states[hidden_dst_base + h] = 0.0f;
                 }
@@ -413,7 +443,7 @@ next_layer_batch_loop:
 
 // Run EAGLE4 SLM forward + LM-head top-k for one draft depth.
 // The SLM path owns top-k candidate generation; outputs are packed to fused-step layout.
-inline void cdt_run_eagle4_slm_topk_hls(
+void cdt_run_eagle4_slm_topk_hls(
     const float* input_hidden_states,          // packed [batch, tree_width, hidden]
     int batch_size,
     int tree_width,
@@ -463,13 +493,16 @@ inline void cdt_run_eagle4_slm_topk_hls(
 
 slm_batch_loop:
     for (int b = 0; b < batch_size; ++b) {
+#pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
         hls_stream<vec_t<VEC_W>> hidden_in_stream("cdt_hidden_in_stream");
         hls_stream<vec_t<VEC_W>> embed_in_stream("cdt_embed_in_stream");
 
     slm_stream_token_loop:
         for (int t = 0; t < TREE_WIDTH; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
         slm_stream_hidden_vec_loop:
             for (int hv = 0; hv < HIDDEN / VEC_W; ++hv) {
+#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W avg=HIDDEN/VEC_W
 #pragma HLS PIPELINE II = 1
                 vec_t<VEC_W> hidden_vec;
                 vec_t<VEC_W> embed_vec;
@@ -533,8 +566,10 @@ slm_batch_loop:
 
     slm_copy_hidden_loop_t:
         for (int t = 0; t < tree_width; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
         slm_copy_hidden_loop_h:
             for (int h = 0; h < hidden_size; ++h) {
+#pragma HLS loop_tripcount min=HIDDEN max=HIDDEN avg=HIDDEN
 #pragma HLS PIPELINE II = 1
                 const int64_t dst =
                     (static_cast<int64_t>(b) * tree_width + t) * hidden_size + h;
@@ -545,8 +580,10 @@ slm_batch_loop:
 
     slm_copy_topk_loop_t:
         for (int t = 0; t < tree_width; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
         slm_copy_topk_loop_k:
             for (int k = 0; k < node_top_k; ++k) {
+#pragma HLS loop_tripcount min=kTcTopK max=kTcTopK avg=kTcTopK
 #pragma HLS PIPELINE II = 1
                 const int src = t * node_top_k + k;
                 const int dst = b * (tree_width * node_top_k) + src;
@@ -575,7 +612,7 @@ slm_batch_loop:
 //   If use_policy_schedule=true and schedule arrays are non-null, depth-wise policy comes from:
 //     policy_next_tree_width[depth], policy_next_verify_num[depth], policy_stop_signal[depth].
 //   Otherwise, fixed policy is used: keep curr_tree_width/curr_verify_num and never stop.
-inline void cdt_apply_policy_schedule_hls(
+void cdt_apply_policy_schedule_hls(
     int depth,
     int batch_size,
     int curr_tree_width,
@@ -619,7 +656,7 @@ inline void cdt_apply_policy_schedule_hls(
     }
 }
 
-inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
+void cost_draft_tree_multilayer_orchestrator_impl_hls(
     int tree_depth,
     int curr_depth_start,
 
@@ -715,13 +752,13 @@ inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
     //   - use caller-provided initial_topk_* if present,
     //   - otherwise compute initial_topk_* from initial_logits (+ optional candidate remap).
     // initial_hidden_states must be [batch, hidden] from previous verify output.
-    bool enable_initial_loop = false,
-    const float* initial_logits = nullptr,             // [batch, initial_logits_width]
-    const int64_t* initial_candidate_indices = nullptr,// [batch, initial_logits_width] optional
-    int initial_logits_width = 0,
-    const float* initial_topk_probas = nullptr,        // [batch, node_top_k] optional
-    const int64_t* initial_topk_tokens = nullptr,      // [batch, node_top_k] optional
-    const float* initial_hidden_states = nullptr       // [batch, hidden]
+    bool enable_initial_loop,// = false,
+    const float* initial_logits,// = nullptr,             // [batch, initial_logits_width]
+    const int64_t* initial_candidate_indices,// = nullptr,// [batch, initial_logits_width] optional
+    int initial_logits_width,// = 0,
+    const float* initial_topk_probas,// = nullptr,        // [batch, node_top_k] optional
+    const int64_t* initial_topk_tokens,// = nullptr,      // [batch, node_top_k] optional
+    const float* initial_hidden_states// = nullptr       // [batch, hidden]
 ) {
 #pragma HLS INLINE off
     if (tree_depth <= 0 || batch_size <= 0 || batch_size > kCdtFusedMaxBatch ||
@@ -780,6 +817,7 @@ inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
     int parent_indices_accum[kCdtControllerMaxDepth * TREE_WIDTH];
 #pragma HLS BIND_STORAGE variable = parent_indices_accum type = ram_2p impl = bram
     for (int i = 0; i < kCdtControllerMaxDepth * TREE_WIDTH; ++i) {
+#pragma HLS loop_tripcount min=kTcParentAccumSize max=kTcParentAccumSize avg=kTcParentAccumSize
 #pragma HLS PIPELINE II = 1
         parent_indices_accum[i] = 0;
     }
@@ -797,9 +835,17 @@ inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
     int loop_start_depth = 0;
 
     if (run_initial_loop) {
-        const float* initial_topk_probas_ptr = initial_topk_probas;
-        const int64_t* initial_topk_tokens_ptr = initial_topk_tokens;
-        if (!has_initial_topk) {
+        if (has_initial_topk) {
+            // Copy external data into local scratch so the pointer below is always
+            // a known local object (HLS cannot synthesize conditional pointer aliasing).
+        init_topk_copy_loop:
+            for (int i = 0; i < kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK; ++i) {
+#pragma HLS loop_tripcount min=kTcInitScratchSize max=kTcInitScratchSize avg=kTcInitScratchSize
+#pragma HLS PIPELINE II = 1
+                s_initial_topk_probas[i] = initial_topk_probas[i];
+                s_initial_topk_tokens[i] = initial_topk_tokens[i];
+            }
+        } else {
             cdt_softmax_topk_from_logits_hls(
                 initial_logits,
                 initial_candidate_indices,
@@ -808,8 +854,6 @@ inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
                 node_top_k,
                 s_initial_topk_probas,
                 s_initial_topk_tokens);
-            initial_topk_probas_ptr = s_initial_topk_probas;
-            initial_topk_tokens_ptr = s_initial_topk_tokens;
         }
 
         float initial_last_layer_scores[kCdtFusedMaxBatch];
@@ -818,6 +862,7 @@ inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
 #pragma HLS ARRAY_PARTITION variable = initial_topk_indexs_prev complete
     init_seed_loop:
         for (int b = 0; b < batch_size; ++b) {
+#pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
 #pragma HLS PIPELINE II = 1
             initial_last_layer_scores[b] = 1.0f;
             initial_topk_indexs_prev[b] = 0;  // root global index
@@ -826,8 +871,8 @@ inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
         // InitialLoop Stage-0 parity:
         // topk from previous-verify logits updates cumulative state with tree_width=1.
         cost_draft_tree_fused_step_hls(
-            initial_topk_probas_ptr,
-            initial_topk_tokens_ptr,
+            s_initial_topk_probas,
+            s_initial_topk_tokens,
             initial_last_layer_scores,
             initial_hidden_states,
             hot_token_id,
@@ -865,6 +910,7 @@ inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
         if (curr_depth_start >= 0 && curr_depth_start < kCdtControllerMaxDepth) {
         init_parent_accum_loop:
             for (int t = 0; t < TREE_WIDTH; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
 #pragma HLS PIPELINE II = 1
                 int parent_slot = 0;
                 if (t < node_top_k) {
@@ -877,8 +923,10 @@ inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
         if (dbg_parent_indices_in_layer != nullptr) {
         init_dbg_parent_fwd_loop_b:
             for (int b = 0; b < batch_size; ++b) {
+#pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
             init_dbg_parent_fwd_loop_i:
                 for (int i = 0; i < node_top_k; ++i) {
+#pragma HLS loop_tripcount min=kTcTopK max=kTcTopK avg=kTcTopK
 #pragma HLS PIPELINE II = 1
                     dbg_parent_indices_in_layer[b * node_top_k + i] =
                         s_parent_scratch[b * node_top_k + i];
@@ -946,6 +994,7 @@ inline void cost_draft_tree_multilayer_orchestrator_impl_hls(
 
 orchestrator_depth_loop:
     for (int d = loop_start_depth; d < tree_depth; ++d) {
+#pragma HLS loop_tripcount min=kTcDepth max=kTcDepth avg=kTcDepth
         if (curr_tree_width <= 0) {
             stopped = true;
             break;
@@ -1050,6 +1099,7 @@ orchestrator_depth_loop:
         if (current_depth >= 0 && current_depth < kCdtControllerMaxDepth) {
         accum_parent_loop:
             for (int t = 0; t < TREE_WIDTH; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
 #pragma HLS PIPELINE II = 1
                 int parent_slot = 0;
                 if (t < node_top_k) {
@@ -1063,8 +1113,10 @@ orchestrator_depth_loop:
         if (dbg_parent_indices_in_layer != nullptr) {
         dbg_parent_fwd_loop_b:
             for (int b = 0; b < batch_size; ++b) {
+#pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
             dbg_parent_fwd_loop_i:
                 for (int i = 0; i < node_top_k; ++i) {
+#pragma HLS loop_tripcount min=kTcTopK max=kTcTopK avg=kTcTopK
 #pragma HLS PIPELINE II = 1
                     dbg_parent_indices_in_layer[b * node_top_k + i] =
                         s_parent_scratch[b * node_top_k + i];
@@ -1143,7 +1195,8 @@ orchestrator_finalize:
 } // namespace hls
 } // namespace tmac
 
-extern "C" void cost_draft_tree_multilayer_orchestrator_hls(
+extern "C" {
+void cost_draft_tree_multilayer_orchestrator_hls(
     int tree_depth,
     int curr_depth_start,
     const int* policy_next_tree_width,
@@ -1248,7 +1301,7 @@ extern "C" void cost_draft_tree_multilayer_orchestrator_hls(
 #pragma HLS INTERFACE m_axi port=embed_norm_gamma offset=slave bundle=gmem7
 #pragma HLS INTERFACE m_axi port=post_attn_norm_gamma offset=slave bundle=gmem7
 #pragma HLS INTERFACE m_axi port=final_norm_gamma offset=slave bundle=gmem7
-#pragma HLS INTERFACE m_axi port=rope_cfg_table offset=slave bundle=gmem_cfg
+//#pragma HLS INTERFACE m_axi port=rope_cfg offset=slave bundle=gmem_cfg
 #pragma HLS INTERFACE m_axi port=hbm_k offset=slave bundle=gmem8
 #pragma HLS INTERFACE m_axi port=hbm_v offset=slave bundle=gmem9
 
@@ -1383,3 +1436,4 @@ extern "C" void cost_draft_tree_multilayer_orchestrator_hls(
 }
 
 #endif // TMAC_COST_DRAFT_TREE_FUSED_WIRING_HLS_HPP
+}

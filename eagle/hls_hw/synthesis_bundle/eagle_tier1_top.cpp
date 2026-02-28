@@ -15,10 +15,13 @@ static_assert(HIDDEN == NUM_HEADS * HEAD_DIM, "HIDDEN must equal NUM_HEADS * HEA
 void distribute_q_heads(hls_stream<vec_t<VEC_W>>& s_q_rot, hls_stream<vec_t<VEC_W>> q_head_streams[TREE_WIDTH][NUM_HEADS]) {
 #pragma HLS INLINE off
 for (int t = 0; t < TREE_WIDTH; t++) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
 head_loop:
     for (int h = 0; h < NUM_HEADS; ++h) {
+#pragma HLS loop_tripcount min=NUM_HEADS max=NUM_HEADS avg=NUM_HEADS
     vec_loop:
         for (int i = 0; i < VECS_PER_Q; ++i) {
+#pragma HLS loop_tripcount min=VECS_PER_Q max=VECS_PER_Q avg=VECS_PER_Q
 #pragma HLS PIPELINE II = 1
             q_head_streams[t][h].write(s_q_rot.read());
         }
@@ -41,6 +44,7 @@ void broadcast_kv_heads(
     #pragma HLS LOOP_TRIPCOUNT min=1 avg=MAX_CTX/2 max=MAX_CTX
         kv_vec_loop:
             for (int v = 0; v < VECS_PER_KV_TOKEN; ++v) {
+    #pragma HLS loop_tripcount min=VECS_PER_KV_TOKEN max=VECS_PER_KV_TOKEN avg=VECS_PER_KV_TOKEN
     #pragma HLS PIPELINE II = 1
                 int kvh = v / VECS_PER_Q;
                 vec_t<VEC_W> ek = s_k_hist_raw[t].read();
@@ -90,10 +94,13 @@ for (int t = 0; t < TREE_WIDTH; t++) {
 void collect_ctx(hls_stream<vec_t<VEC_W>>& s_context, hls_stream<vec_t<VEC_W>> ctx_head_streams[TREE_WIDTH][NUM_HEADS]) {
 #pragma HLS INLINE off
     for (int t = 0; t < TREE_WIDTH; t++) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
     head_loop:
         for (int i = 0; i < NUM_HEADS; i++) {
+#pragma HLS loop_tripcount min=NUM_HEADS max=NUM_HEADS avg=NUM_HEADS
         vec_loop:
             for (int j = 0; j < VECS_PER_Q; ++j) {
+#pragma HLS loop_tripcount min=VECS_PER_Q max=VECS_PER_Q avg=VECS_PER_Q
     #pragma HLS PIPELINE II = 1
                 s_context.write(ctx_head_streams[t][i].read());
             }
@@ -108,13 +115,16 @@ void concat_embed_hidden(hls_stream<vec_t<VEC_W>>& s_embed_norm,
     constexpr int VECS_PER_H = HIDDEN / VEC_W;
 token_cat_loop:
     for (int t = 0; t < TREE_WIDTH; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
 embed_loop:
         for (int i = 0; i < VECS_PER_H; ++i) {
+#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W avg=HIDDEN/VEC_W
 #pragma HLS PIPELINE II = 1
         s_attn_cat.write(s_embed_norm.read());
     }
 hidden_loop:
         for (int i = 0; i < VECS_PER_H; ++i) {
+#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W avg=HIDDEN/VEC_W
 #pragma HLS PIPELINE II = 1
         s_attn_cat.write(s_hidden_norm.read());
         }
@@ -128,13 +138,16 @@ void split_down_2hs(hls_stream<vec_t<VEC_W>>& s_down_2hs,
     constexpr int VECS_PER_H = HIDDEN / VEC_W;
 token_split_loop:
     for (int t = 0; t < TREE_WIDTH; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
 to_logits_loop:
         for (int i = 0; i < VECS_PER_H; ++i) {
+#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W avg=HIDDEN/VEC_W
 #pragma HLS PIPELINE II = 1
         s_to_logits.write(s_down_2hs.read());
     }
 reasoning_loop:
         for (int i = 0; i < VECS_PER_H; ++i) {
+#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W avg=HIDDEN/VEC_W
 #pragma HLS PIPELINE II = 1
         s_for_reasoning.write(s_down_2hs.read());
         }
@@ -164,37 +177,8 @@ void eagle_tier1_top_eagle4_l0(
     int current_depth,
     const int* parent_indices_per_layer
 ) {
-#pragma HLS INTERFACE axis port=hidden_in_stream
-#pragma HLS INTERFACE axis port=embed_in_stream
-#pragma HLS INTERFACE axis port=reasoning_out_stream
-#pragma HLS INTERFACE axis port=logits_norm_out_stream
-#pragma HLS INTERFACE m_axi port=w_q offset=slave bundle=gmem0 depth=TMAC_W_Q_DEPTH
-#pragma HLS INTERFACE m_axi port=s_q offset=slave bundle=gmem0 depth=TMAC_S_Q_DEPTH
-#pragma HLS INTERFACE m_axi port=w_k offset=slave bundle=gmem1 depth=TMAC_W_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=s_k offset=slave bundle=gmem1 depth=TMAC_S_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=w_v offset=slave bundle=gmem2 depth=TMAC_W_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=s_v offset=slave bundle=gmem2 depth=TMAC_S_KV_DEPTH
-#pragma HLS INTERFACE m_axi port=w_o offset=slave bundle=gmem3 depth=TMAC_W_O_DEPTH
-#pragma HLS INTERFACE m_axi port=s_o offset=slave bundle=gmem3 depth=TMAC_S_O_DEPTH
-#pragma HLS INTERFACE m_axi port=w_gate offset=slave bundle=gmem4 depth=TMAC_W_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=gate_scales offset=slave bundle=gmem4 depth=TMAC_S_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=w_up offset=slave bundle=gmem5 depth=TMAC_W_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=up_scales offset=slave bundle=gmem5 depth=TMAC_S_GATE_UP_DEPTH
-#pragma HLS INTERFACE m_axi port=w_down offset=slave bundle=gmem6 depth=TMAC_W_DOWN_DEPTH
-#pragma HLS INTERFACE m_axi port=down_scales offset=slave bundle=gmem6 depth=TMAC_S_DOWN_DEPTH
-#pragma HLS INTERFACE m_axi port=hidden_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=embed_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=post_attn_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=final_norm_gamma offset=slave bundle=gmem7 depth=TMAC_HIDDEN_SIZE
-#pragma HLS INTERFACE m_axi port=hbm_k offset=slave bundle=gmem8 depth=TMAC_KV_CACHE_DEPTH
-#pragma HLS INTERFACE m_axi port=hbm_v offset=slave bundle=gmem9 depth=TMAC_KV_CACHE_DEPTH
-#pragma HLS INTERFACE m_axi port=parent_indices_per_layer offset=slave bundle=gmem10 depth=64
-#pragma HLS INTERFACE s_axilite port=prefix_len bundle=control
-#pragma HLS INTERFACE s_axilite port=current_depth bundle=control
-#pragma HLS INTERFACE s_axilite port=return bundle=control
 
 #pragma HLS DATAFLOW
-
     hls_stream<vec_t<VEC_W>> s_hidden_norm_in("s_hidden_norm_in");
     hls_stream<vec_t<VEC_W>> s_hidden_residual("s_hidden_residual");
     hls_stream<vec_t<VEC_W>> s_hidden_norm("s_hidden_norm");
