@@ -1,0 +1,19 @@
+metric,value
+gpu_name,Tesla V100-PCIE-16GB
+dtype,torch.float16
+vocab,128256
+hidden,4096
+rank,128
+topk,128
+b_only_latency_mean_us,51.960
+b_only_latency_std_us,0.658
+b_hbm_read_bytes_per_token,32833792
+b_effective_gbps,631.910
+stage_mean_embedding_us,15.949
+stage_mean_transformer_layers_us,494.450
+stage_mean_lm_head_a_us,33.291
+stage_mean_lm_head_b_us,54.079
+stage_mean_lm_head_c_us,86.146
+stage_mean_topk_us,14.362
+stage_mean_total_us,698.278
+lm_head_b_percent_total,7.74

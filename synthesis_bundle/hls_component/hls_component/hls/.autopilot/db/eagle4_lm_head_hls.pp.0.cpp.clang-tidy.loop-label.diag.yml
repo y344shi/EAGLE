@@ -1,0 +1,1700 @@
+---
+MainSourceFile:  'C:/EAGLE/eagle/hls_hw/synthesis_bundle/hls_component/hls_component/hls/.autopilot/db/eagle4_lm_head_hls.pp.0.cpp'
+Diagnostics:     
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_676_1:  '
+    FileOffset:      676
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\ap_int_ref.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          443819
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_676_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_690_1:  '
+    FileOffset:      690
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\ap_int_ref.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          444285
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_690_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_704_1:  '
+    FileOffset:      704
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\ap_int_ref.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          444752
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_704_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1248_1:  '
+    FileOffset:      1248
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\ap_fixed_base.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          739510
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1248_1: '
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      91
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      92
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      93
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      94
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      95
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      125
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      126
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      127
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      128
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      129
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      130
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      131
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      132
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      133
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      134
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      184
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      185
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      186
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      213
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      214
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      215
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      216
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      217
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      218
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      254
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  clang-diagnostic-error
+    Message:         'Invalid Directive: for current device, ROM_1P + LUTRAM is invalid combination for BIND_STORAGE''s option ''type + impl'''
+    FileOffset:      255
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hotbm_apfixed.h'
+    Replacements:    
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_61_1:  '
+    FileOffset:      61
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cordic_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1178921
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_61_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_117_1:  '
+    FileOffset:      117
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cordic_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1179739
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_117_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_289_1:  '
+    FileOffset:      289
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cordic_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1182390
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_289_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_449_1:  '
+    FileOffset:      449
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cordic_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1185117
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_449_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_629_1:  '
+    FileOffset:      629
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cordic_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1188278
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_629_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_633_2:  '
+    FileOffset:      633
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cordic_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1188359
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_633_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_743_1:  '
+    FileOffset:      743
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cordic_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1190668
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_743_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_840_1:  '
+    FileOffset:      840
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cordic_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1192166
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_840_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_859_2:  '
+    FileOffset:      859
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cordic_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1192396
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_859_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1173_1:  '
+    FileOffset:      1173
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cordic_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1198586
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1173_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1256_1:  '
+    FileOffset:      1256
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cordic_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1200189
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1256_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_68_1:  '
+    FileOffset:      68
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1208078
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_68_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_74_2:  '
+    FileOffset:      74
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1208228
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_74_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_78_3:  '
+    FileOffset:      78
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1208325
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_78_3: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_145_4:  '
+    FileOffset:      145
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1210148
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_145_4: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_151_5:  '
+    FileOffset:      151
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1210298
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_151_5: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_155_6:  '
+    FileOffset:      155
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1210395
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_155_6: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_170_7:  '
+    FileOffset:      170
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1210776
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_170_7: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_178_8:  '
+    FileOffset:      178
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1211007
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_178_8: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_243_9:  '
+    FileOffset:      243
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1214412
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_243_9: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_249_10:  '
+    FileOffset:      249
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1214564
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_249_10: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_253_11:  '
+    FileOffset:      253
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1214664
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_253_11: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_268_12:  '
+    FileOffset:      268
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1215046
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_268_12: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_276_13:  '
+    FileOffset:      276
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1215284
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_276_13: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_505_14:  '
+    FileOffset:      505
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1230839
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_505_14: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_511_15:  '
+    FileOffset:      511
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1230991
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_511_15: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_515_16:  '
+    FileOffset:      515
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1231090
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_515_16: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_525_17:  '
+    FileOffset:      525
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1231267
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_525_17: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_529_18:  '
+    FileOffset:      529
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1231365
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_529_18: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_539_19:  '
+    FileOffset:      539
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1231650
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_539_19: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_547_20:  '
+    FileOffset:      547
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1231905
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_547_20: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_908_21:  '
+    FileOffset:      908
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1264144
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_908_21: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_914_22:  '
+    FileOffset:      914
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1264296
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_914_22: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_918_23:  '
+    FileOffset:      918
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1264396
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_918_23: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1034_1:  '
+    FileOffset:      1034
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1267086
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1034_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1040_2:  '
+    FileOffset:      1040
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1267236
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1040_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1044_3:  '
+    FileOffset:      1044
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1267334
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1044_3: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1131_4:  '
+    FileOffset:      1131
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1270804
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1131_4: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1137_5:  '
+    FileOffset:      1137
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1270955
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1137_5: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1141_6:  '
+    FileOffset:      1141
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1271054
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1141_6: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1160_7:  '
+    FileOffset:      1160
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1271534
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1160_7: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1167_8:  '
+    FileOffset:      1167
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1271776
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1167_8: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1283_9:  '
+    FileOffset:      1283
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1277224
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1283_9: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1289_10:  '
+    FileOffset:      1289
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1277376
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1289_10: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1293_11:  '
+    FileOffset:      1293
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1277475
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1293_11: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1313_12:  '
+    FileOffset:      1313
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1277984
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1313_12: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1320_13:  '
+    FileOffset:      1320
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1278233
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1320_13: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1582_14:  '
+    FileOffset:      1582
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1295510
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1582_14: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1588_15:  '
+    FileOffset:      1588
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1295662
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1588_15: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1592_16:  '
+    FileOffset:      1592
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1295762
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1592_16: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1616_17:  '
+    FileOffset:      1616
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1296236
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1616_17: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1623_18:  '
+    FileOffset:      1623
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1296503
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1623_18: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2053_19:  '
+    FileOffset:      2053
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1334943
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2053_19: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2059_20:  '
+    FileOffset:      2059
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1335095
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2059_20: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2063_21:  '
+    FileOffset:      2063
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1335195
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2063_21: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2192_1:  '
+    FileOffset:      2192
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1337806
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2192_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2199_2:  '
+    FileOffset:      2199
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1337969
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2199_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2203_3:  '
+    FileOffset:      2203
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1338061
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2203_3: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2250_4:  '
+    FileOffset:      2250
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1339670
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2250_4: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2257_5:  '
+    FileOffset:      2257
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1339832
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2257_5: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2261_6:  '
+    FileOffset:      2261
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1339924
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2261_6: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2279_7:  '
+    FileOffset:      2279
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1340297
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2279_7: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2334_8:  '
+    FileOffset:      2334
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1342763
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2334_8: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2341_9:  '
+    FileOffset:      2341
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1342930
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2341_9: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2345_10:  '
+    FileOffset:      2345
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1343023
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2345_10: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2363_11:  '
+    FileOffset:      2363
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1343404
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2363_11: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2452_12:  '
+    FileOffset:      2452
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1348845
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2452_12: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2459_13:  '
+    FileOffset:      2459
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1349013
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2459_13: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2463_14:  '
+    FileOffset:      2463
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1349107
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2463_14: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2473_15:  '
+    FileOffset:      2473
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1349278
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2473_15: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2477_16:  '
+    FileOffset:      2477
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1349369
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2477_16: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2488_17:  '
+    FileOffset:      2488
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1349651
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2488_17: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2496_18:  '
+    FileOffset:      2496
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1349838
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2496_18: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2821_19:  '
+    FileOffset:      2821
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1384308
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2821_19: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2828_20:  '
+    FileOffset:      2828
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1384476
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2828_20: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2832_21:  '
+    FileOffset:      2832
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1384570
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2832_21: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2920_1:  '
+    FileOffset:      2920
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1386356
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2920_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2927_2:  '
+    FileOffset:      2927
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1386464
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2927_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2931_3:  '
+    FileOffset:      2931
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1386535
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2931_3: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2946_4:  '
+    FileOffset:      2946
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1386823
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2946_4: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2978_5:  '
+    FileOffset:      2978
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1388037
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2978_5: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2985_6:  '
+    FileOffset:      2985
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1388148
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2985_6: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_2989_7:  '
+    FileOffset:      2989
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1388221
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_2989_7: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3004_8:  '
+    FileOffset:      3004
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1388516
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3004_8: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3054_9:  '
+    FileOffset:      3054
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1391849
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3054_9: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3061_10:  '
+    FileOffset:      3061
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1391960
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3061_10: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3065_11:  '
+    FileOffset:      3065
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1392033
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3065_11: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3080_12:  '
+    FileOffset:      3080
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1392329
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3080_12: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3217_13:  '
+    FileOffset:      3217
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1411641
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3217_13: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3224_14:  '
+    FileOffset:      3224
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1411755
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3224_14: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3228_15:  '
+    FileOffset:      3228
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1411830
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3228_15: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3243_16:  '
+    FileOffset:      3243
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1412117
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3243_16: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3403_17:  '
+    FileOffset:      3403
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1437727
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3403_17: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3410_18:  '
+    FileOffset:      3410
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1437841
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3410_18: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_3414_19:  '
+    FileOffset:      3414
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_exp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1437918
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_3414_19: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_703_1:  '
+    FileOffset:      703
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_log_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1472002
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_703_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_921_1:  '
+    FileOffset:      921
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_log_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1480391
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_921_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_1345_1:  '
+    FileOffset:      1345
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_log_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1499368
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_1345_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_243_1:  '
+    FileOffset:      243
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_sqrt_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1514276
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_243_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_271_2:  '
+    FileOffset:      271
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_sqrt_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1514797
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_271_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_48_1:  '
+    FileOffset:      48
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_pow_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1530777
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_48_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_109_2:  '
+    FileOffset:      109
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_pow_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1531931
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_109_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_123_3:  '
+    FileOffset:      123
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_pow_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1532240
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_123_3: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_153_4:  '
+    FileOffset:      153
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_pow_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1532750
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_153_4: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_281_1:  '
+    FileOffset:      281
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_pow_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1534609
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_281_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_301_2:  '
+    FileOffset:      301
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_pow_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1534974
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_301_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_315_3:  '
+    FileOffset:      315
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_pow_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1535282
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_315_3: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_433_1:  '
+    FileOffset:      433
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_pow_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1537114
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_433_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_447_2:  '
+    FileOffset:      447
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_pow_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1537439
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_447_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_33_1:  '
+    FileOffset:      33
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_diff_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1540112
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_33_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_183_1:  '
+    FileOffset:      183
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_diff_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1543016
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_183_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_248_1:  '
+    FileOffset:      248
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_diff_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1544307
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_248_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_44_1:  '
+    FileOffset:      44
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_frexp_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1549956
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_44_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_16_1:  '
+    FileOffset:      16
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_all_any_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1555260
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_16_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_27_1:  '
+    FileOffset:      27
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_all_any_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1555435
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_27_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_38_1:  '
+    FileOffset:      38
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_all_any_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1555596
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_38_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_49_1:  '
+    FileOffset:      49
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_all_any_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1555758
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_49_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_60_1:  '
+    FileOffset:      60
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_all_any_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1555932
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_60_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_71_1:  '
+    FileOffset:      71
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_all_any_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1556107
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_71_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_82_1:  '
+    FileOffset:      82
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_all_any_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1556268
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_82_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_93_1:  '
+    FileOffset:      93
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_all_any_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1556430
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_93_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_26_1:  '
+    FileOffset:      26
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_mad_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1628164
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_26_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_40_1:  '
+    FileOffset:      40
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_cbrt_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1629920
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_40_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_49_1:  '
+    FileOffset:      49
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hypot_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1634459
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_49_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_81_2:  '
+    FileOffset:      81
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hypot_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1635194
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_81_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_169_3:  '
+    FileOffset:      169
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\etc\hls_hypot_apfixed.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          1636883
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_169_3: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_133_1:  '
+    FileOffset:      133
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2173281
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_133_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_149_1:  '
+    FileOffset:      149
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2173728
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_149_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_175_1:  '
+    FileOffset:      175
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2174250
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_175_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_176_1:  '
+    FileOffset:      176
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2174569
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_176_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_204_1:  '
+    FileOffset:      204
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2175375
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_204_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_205_1:  '
+    FileOffset:      205
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2175732
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_205_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_206_1:  '
+    FileOffset:      206
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2176089
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_206_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_207_1:  '
+    FileOffset:      207
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2176446
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_207_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_208_1:  '
+    FileOffset:      208
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2176803
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_208_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_209_1:  '
+    FileOffset:      209
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2177160
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_209_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_210_1:  '
+    FileOffset:      210
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2177517
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_210_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_211_1:  '
+    FileOffset:      211
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2177874
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_211_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_212_1:  '
+    FileOffset:      212
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2178232
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_212_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_213_1:  '
+    FileOffset:      213
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2178591
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_213_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_228_1:  '
+    FileOffset:      228
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2179015
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_228_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_229_1:  '
+    FileOffset:      229
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2179353
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_229_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_230_1:  '
+    FileOffset:      230
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2179690
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_230_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_231_1:  '
+    FileOffset:      231
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2180026
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_231_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_232_1:  '
+    FileOffset:      232
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2180363
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_232_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_262_1:  '
+    FileOffset:      262
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2180822
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_262_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_263_1:  '
+    FileOffset:      263
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2181247
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_263_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_264_1:  '
+    FileOffset:      264
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2181674
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_264_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_265_1:  '
+    FileOffset:      265
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2182101
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_265_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_266_1:  '
+    FileOffset:      266
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2182528
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_266_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_267_1:  '
+    FileOffset:      267
+    FilePath:        'C:\AMDDesignTools\2025.1\Vitis\common\technology\autopilot\hls_vector.h'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2182954
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_267_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_26_1:  '
+    FileOffset:      26
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2187361
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_26_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_43_1:  '
+    FileOffset:      43
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2187853
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_43_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_46_2:  '
+    FileOffset:      46
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2188067
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_46_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_49_3:  '
+    FileOffset:      49
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2188209
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_49_3: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_78_1:  '
+    FileOffset:      78
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2189185
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_78_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_80_2:  '
+    FileOffset:      80
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2189297
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_80_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_88_3:  '
+    FileOffset:      88
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2189549
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_88_3: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_92_4:  '
+    FileOffset:      92
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2189700
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_92_4: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_96_5:  '
+    FileOffset:      96
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2189986
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_96_5: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_116_6:  '
+    FileOffset:      116
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2190824
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_116_6: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_119_7:  '
+    FileOffset:      119
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2190966
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_119_7: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_142_1:  '
+    FileOffset:      142
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2191727
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_142_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_144_2:  '
+    FileOffset:      144
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2191839
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_144_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_149_3:  '
+    FileOffset:      149
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2192152
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_149_3: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_173_1:  '
+    FileOffset:      173
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2192910
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_173_1: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_177_2:  '
+    FileOffset:      177
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2193088
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_177_2: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_186_3:  '
+    FileOffset:      186
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2193374
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_186_3: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_195_4:  '
+    FileOffset:      195
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2193714
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_195_4: '
+  - DiagnosticName:  xilinx-label-all-loops
+    Message:         'Added loop label VITIS_LOOP_205_5:  '
+    FileOffset:      205
+    FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\eagle4_lm_head_hls.cpp'
+    Replacements:    
+      - FilePath:        'C:\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\hls_component\hls\.autopilot\db\eagle4_lm_head_hls.pp.0.cpp'
+        Offset:          2194048
+        Length:          0
+        ReplacementText: 'VITIS_LOOP_205_5: '
+...

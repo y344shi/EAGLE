@@ -1,0 +1,172 @@
+<ENTRY>
+{
+ "thisFile": "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\hls_component\\hls_component.hlsrun_package_summary",
+ "connectId": "",
+ "serverToken": "",
+ "timestamp": "0"
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_CmdStep",
+ "dateTimestamp": "02/28/26 13:29:47",
+ "timestampMillis": "1772314187664",
+ "buildStep": {
+  "cmdId": "3ae3448a-5d52-43e2-9556-56e1e688a47d",
+  "name": "vitis-run",
+  "logFile": "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\hls_component\\logs\\hls_component.steps.log",
+  "commandLine": "C:/AMDDesignTools/2025.1/Vitis/bin/unwrapped/win64.o/vitis-run.exe  --mode hls --package --config C:\\Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\hls_config.cfg --work_dir hls_component ",
+  "args": [
+   "--mode",
+   "hls",
+   "--package",
+   "--config",
+   "C:\\Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\hls_config.cfg",
+   "--work_dir",
+   "hls_component"
+  ],
+  "iniFiles": [],
+  "cwd": "C:\\Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "02/28/26 13:29:47",
+ "timestampMillis": "1772314187665",
+ "status": {
+  "cmdId": "3ae3448a-5d52-43e2-9556-56e1e688a47d",
+  "state": "CS_RUNNING"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_FlowMetaData",
+ "dateTimestamp": "02/28/26 13:29:53",
+ "timestampMillis": "1772314193176",
+ "buildSummary": {
+  "hardwarePlatform": "",
+  "hardwareDsa": "",
+  "platformDirectory": "",
+  "runtime": "",
+  "systemConfig": "",
+  "flow": "BF_RUN",
+  "target": "TT_HLS_IP",
+  "kernels": [
+   {
+    "base": {
+     "type": "KERNEL",
+     "name": "cost_draft_tree_multilayer_orchestrator_hls",
+     "file": "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\hls_component\\cost_draft_tree_multilayer_orchestrator_hls.zip",
+     "reports": [],
+     "uuid": ""
+    },
+    "sources": [
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\contiguous_kv_hls.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\cost_draft_tree_controller_hls.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\cost_draft_tree_fused_wiring_hls.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\cost_draft_tree_multilayer_orchestrator_tb.cpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\cost_draft_tree_score_hls.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\cost_draft_tree_update_hls.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\eagle_tier1_lm_top.cpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\eagle_tier1_lm_top.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\eagle_tier1_top.cpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\eagle_tier1_top.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\eagle4_lm_head_hls.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\fused_online_attention_pwl.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\rms_norm_stream.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\rope_kernel.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\stream_utils.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\tmac_utils.hpp",
+     "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\eagle4_lm_head_hls.cpp"
+    ],
+    "psSources": [],
+    "cuNames": [],
+    "type": "HLS",
+    "frequency": 0,
+    "freqUnits": ""
+   }
+  ],
+  "toolVersion": "2025.1"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_SubCmdStep",
+ "dateTimestamp": "02/28/26 13:29:53",
+ "timestampMillis": "1772314193181",
+ "buildStep": {
+  "cmdId": "c6e4e32a-9269-4709-b862-ae1f953c6e6e",
+  "name": "",
+  "logFile": "C:/Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\hls_component\\hls\\hls.log",
+  "commandLine": "",
+  "args": [],
+  "iniFiles": [],
+  "cwd": "C:\\Users\\mark1\\Desktop\\projects\\EAGLE-4\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "02/28/26 13:29:53",
+ "timestampMillis": "1772314193182",
+ "status": {
+  "cmdId": "c6e4e32a-9269-4709-b862-ae1f953c6e6e",
+  "state": "CS_RUNNING"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "02/28/26 14:03:12",
+ "timestampMillis": "1772316192239",
+ "status": {
+  "cmdId": "c6e4e32a-9269-4709-b862-ae1f953c6e6e",
+  "state": "CS_PASSED"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Status",
+ "dateTimestamp": "02/28/26 14:03:12",
+ "timestampMillis": "1772316192578",
+ "status": {
+  "cmdId": "3ae3448a-5d52-43e2-9556-56e1e688a47d",
+  "state": "CS_FAILED"
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Report",
+ "dateTimestamp": "02/28/26 14:03:12",
+ "timestampMillis": "1772316192579",
+ "report": {
+  "path": "",
+  "name": "",
+  "fileType": "HTML",
+  "reportType": "GLOBAL_RULECHECK_GUIDANCE",
+  "cmdId": ""
+ }
+}
+</ENTRY>
+<ENTRY>
+{
+ "type": "ET_Report",
+ "dateTimestamp": "02/28/26 14:03:12",
+ "timestampMillis": "1772316192579",
+ "report": {
+  "path": "",
+  "name": "",
+  "fileType": "BINARY_PROTOBUF",
+  "reportType": "GLOBAL_RULECHECK_GUIDANCE",
+  "cmdId": ""
+ }
+}
+</ENTRY>

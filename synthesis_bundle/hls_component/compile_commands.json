@@ -1,0 +1,54 @@
+[
+  {
+    "directory": "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component",
+    "arguments": [
+      "C:\\AMDDesignTools\\2025.1\\Vitis\\vcxx\\libexec\\clang++.exe",
+      "--sysroot=C:\\AMDDesignTools\\2025.1\\Vitis\\tps\\mingw\\10.0.0\\win64.o\\nt",
+      "-fhls",
+      "-hls-syn-headers-dir=C:\\AMDDesignTools\\2025.1\\Vitis\\common\\technology\\autopilot",
+      "-fhlstoplevel=cost_draft_tree_multilayer_orchestrator_hls",
+      "-c",
+      "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\..\\cost_draft_tree_multilayer_orchestrator_tb.cpp"
+    ],
+    "file": "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\..\\cost_draft_tree_multilayer_orchestrator_tb.cpp"
+  },
+  {
+    "directory": "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component",
+    "arguments": [
+      "C:\\AMDDesignTools\\2025.1\\Vitis\\vcxx\\libexec\\clang++.exe",
+      "--sysroot=C:\\AMDDesignTools\\2025.1\\Vitis\\tps\\mingw\\10.0.0\\win64.o\\nt",
+      "-fhls",
+      "-hls-syn-headers-dir=C:\\AMDDesignTools\\2025.1\\Vitis\\common\\technology\\autopilot",
+      "-fhlstoplevel=cost_draft_tree_multilayer_orchestrator_hls",
+      "-c",
+      "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\..\\eagle_tier1_lm_top.cpp"
+    ],
+    "file": "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\..\\eagle_tier1_lm_top.cpp"
+  },
+  {
+    "directory": "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component",
+    "arguments": [
+      "C:\\AMDDesignTools\\2025.1\\Vitis\\vcxx\\libexec\\clang++.exe",
+      "--sysroot=C:\\AMDDesignTools\\2025.1\\Vitis\\tps\\mingw\\10.0.0\\win64.o\\nt",
+      "-fhls",
+      "-hls-syn-headers-dir=C:\\AMDDesignTools\\2025.1\\Vitis\\common\\technology\\autopilot",
+      "-fhlstoplevel=cost_draft_tree_multilayer_orchestrator_hls",
+      "-c",
+      "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\..\\eagle4_lm_head_hls.cpp"
+    ],
+    "file": "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\..\\eagle4_lm_head_hls.cpp"
+  },
+  {
+    "directory": "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component",
+    "arguments": [
+      "C:\\AMDDesignTools\\2025.1\\Vitis\\vcxx\\libexec\\clang++.exe",
+      "--sysroot=C:\\AMDDesignTools\\2025.1\\Vitis\\tps\\mingw\\10.0.0\\win64.o\\nt",
+      "-fhls",
+      "-hls-syn-headers-dir=C:\\AMDDesignTools\\2025.1\\Vitis\\common\\technology\\autopilot",
+      "-fhlstoplevel=cost_draft_tree_multilayer_orchestrator_hls",
+      "-c",
+      "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\..\\eagle_tier1_top.cpp"
+    ],
+    "file": "C:\\EAGLE\\eagle\\hls_hw\\synthesis_bundle\\hls_component\\..\\eagle_tier1_top.cpp"
+  }
+]

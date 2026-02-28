@@ -1,0 +1,9 @@
+{
+    "clangd.fallbackFlags": [
+        "-IC:\\AMDDesignTools\\2025.1\\Vitis\\include",
+        "-IC:\\AMDDesignTools\\2025.1\\Vitis\\include\\etc",
+        "-IC:\\AMDDesignTools\\2025.1\\Vitis\\include\\ap_sysc",
+        "-IC:\\AMDDesignTools\\2025.1\\Vitis\\win64\\tools\\auto_cc\\include",
+        "-IC:\\AMDDesignTools\\2025.1\\Vitis\\win64\\tools\\systemc\\include"
+    ]
+}
