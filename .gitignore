@@ -161,3 +161,6 @@ cython_debug/
 
 eagle/hls_hw/synthesis_bundle/_ide/
 eagle/hls_hw/synthesis_bundle/hls_component/
+synthesis_bundle/hls_component/
+synthesis_bundle/_ide/
+.claude/
