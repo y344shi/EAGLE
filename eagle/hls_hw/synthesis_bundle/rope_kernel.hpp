@@ -34,8 +34,8 @@ void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
 #pragma HLS INTERFACE s_axilite port = cfg bundle = control
 #pragma HLS INTERFACE s_axilite port = return bundle = control
 
-#pragma HLS ARRAY_PARTITION variable=cfg.cos_vals complete dim = 1
-#pragma HLS ARRAY_PARTITION variable=cfg.sin_vals complete dim = 1
+//#pragma HLS ARRAY_PARTITION variable=cfg.cos_vals complete dim = 1
+//#pragma HLS ARRAY_PARTITION variable=cfg.sin_vals complete dim = 1
 
     constexpr int HALF_DIM = HEAD_DIM / 2;
     float q_buf[NUM_HEADS][HEAD_DIM];
@@ -77,7 +77,7 @@ for (int t = 0; t < TREE_WIDTH; t++) {
 #pragma HLS loop_tripcount min=NUM_HEADS max=NUM_HEADS avg=NUM_HEADS
         for (int i = 0; i < HALF_DIM; ++i) {
 #pragma HLS loop_tripcount min=HALF_DIM max=HALF_DIM avg=HALF_DIM
-#pragma HLS UNROLL
+//#pragma HLS UNROLL
             const float a = q_buf[h][i];
             const float b = q_buf[h][i + HALF_DIM];
             const float c = cfg.cos_vals[i];
@@ -91,7 +91,7 @@ for (int t = 0; t < TREE_WIDTH; t++) {
 #pragma HLS loop_tripcount min=NUM_KV_HEADS max=NUM_KV_HEADS avg=NUM_KV_HEADS
         for (int i = 0; i < HALF_DIM; ++i) {
 #pragma HLS loop_tripcount min=HALF_DIM max=HALF_DIM avg=HALF_DIM
-#pragma HLS UNROLL
+//#pragma HLS UNROLL
             const float a = k_buf[h][i];
             const float b = k_buf[h][i + HALF_DIM];
             const float c = cfg.cos_vals[i];

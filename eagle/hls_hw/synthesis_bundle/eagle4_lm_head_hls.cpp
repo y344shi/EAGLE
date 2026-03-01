@@ -1,5 +1,6 @@
-#include "C:\Users\mark1\Desktop\projects\EAGLE-4\EAGLE\eagle\hls_hw\synthesis_bundle\hls_component\..\eagle4_lm_head_hls.hpp"
+#include "eagle4_lm_head_hls.hpp"
 #include <cmath>
+#include <hls_half.h>
 
 namespace tmac {
 namespace hls {
@@ -9,30 +10,10 @@ constexpr int kLmTcQpackFactor = 8;   // int4 values per int32
 constexpr int kLmTcVocab       = 32000; // typical vocab size
 
 float eagle4_fp16_to_float(uint16_t h) {
-    uint32_t sign = (h >> 15) & 0x1u;
-    uint32_t exp = (h >> 10) & 0x1Fu;
-    uint32_t mant = h & 0x3FFu;
-    uint32_t f;
-    if (exp == 0) {
-        if (mant == 0) {
-            f = sign << 31;
-        } else {
-            exp = 1;
-            while ((mant & 0x400u) == 0u) {
-                mant <<= 1;
-                exp--;
-            }
-            mant &= 0x3FFu;
-            f = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13);
-        }
-    } else if (exp == 31) {
-        f = (sign << 31) | 0x7F800000u | (mant << 13);
-    } else {
-        f = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13);
-    }
-    float out;
-    std::memcpy(&out, &f, sizeof(float));
-    return out;
+#pragma HLS INLINE
+    half fp16_val;
+    std::memcpy(&fp16_val, &h, sizeof(half));
+    return static_cast<float>(fp16_val);
 }
 
 int eagle4_lowest_slot(const float* scores, int topk) {
