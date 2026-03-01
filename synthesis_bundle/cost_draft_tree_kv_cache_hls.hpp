@@ -15,7 +15,7 @@ namespace hls {
 //   - kv_lens    [batch, max_tree_width]
 // to attention-ready token-major K/V streams per candidate.
 template <int HEAD_DIM, int NUM_KV_HEADS, int MAX_TREE_WIDTH, int MAX_INPUT_SIZE>
-void cdt_tree_kv_cache_gather_hls(
+void e4d_kv_cache_gather(
     const vec_t<VEC_W>* hbm_k_buffer,       // [kv_cache_tokens, VECS_PER_TOKEN]
     const vec_t<VEC_W>* hbm_v_buffer,       // [kv_cache_tokens, VECS_PER_TOKEN]
     const int32_t* kv_indices,              // [batch, max_tree_width, max_input_size]

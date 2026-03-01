@@ -101,7 +101,8 @@ load_q:
 token_loop:
     for (int t = 0; t < total_len; ++t) {
 #pragma HLS LOOP_TRIPCOUNT min=1 avg=1024 max=4096
-        float partial_score[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        const int num_banks = 8;
+        float partial_score[num_banks] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
         float v_local[HEAD_DIM];
 #pragma HLS ARRAY_PARTITION variable = v_local cyclic factor = VEC_W
 
@@ -115,7 +116,7 @@ dot_and_load:
                 for (int j = 0; j < VEC_W; ++j) {
 #pragma HLS UNROLL
                     const int idx = i * VEC_W + j;
-                    partial_score[j & 0x3] += q_buffer[idx] * k_chunk[j];
+                    partial_score[j & (num_banks - 1)] += q_buffer[idx] * k_chunk[j];
                     v_local[idx] = v_chunk[j];
                 }
             }
@@ -129,7 +130,9 @@ pad_token:
         }
 
         float score = (partial_score[0] + partial_score[1]) +
-                      (partial_score[2] + partial_score[3]);
+                      (partial_score[2] + partial_score[3]) + 
+                      (partial_score[4] + partial_score[5]) +
+                      (partial_score[6] + partial_score[7]);
         if (t >= seq_len) score = -1e9f;
         score *= scale;
 

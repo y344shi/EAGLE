@@ -16,12 +16,12 @@ constexpr int kCdtUpdateTcTreeWidth = 4;
 constexpr int kCdtUpdateTcTotalTopK = kCdtUpdateTcTreeWidth * kCdtUpdateTcTopK; // 32
 constexpr int kCdtUpdateTcMaxVerifyNum = 64;
 
-inline int cdt_update_min(int a, int b) {
+inline int e4d_min(int a, int b) {
 #pragma HLS INLINE
     return (a < b) ? a : b;
 }
 
-inline int64_t cdt_safe_index_i64(int64_t idx, int64_t low, int64_t high, int64_t fallback) {
+inline int64_t e4d_safe_index(int64_t idx, int64_t low, int64_t high, int64_t fallback) {
 #pragma HLS INLINE
     if (idx < low || idx >= high) {
         return fallback;
@@ -30,7 +30,7 @@ inline int64_t cdt_safe_index_i64(int64_t idx, int64_t low, int64_t high, int64_
 }
 
 // HLS mapping for update_cumu_draft_state kernel path.
-void cost_draft_tree_update_state_hls(
+void e4d_update_state(
     const float* topk_probas,         // [batch_size, tree_width * node_top_k]
     const int64_t* topk_tokens,       // [batch_size, tree_width * node_top_k]
     const float* sorted_scores,       // [batch_size, tree_width * node_top_k]
@@ -92,7 +92,7 @@ batch_loop:
             output_scores[output_offset + i] = sorted_scores[topk_offset + i];
 
             int64_t parent_idx = parent_indexs[parent_offset + i];
-            parent_idx = cdt_safe_index_i64(parent_idx, 0, tree_width, 0);
+            parent_idx = e4d_safe_index(parent_idx, 0, tree_width, 0);
 
             int64_t original_idx = sorted_indexs[topk_offset + i];
             if (original_idx < 0) {
@@ -139,7 +139,7 @@ batch_loop:
         }
 
         // 4a) Update work_scores prefix.
-        const int work_size_0 = cdt_update_min(verify_num, cumu_count);
+        const int work_size_0 = e4d_min(verify_num, cumu_count);
     work_scores_old_loop:
         for (int i = 0; i < work_size_0; ++i) {
 #pragma HLS loop_tripcount min=1 max=kCdtUpdateTcMaxVerifyNum avg=(1+kCdtUpdateTcMaxVerifyNum)/2
@@ -155,7 +155,7 @@ batch_loop:
 
         // 4b) Merge two descending segments into sort_scores prefix.
         // left: sort_scores[:work_size_0], right: sorted_scores[:num_new_tokens]
-        const int work_size_1 = cdt_update_min(verify_num, cumu_count + num_new_tokens);
+        const int work_size_1 = e4d_min(verify_num, cumu_count + num_new_tokens);
 
         if (work_size_1 > kCdtUpdateMergeMax) {
             // Keep behavior defined under compile-time bound.

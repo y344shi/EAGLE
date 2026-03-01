@@ -8,21 +8,21 @@ namespace hls {
 
 constexpr int kCdtControllerMaxDepth = 64;
 
-inline int cdt_clamp_int(int x, int low, int high) {
+inline int e4d_clamp_int(int x, int low, int high) {
 #pragma HLS INLINE
     if (x < low) return low;
     if (x > high) return high;
     return x;
 }
 
-inline int64_t cdt_clamp_i64(int64_t x, int64_t low, int64_t high) {
+inline int64_t e4d_clamp_i64(int64_t x, int64_t low, int64_t high) {
 #pragma HLS INLINE
     if (x < low) return low;
     if (x > high) return high;
     return x;
 }
 
-void cdt_controller_reset(
+void e4d_ctrl_reset(
     int batch_size,
     int max_tree_width,
     int max_node_count,
@@ -59,7 +59,7 @@ reset_batch_loop:
     }
 }
 
-void cdt_controller_seed_frontier(
+void e4d_ctrl_seed(
     const int64_t* seed_tokens,         // [batch, width]
     int batch_size,
     int width,
@@ -75,7 +75,7 @@ void cdt_controller_seed_frontier(
     int64_t* node_depths               // [batch, max_node_count] in/out
 ) {
 #pragma HLS INLINE off
-    const int use_width = cdt_clamp_int(width, 0, max_tree_width);
+    const int use_width = e4d_clamp_int(width, 0, max_tree_width);
 
 seed_batch_loop:
     for (int b = 0; b < batch_size; ++b) {
@@ -117,7 +117,7 @@ seed_batch_loop:
     }
 }
 
-void cdt_controller_expand_frontier(
+void e4d_ctrl_expand(
     const int64_t* parent_frontier_node_ids, // [batch, max_tree_width]
     const int64_t* parent_slots,             // [batch, width], each in [0, parent_width)
     const int64_t* child_tokens,             // [batch, width]
@@ -136,8 +136,8 @@ void cdt_controller_expand_frontier(
     int64_t* node_depths                     // [batch, max_node_count] in/out
 ) {
 #pragma HLS INLINE off
-    const int use_width = cdt_clamp_int(width, 0, max_tree_width);
-    const int use_parent_width = cdt_clamp_int(parent_width, 1, max_tree_width);
+    const int use_width = e4d_clamp_int(width, 0, max_tree_width);
+    const int use_parent_width = e4d_clamp_int(parent_width, 1, max_tree_width);
 
 expand_batch_loop:
     for (int b = 0; b < batch_size; ++b) {
@@ -149,7 +149,7 @@ expand_batch_loop:
             const int in_idx = b * use_width + i;
 
             int64_t slot = parent_slots[in_idx];
-            slot = cdt_clamp_i64(slot, 0, use_parent_width - 1);
+            slot = e4d_clamp_i64(slot, 0, use_parent_width - 1);
             int64_t parent_nid = parent_frontier_node_ids[b * max_tree_width + slot];
             if (parent_nid < 0 || parent_nid >= max_node_count) {
                 parent_nid = -1;
@@ -196,7 +196,7 @@ expand_batch_loop:
     }
 }
 
-void cdt_controller_export_frontier(
+void e4d_ctrl_export(
     const int64_t* frontier_node_ids,   // [batch, max_tree_width]
     int batch_size,
     int width,
@@ -210,7 +210,7 @@ void cdt_controller_export_frontier(
     int64_t* frontier_depths            // [batch, max_tree_width]
 ) {
 #pragma HLS INLINE off
-    const int use_width = cdt_clamp_int(width, 0, max_tree_width);
+    const int use_width = e4d_clamp_int(width, 0, max_tree_width);
 
 export_batch_loop:
     for (int b = 0; b < batch_size; ++b) {

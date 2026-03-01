@@ -32,7 +32,7 @@ constexpr int kTcInitScratchSize = kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK; // 
 // 1) score/sort + parent pick + hidden gather,
 // 2) cumulative state update (cumu_tokens, prev/next/side_indexs, work/sort_scores).
 // KV management uses contiguous HBM ancestor-chain; no tree-mask or controller needed.
-void cost_draft_tree_fused_step_hls(
+void e4d_fused_step(
     // Score inputs
     const float* topk_probas_sampling,      // [batch, tree_width * node_top_k]
     const int64_t* topk_tokens_sampling,    // [batch, tree_width * node_top_k]
@@ -84,7 +84,7 @@ void cost_draft_tree_fused_step_hls(
 
 // Fixed tree-width policy helper for orchestrator usage.
 // The policy keeps tree_width/verify_num unchanged and never stops early.
-struct CdtFixedWidthPolicyHls {
+struct E4dFixedPolicy {
     void operator()(
         int depth,
         int batch_size,
@@ -118,7 +118,7 @@ struct CdtFixedWidthPolicyHls {
 
 // Select top-k from logits and output softmax probabilities for those winners.
 // If candidate_indices is provided, winner indices are remapped to real vocab token IDs.
-void cdt_softmax_topk_from_logits_hls(
+void e4d_softmax_topk(
     const float* logits,                 // [batch, logits_width]
     const int64_t* candidate_indices,    // [batch, logits_width] optional
     int batch_size,
@@ -128,7 +128,7 @@ void cdt_softmax_topk_from_logits_hls(
     int64_t* topk_tokens_out             // [batch, node_top_k]
 );
 
-void cdt_copy_frontier_for_next_depth_hls(
+void e4d_copy_frontier(
     const int64_t* frontier_src,  // [batch, max_tree_width]
     int batch_size,
     int max_tree_width,
@@ -138,7 +138,7 @@ void cdt_copy_frontier_for_next_depth_hls(
 // Wire per-layer outputs into the next layer's inputs.
 // Selects first next_tree_width entries from node_top_k outputs and
 // feeds selected hidden states and global indices back into the next SLM call.
-void cdt_prepare_next_layer_inputs_hls(
+void e4d_prep_next_inputs(
     const float* output_scores,           // [batch, node_top_k]
     const int64_t* output_tokens,         // [batch, node_top_k]
     const float* output_hidden_states,    // [batch, node_top_k, hidden]
@@ -156,7 +156,7 @@ void cdt_prepare_next_layer_inputs_hls(
 
 // Run EAGLE4 SLM forward + LM-head top-k for one draft depth.
 // The SLM path owns top-k candidate generation; outputs are packed to fused-step layout.
-void cdt_run_eagle4_slm_topk_hls(
+void e4d_slm_topk(
     const float* input_hidden_states,          // packed [batch, tree_width, hidden]
     int batch_size,
     int tree_width,
@@ -210,7 +210,7 @@ void cdt_run_eagle4_slm_topk_hls(
 //   If use_policy_schedule=true and schedule arrays are non-null, depth-wise policy comes from:
 //     policy_next_tree_width[depth], policy_next_verify_num[depth], policy_stop_signal[depth].
 //   Otherwise, fixed policy is used: keep curr_tree_width/curr_verify_num and never stop.
-void cdt_apply_policy_schedule_hls(
+void e4d_apply_policy(
     int depth,
     int batch_size,
     int curr_tree_width,
@@ -228,7 +228,7 @@ void cdt_apply_policy_schedule_hls(
     int* next_verify_num,
     bool* stop_signal);
 
-void cost_draft_tree_multilayer_orchestrator_impl_hls(
+void eagle4_draft_impl(
     int tree_depth,
     int curr_depth_start,
 
@@ -336,7 +336,7 @@ void cost_draft_tree_multilayer_orchestrator_impl_hls(
 } // namespace hls
 } // namespace tmac
 
-void cost_draft_tree_multilayer_orchestrator_hls(
+void eagle4_draft(
     int tree_depth,
     int curr_depth_start,
     const int* policy_next_tree_width,

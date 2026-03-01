@@ -16,7 +16,7 @@ constexpr int kCdtScoreTcTreeWidth = 4;
 constexpr int kCdtScoreTcTotalTopK = kCdtScoreTcTreeWidth * kCdtScoreTcTopK; // 32
 constexpr int kCdtScoreTcHidden = 4096;
 
-void cdt_bitonic_sort_64(float scores[kCdtSortWidth],
+void e4d_bitonic_sort(float scores[kCdtSortWidth],
                                 int64_t indices[kCdtSortWidth],
                                 int valid_count) {
 #pragma HLS INLINE
@@ -49,7 +49,7 @@ bitonic_size:
     }
 }
 
-inline int64_t cdt_hot_token_lookup(
+inline int64_t e4d_hot_token_lookup(
     const int64_t* hot_token_id,
     int64_t hot_token_vocab_size,
     int64_t token) {
@@ -68,7 +68,7 @@ inline int64_t cdt_hot_token_lookup(
 // 1) remap sampled tokens through hot_token_id,
 // 2) expose remapped per-candidate tokens,
 // 3) emit top-k output tokens by sorted score index.
-void cost_draft_tree_layer_score_hls_core(
+void e4d_score_core(
     const float* topk_probas_sampling,   // [batch_size, tree_width * node_top_k]
     const int64_t* topk_tokens_sampling, // [batch_size, tree_width * node_top_k] (optional)
     const float* last_layer_scores,      // [batch_size, tree_width]
@@ -128,7 +128,7 @@ batch_loop:
             if (topk_tokens_sampling != nullptr) {
                 int64_t token = topk_tokens_sampling[flat_idx];
                 if (use_hot_token_id) {
-                    token = cdt_hot_token_lookup(hot_token_id, hot_token_vocab_size, token);
+                    token = e4d_hot_token_lookup(hot_token_id, hot_token_vocab_size, token);
                 }
                 s_tokens[tid] = token;
                 if (remapped_topk_tokens_sampling != nullptr) {
@@ -137,7 +137,7 @@ batch_loop:
             }
         }
 
-        cdt_bitonic_sort_64(s_scores, s_indices, total_topk);
+        e4d_bitonic_sort(s_scores, s_indices, total_topk);
 
     write_sorted_loop:
         for (int tid = 0; tid < total_topk; ++tid) {
@@ -180,7 +180,7 @@ batch_loop:
 }
 
 // Backward-compatible API used by the existing testbench/flow.
-void cost_draft_tree_layer_score_hls(
+void e4d_score(
     const float* topk_probas_sampling,   // [batch_size, tree_width * node_top_k]
     const float* last_layer_scores,      // [batch_size, tree_width]
     const float* input_hidden_states,    // [batch_size, tree_width, hidden_size]
@@ -196,7 +196,7 @@ void cost_draft_tree_layer_score_hls(
     int64_t* parent_indices_in_layer,    // [batch_size, node_top_k]
     float* output_hidden_states          // [batch_size, node_top_k, hidden_size]
 ) {
-    cost_draft_tree_layer_score_hls_core(
+    e4d_score_core(
         topk_probas_sampling,
         nullptr,
         last_layer_scores,
@@ -220,7 +220,7 @@ void cost_draft_tree_layer_score_hls(
 }
 
 // New API for multi-candidate adaptation: carries token path and optional hot-token remap.
-void cost_draft_tree_layer_score_hls_with_tokens(
+void e4d_score_with_tokens(
     const float* topk_probas_sampling,   // [batch_size, tree_width * node_top_k]
     const int64_t* topk_tokens_sampling, // [batch_size, tree_width * node_top_k]
     const float* last_layer_scores,      // [batch_size, tree_width]
@@ -242,7 +242,7 @@ void cost_draft_tree_layer_score_hls_with_tokens(
     int64_t* remapped_topk_tokens_sampling, // [batch_size, tree_width * node_top_k]
     int64_t* output_tokens               // [batch_size, node_top_k]
 ) {
-    cost_draft_tree_layer_score_hls_core(
+    e4d_score_core(
         topk_probas_sampling,
         topk_tokens_sampling,
         last_layer_scores,
