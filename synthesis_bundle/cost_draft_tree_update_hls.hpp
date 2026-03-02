@@ -170,7 +170,7 @@ batch_loop:
     merge_loop:
         for (int i = 0; i < work_size_1; ++i) {
 #pragma HLS loop_tripcount min=1 max=kCdtUpdateTcMaxVerifyNum avg=(1+kCdtUpdateTcMaxVerifyNum)/2
-//#pragma HLS PIPELINE II = 1
+#pragma HLS PIPELINE off // too much multiplexing
             const bool has_a = (ia < work_size_0);
             const bool has_b = (ib < num_new_tokens);
             const float a = has_a ? sort_scores[verify_offset + ia] : kCdtUpdatePadScore;

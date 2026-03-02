@@ -15,6 +15,8 @@ namespace hls {
 
 constexpr int kCdtFusedMaxBatch = 128;
 constexpr int kCdtFusedMaxNodeTopK = 16;
+constexpr int kHlsMaxNodeCount = 4032; // matches Python MAX_Node_Count worst case
+constexpr int kHlsHiddenBatch  = 1;    // current iteration uses batch=1 for hidden arrays
 
 // Tripcount policy for HLS synthesis latency estimation.
 // Configuration: batch=1, node_top_k=8, depth=16, tree_width=TREE_WIDTH(4).
