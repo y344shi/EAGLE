@@ -167,8 +167,8 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
                                const float* embed_norm_gamma,
                                const float* post_attn_norm_gamma,
                                const float* final_norm_gamma,
-                               const float rope_cos_vals[HEAD_DIM / 2],
-                               const float rope_sin_vals[HEAD_DIM / 2],
+                               const float rope_cos_vals[tmac::hls::HEAD_DIM / 2],
+                               const float rope_sin_vals[tmac::hls::HEAD_DIM / 2],
                                tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_k,
                                tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_v,
                                const uint16_t* efficient_lm_head_down_proj_weight,
@@ -201,7 +201,7 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
 #pragma HLS STREAM variable=reasoning_out depth=64
 #pragma HLS STREAM variable=logits_out depth=64
 
-    eagle_tier1_top_eagle4_l0(hidden_in_stream, embed_in_stream, reasoning_out, logits_out,
+    tmac::hls::eagle_tier1_top_eagle4_l0(hidden_in_stream, embed_in_stream, reasoning_out, logits_out,
                               w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales,
                               w_up, up_scales, w_down, down_scales, hidden_norm_gamma, embed_norm_gamma,
                               post_attn_norm_gamma, final_norm_gamma,

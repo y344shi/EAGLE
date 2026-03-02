@@ -1,33 +1,7 @@
 #include "eagle4_lm_head_hls.hpp"
-#include <cmath>
-#include <hls_half.h>
 
 namespace tmac {
 namespace hls {
-
-// Tripcount constants for C synthesis latency estimation (only for values without existing named constants).
-constexpr int kLmTcQpackFactor = 8;   // int4 values per int32
-constexpr int kLmTcVocab       = 32000; // typical vocab size
-
-float eagle4_fp16_to_float(uint16_t h) {
-#pragma HLS INLINE
-    half fp16_val;
-    std::memcpy(&fp16_val, &h, sizeof(half));
-    return static_cast<float>(fp16_val);
-}
-
-int eagle4_lowest_slot(const float* scores, int topk) {
-    int min_pos = 0;
-    float min_val = scores[0];
-    for (int i = 1; i < topk; ++i) {
-#pragma HLS loop_tripcount min=1 max=kEagle4LmTopKMax avg=(1+kEagle4LmTopKMax)/2
-        if (scores[i] < min_val) {
-            min_val = scores[i];
-            min_pos = i;
-        }
-    }
-    return min_pos;
-}
 
 void eagle4_lm_down_project(
     const float logits_hidden[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax],

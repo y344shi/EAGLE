@@ -88,8 +88,8 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
                                const float* embed_norm_gamma,
                                const float* post_attn_norm_gamma,
                                const float* final_norm_gamma,
-                               const float rope_cos_vals[HEAD_DIM / 2],
-                               const float rope_sin_vals[HEAD_DIM / 2],
+                               const float rope_cos_vals[tmac::hls::HEAD_DIM / 2],
+                               const float rope_sin_vals[tmac::hls::HEAD_DIM / 2],
                                tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_k,
                                tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_v,
                                const uint16_t* efficient_lm_head_down_proj_weight, // fp16 [rank, hidden]
