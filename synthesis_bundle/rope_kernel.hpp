@@ -26,16 +26,14 @@ void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
                        hls_stream<vec_t<VEC_W>>& q_out,
                        hls_stream<vec_t<VEC_W>>& k_in,
                        hls_stream<vec_t<VEC_W>>& k_out,
-                       const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& cfg) {
+                       const float cos_vals[HEAD_DIM / 2],
+                       const float sin_vals[HEAD_DIM / 2]) {
 #pragma HLS INTERFACE axis port = q_in
 #pragma HLS INTERFACE axis port = q_out
 #pragma HLS INTERFACE axis port = k_in
 #pragma HLS INTERFACE axis port = k_out
-#pragma HLS INTERFACE s_axilite port = cfg bundle = control
-#pragma HLS INTERFACE s_axilite port = return bundle = control
-
-//#pragma HLS ARRAY_PARTITION variable=cfg.cos_vals complete dim = 1
-//#pragma HLS ARRAY_PARTITION variable=cfg.sin_vals complete dim = 1
+#pragma HLS ARRAY_PARTITION variable=cos_vals complete dim = 1
+#pragma HLS ARRAY_PARTITION variable=sin_vals complete dim = 1
 
     constexpr int HALF_DIM = HEAD_DIM / 2;
     float q_buf[NUM_HEADS][HEAD_DIM];
@@ -77,11 +75,11 @@ for (int t = 0; t < TREE_WIDTH; t++) {
 #pragma HLS loop_tripcount min=NUM_HEADS max=NUM_HEADS avg=NUM_HEADS
         for (int i = 0; i < HALF_DIM; ++i) {
 #pragma HLS loop_tripcount min=HALF_DIM max=HALF_DIM avg=HALF_DIM
-//#pragma HLS UNROLL
+#pragma HLS UNROLL
             const float a = q_buf[h][i];
             const float b = q_buf[h][i + HALF_DIM];
-            const float c = cfg.cos_vals[i];
-            const float s = cfg.sin_vals[i];
+            const float c = cos_vals[i];
+            const float s = sin_vals[i];
             q_buf[h][i] = a * c - b * s;
             q_buf[h][i + HALF_DIM] = a * s + b * c;
         }
@@ -91,11 +89,11 @@ for (int t = 0; t < TREE_WIDTH; t++) {
 #pragma HLS loop_tripcount min=NUM_KV_HEADS max=NUM_KV_HEADS avg=NUM_KV_HEADS
         for (int i = 0; i < HALF_DIM; ++i) {
 #pragma HLS loop_tripcount min=HALF_DIM max=HALF_DIM avg=HALF_DIM
-//#pragma HLS UNROLL
+#pragma HLS UNROLL
             const float a = k_buf[h][i];
             const float b = k_buf[h][i + HALF_DIM];
-            const float c = cfg.cos_vals[i];
-            const float s = cfg.sin_vals[i];
+            const float c = cos_vals[i];
+            const float s = sin_vals[i];
             k_buf[h][i] = a * c - b * s;
             k_buf[h][i + HALF_DIM] = a * s + b * c;
         }
@@ -130,6 +128,17 @@ for (int t = 0; t < TREE_WIDTH; t++) {
         }
     }
 }
+}
+
+// Compatibility overload: delegates to the flat-pointer version above.
+template <int NUM_HEADS, int NUM_KV_HEADS, int HEAD_DIM, int TREE_WIDTH>
+void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
+                       hls_stream<vec_t<VEC_W>>& q_out,
+                       hls_stream<vec_t<VEC_W>>& k_in,
+                       hls_stream<vec_t<VEC_W>>& k_out,
+                       const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& cfg) {
+    rope_apply_stream<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM, TREE_WIDTH>(
+        q_in, q_out, k_in, k_out, cfg.cos_vals, cfg.sin_vals);
 }
 
 } // namespace hls

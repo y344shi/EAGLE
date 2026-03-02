@@ -100,7 +100,7 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
             best_score,
             w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales, w_up, up_scales, w_down, down_scales,
             hidden_norm_gamma, embed_norm_gamma, post_attn_norm_gamma, final_norm_gamma,
-            rope_cfg, hbm_k, hbm_v,
+            rope_cfg.cos_vals, rope_cfg.sin_vals, hbm_k, hbm_v,
             efficient_lm_head_down_proj_weight,
             efficient_lm_head_qweight_row_major,
             efficient_lm_head_scales_row_major,
@@ -131,7 +131,8 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
     eagle_tier1_top_eagle4_l0(hidden_in_stream, embed_in_stream, reasoning_out, logits_out,
                               w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales,
                               w_up, up_scales, w_down, down_scales, hidden_norm_gamma, embed_norm_gamma,
-                              post_attn_norm_gamma, final_norm_gamma, rope_cfg, hbm_k, hbm_v,
+                              post_attn_norm_gamma, final_norm_gamma,
+                              rope_cfg.cos_vals, rope_cfg.sin_vals, hbm_k, hbm_v,
                               prefix_len, current_depth, parent_indices_per_layer);
 
     TokenOutput lm_result{};
@@ -166,7 +167,8 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
                                const float* embed_norm_gamma,
                                const float* post_attn_norm_gamma,
                                const float* final_norm_gamma,
-                               const tmac::hls::RopeConfig<tmac::hls::NUM_HEADS, tmac::hls::NUM_KV_HEADS, tmac::hls::HEAD_DIM>& rope_cfg,
+                               const float rope_cos_vals[HEAD_DIM / 2],
+                               const float rope_sin_vals[HEAD_DIM / 2],
                                tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_k,
                                tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_v,
                                const uint16_t* efficient_lm_head_down_proj_weight,
@@ -202,7 +204,8 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
     eagle_tier1_top_eagle4_l0(hidden_in_stream, embed_in_stream, reasoning_out, logits_out,
                               w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales,
                               w_up, up_scales, w_down, down_scales, hidden_norm_gamma, embed_norm_gamma,
-                              post_attn_norm_gamma, final_norm_gamma, rope_cfg, hbm_k, hbm_v,
+                              post_attn_norm_gamma, final_norm_gamma,
+                              rope_cos_vals, rope_sin_vals, hbm_k, hbm_v,
                               prefix_len, current_depth, parent_indices_per_layer);
 
     sink_reasoning_stream(reasoning_out, reasoning_state_out);

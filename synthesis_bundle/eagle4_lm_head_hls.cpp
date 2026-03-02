@@ -91,6 +91,7 @@ void eagle4_lm_candidate_logits_row4(
             const int32_t packed = qweight_row_major[static_cast<size_t>(o) * static_cast<size_t>(in_packs) + p];
             for (int j = 0; j < 8; ++j) {
 #pragma HLS loop_tripcount min=kLmTcQpackFactor max=kLmTcQpackFactor avg=kLmTcQpackFactor
+#pragma HLS PIPELINE
                 const int k = k_base + j;
                 const int g = (g_idx != nullptr) ? g_idx[k] : (k / group_size);
                 const float scale = eagle4_fp16_to_float(

@@ -30,6 +30,24 @@ constexpr int kTcLogitsWidth = 1024;  // typical initial logits candidate count
 constexpr int kTcParentAccumSize = kCdtControllerMaxDepth * TREE_WIDTH;  // 256
 constexpr int kTcInitScratchSize = kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK; // 2048
 
+// Prefetch / writeback staging loop tripcounts for eagle4_draft_impl.
+constexpr int kTcStepFlat    = kTcBatch * TREE_WIDTH;                                           //     4
+constexpr int kMaxStepFlat   = kCdtFusedMaxBatch * TREE_WIDTH;                                  //   512
+constexpr int kTcTopkFlat    = kTcTotalTopK;                                                    //    32
+constexpr int kMaxTopkFlat   = kCdtFusedMaxBatch * TREE_WIDTH * kCdtFusedMaxNodeTopK;           //  8192
+constexpr int kTcNodeFlat    = kTcBatch * kTcMaxNodeCount;                                      //   128
+constexpr int kMaxNodeFlat   = kCdtFusedMaxBatch * kHlsMaxNodeCount;                            // 516096
+constexpr int kTcHidStep     = kTcBatch * TREE_WIDTH * HIDDEN;                                  // 16384
+constexpr int kMaxHidStep    = kHlsHiddenBatch * TREE_WIDTH * HIDDEN;                           // 16384
+constexpr int kTcHidOut      = kTcBatch * kTcTopK * HIDDEN;                                     // 32768
+constexpr int kMaxHidOut     = kHlsHiddenBatch * kCdtFusedMaxNodeTopK * HIDDEN;                 // 65536
+constexpr int kTcWorkFlat    = kTcBatch * (kTcMaxVerifyNum + kTcTopK);                          //    72
+constexpr int kMaxWorkFlat   = kCdtFusedMaxBatch * (kCdtFusedMaxBatch + kCdtFusedMaxNodeTopK);  // 18432
+constexpr int kTcOutputFlat  = kTcBatch * kTcTopK;                                              //     8
+constexpr int kMaxOutputFlat = kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK;                        //  2048
+constexpr int kTcSortFlat    = kTcBatch * kTcMaxVerifyNum;                                      //    64
+constexpr int kMaxSortFlat   = kCdtFusedMaxBatch * kCdtFusedMaxBatch;                           // 16384
+
 // Fused step wiring for one draft-tree layer in HLS:
 // 1) score/sort + parent pick + hidden gather,
 // 2) cumulative state update (cumu_tokens, prev/next/side_indexs, work/sort_scores).
@@ -175,7 +193,8 @@ void e4d_slm_topk(
     const float* embed_norm_gamma,
     const float* post_attn_norm_gamma,
     const float* final_norm_gamma,
-    const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& rope_cfg,
+    const float rope_cos_vals[HEAD_DIM / 2],
+    const float rope_sin_vals[HEAD_DIM / 2],
     vec_t<VEC_W>* hbm_k,
     vec_t<VEC_W>* hbm_v,
     const uint16_t* efficient_lm_head_down_proj_weight,

@@ -39,7 +39,7 @@ inline int eagle4_lowest_slot(const float* scores, int topk) {
     return min_pos;
 }
 
-inline void eagle4_lm_down_project(
+void eagle4_lm_down_project(
     const float logits_hidden[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax],
     const uint16_t* down_proj_weight,  // fp16, [rank, hidden_dim]
     float low_rank[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmRankMax],                   // [rank]
@@ -62,7 +62,7 @@ inline void eagle4_lm_down_project(
     }
 }
 
-inline void eagle4_lm_candidate_logits_row4(
+void eagle4_lm_candidate_logits_row4(
     const float low_rank[TREE_WIDTH][kEagle4LmRankMax],  // [TREE_WIDTH, rank]
     const int32_t* qweight_row_major,    // [vocab, rank/8]
     const uint16_t* scales_row_major,    // fp16, [rank/group_size, vocab]
@@ -100,6 +100,7 @@ inline void eagle4_lm_candidate_logits_row4(
             const int k_base = p * 8;
             const int32_t packed = qweight_row_major[static_cast<size_t>(o) * static_cast<size_t>(in_packs) + p];
             for (int j = 0; j < 8; ++j) {
+#pragma HLS PIPELINE off
 #pragma HLS loop_tripcount min=kLmTcQpackFactor max=kLmTcQpackFactor avg=kLmTcQpackFactor
                 const int k = k_base + j;
                 const int g = (g_idx != nullptr) ? g_idx[k] : (k / group_size);
@@ -138,7 +139,7 @@ inline void eagle4_lm_candidate_logits_row4(
     }
 }
 
-inline void eagle4_lm_gather_dot_fp16(
+void eagle4_lm_gather_dot_fp16(
     const float hidden[TREE_WIDTH][kEagle4LmHiddenMax],  // [TREE_WIDTH, hidden_dim]
     const uint16_t* lm_head_weight,      // fp16, [vocab, hidden_dim]
     const int candidate_indices[TREE_WIDTH][kEagle4LmTopKMax],  // [TREE_WIDTH, num_candidates]
@@ -165,7 +166,7 @@ inline void eagle4_lm_gather_dot_fp16(
 // Per-token softmax over gathered logits, producing probabilities for all topk candidates.
 // This is the Gap-2 fix: replaces best_of_candidates with softmax probabilities
 // that feed into the tree expansion fused step.
-inline void eagle4_lm_softmax_topk(
+void eagle4_lm_softmax_topk(
     const int candidate_indices[TREE_WIDTH][kEagle4LmTopKMax],   // [TREE_WIDTH, topk]
     const float gathered_logits[TREE_WIDTH][kEagle4LmTopKMax],   // [TREE_WIDTH, topk]
     int num_candidates,

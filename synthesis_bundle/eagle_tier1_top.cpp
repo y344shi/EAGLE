@@ -170,7 +170,8 @@ void eagle_tier1_top_eagle4_l0(
     const float* embed_norm_gamma,
     const float* post_attn_norm_gamma,
     const float* final_norm_gamma,
-    const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>& rope_cfg,
+    const float rope_cos_vals[HEAD_DIM / 2],
+    const float rope_sin_vals[HEAD_DIM / 2],
     vec_t<VEC_W>* hbm_k,
     vec_t<VEC_W>* hbm_v,
     int prefix_len,
@@ -225,7 +226,7 @@ void eagle_tier1_top_eagle4_l0(
     dense_projection_production_scaled_batched<0, TREE_WIDTH, QKV_INPUT, NUM_KV_HEADS * HEAD_DIM, 128, TMAC_USE_TMAC_QKV>(s_v_in, s_v_proj, w_v, s_v);
 
     // Stage 5: RoPE on Q/K
-    rope_apply_stream<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM, TREE_WIDTH>(s_q_proj, s_q_rot, s_k_proj, s_k_rot, rope_cfg);
+    rope_apply_stream<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM, TREE_WIDTH>(s_q_proj, s_q_rot, s_k_proj, s_k_rot, rope_cos_vals, rope_sin_vals);
 
     // Stage 6: Write new KV to contiguous HBM, then gather prefix + ancestors + self.
     contiguous_kv_write_and_gather<HEAD_DIM, NUM_KV_HEADS, kMaxDraftDepth>(
