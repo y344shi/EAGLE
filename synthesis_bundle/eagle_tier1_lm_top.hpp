@@ -52,11 +52,11 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
                         const wide_vec_t* lm_w7,
                         float* reasoning_state_out,
                         // EAGLE4 efficient LM-head integration inputs (optional for transitional wiring).
-                        const uint16_t* efficient_lm_head_down_proj_weight = nullptr, // fp16 [rank, hidden]
-                        const int32_t* efficient_lm_head_qweight_row_major = nullptr, // int32 [vocab, rank/8]
-                        const uint16_t* efficient_lm_head_scales_row_major = nullptr, // fp16 [rank/group, vocab]
-                        const int32_t* efficient_lm_head_qzeros = nullptr,             // packed int32 [rank/group, ceil(vocab/8)]
-                        const int32_t* efficient_lm_head_g_idx = nullptr,              // optional [rank]
+                        const uint16_t efficient_lm_head_down_proj_weight[tmac::hls::kEagle4LmRankMax * tmac::hls::kEagle4LmHiddenMax] = nullptr, // fp16 [rank, hidden]
+                        const int32_t efficient_lm_head_qweight_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxInPacks] = nullptr, // int32 [vocab, rank/8]
+                        const uint16_t efficient_lm_head_scales_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxGroups] = nullptr, // fp16 [vocab, rank/group]
+                        const int32_t efficient_lm_head_qzeros[tmac::hls::kLmMaxVocabPacked * tmac::hls::kLmMaxGroups] = nullptr,      // packed int32 [ceil(vocab/8), rank/group]
+                        const int32_t efficient_lm_head_g_idx[tmac::hls::kEagle4LmRankMax] = nullptr,                                   // optional [rank]
                         const uint16_t* lm_head_weight = nullptr,                       // fp16 [vocab, hidden]
                         int efficient_lm_rank = 0,
                         int efficient_lm_vocab_size = 0,
@@ -92,11 +92,11 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
                                const float rope_sin_vals[tmac::hls::HEAD_DIM / 2],
                                tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_k,
                                tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_v,
-                               const uint16_t* efficient_lm_head_down_proj_weight, // fp16 [rank, hidden]
-                               const int32_t* efficient_lm_head_qweight_row_major, // int32 [vocab, rank/8]
-                               const uint16_t* efficient_lm_head_scales_row_major, // fp16 [rank/group, vocab]
-                               const int32_t* efficient_lm_head_qzeros,            // packed int32 [rank/group, ceil(vocab/8)] or nullptr
-                               const int32_t* efficient_lm_head_g_idx,             // optional [rank]
+                                const uint16_t efficient_lm_head_down_proj_weight[tmac::hls::kEagle4LmRankMax * tmac::hls::kEagle4LmHiddenMax], // fp16 [rank, hidden]
+                                const int32_t efficient_lm_head_qweight_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxInPacks], // int32 [vocab, rank/8]
+                                const uint16_t efficient_lm_head_scales_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxGroups], // fp16 [vocab, rank/group]
+                                const int32_t efficient_lm_head_qzeros[tmac::hls::kLmMaxVocabPacked * tmac::hls::kLmMaxGroups],      // packed int32 [ceil(vocab/8), rank/group] or nullptr
+                                const int32_t efficient_lm_head_g_idx[tmac::hls::kEagle4LmRankMax],                                   // optional [rank]
                                const uint16_t* lm_head_weight,                      // fp16 [vocab, hidden]
                                int efficient_lm_rank,
                                int efficient_lm_vocab_size,

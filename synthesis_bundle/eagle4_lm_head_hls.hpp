@@ -12,12 +12,16 @@ namespace tmac {
 namespace hls {
 
 constexpr int kEagle4LmHiddenMax = 4096;
-constexpr int kEagle4LmRankMax = 256;
-constexpr int kEagle4LmTopKMax = 1024;
+constexpr int kEagle4LmRankMax = 128;
+constexpr int kEagle4LmTopKMax = 16;
+constexpr int kEagle4LmGroupSize = 64;
 
 // Tripcount constants for C synthesis latency estimation (only for values without existing named constants).
 constexpr int kLmTcQpackFactor = 8;   // int4 values per int32
 constexpr int kLmTcVocab       = 32000; // typical vocab size
+constexpr int kLmMaxInPacks = kEagle4LmRankMax / kLmTcQpackFactor;
+constexpr int kLmMaxGroups = (kEagle4LmRankMax + kEagle4LmGroupSize - 1) / kEagle4LmGroupSize;
+constexpr int kLmMaxVocabPacked = (kLmTcVocab + 7) / 8;
 
 inline float eagle4_fp16_to_float(uint16_t h) {
 #pragma HLS INLINE
@@ -27,11 +31,12 @@ inline float eagle4_fp16_to_float(uint16_t h) {
 }
 
 inline int eagle4_lowest_slot(const float* scores, int topk) {
+#pragma HLS INLINE
     int min_pos = 0;
     float min_val = scores[0];
-    for (int i = 1; i < topk; ++i) {
-#pragma HLS loop_tripcount min=1 max=kEagle4LmTopKMax avg=(1+kEagle4LmTopKMax)/2
-        if (scores[i] < min_val) {
+    for (int i = 1; i < kEagle4LmTopKMax; ++i) {
+#pragma HLS UNROLL
+        if (i < topk && scores[i] < min_val) {
             min_val = scores[i];
             min_pos = i;
         }
@@ -41,17 +46,17 @@ inline int eagle4_lowest_slot(const float* scores, int topk) {
 
 void eagle4_lm_down_project(
     const float logits_hidden[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax],
-    const uint16_t* down_proj_weight,  // fp16, [rank, hidden_dim]
+    const uint16_t down_proj_weight[kEagle4LmRankMax * kEagle4LmHiddenMax],  // fp16, [rank, hidden_dim]
     float low_rank[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmRankMax],
     int hidden_dim,
     int rank);
 
 void eagle4_lm_candidate_logits_row4(
     const float low_rank[TREE_WIDTH][kEagle4LmRankMax],
-    const int32_t* qweight_row_major,
-    const uint16_t* scales_row_major,
-    const int32_t* qzeros_packed,
-    const int32_t* g_idx,
+    const int32_t qweight_row_major[kLmTcVocab * kLmMaxInPacks],
+    const uint16_t scales_row_major[kLmTcVocab * kLmMaxGroups],    // expected [vocab, rank/group_size] (transposed/output-major)
+    const int32_t qzeros_packed[kLmMaxVocabPacked * kLmMaxGroups], // expected [ceil(vocab/8), rank/group_size] (transposed/output-major)
+    const int32_t g_idx[kEagle4LmRankMax],
     int rank,
     int vocab,
     int group_size,

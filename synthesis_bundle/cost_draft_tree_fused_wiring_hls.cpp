@@ -405,11 +405,11 @@ void e4d_slm_topk(
     const float rope_sin_vals[HEAD_DIM / 2],
     vec_t<VEC_W>* hbm_k,
     vec_t<VEC_W>* hbm_v,
-    const uint16_t* efficient_lm_head_down_proj_weight,
-    const int32_t* efficient_lm_head_qweight_row_major,
-    const uint16_t* efficient_lm_head_scales_row_major,
-    const int32_t* efficient_lm_head_qzeros,
-    const int32_t* efficient_lm_head_g_idx,
+    const uint16_t efficient_lm_head_down_proj_weight[tmac::hls::kEagle4LmRankMax * tmac::hls::kEagle4LmHiddenMax],
+    const int32_t efficient_lm_head_qweight_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxInPacks],
+    const uint16_t efficient_lm_head_scales_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxGroups],
+    const int32_t efficient_lm_head_qzeros[tmac::hls::kLmMaxVocabPacked * tmac::hls::kLmMaxGroups],
+    const int32_t efficient_lm_head_g_idx[tmac::hls::kEagle4LmRankMax],
     const uint16_t* lm_head_weight,
     int efficient_lm_rank,
     int efficient_lm_vocab_size,
@@ -421,6 +421,7 @@ void e4d_slm_topk(
     int64_t* topk_tokens_sampling_out          // packed [batch, tree_width * node_top_k]
 ) {
 #pragma HLS INLINE off
+#pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
     if (input_hidden_states == nullptr || reasoning_hidden_states_out == nullptr ||
         topk_probas_sampling_out == nullptr || topk_tokens_sampling_out == nullptr) {
         return;
@@ -632,11 +633,11 @@ void eagle4_draft_impl(
     const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>* rope_cfg_table,
     vec_t<VEC_W>* hbm_k,
     vec_t<VEC_W>* hbm_v,
-    const uint16_t* efficient_lm_head_down_proj_weight,
-    const int32_t* efficient_lm_head_qweight_row_major,
-    const uint16_t* efficient_lm_head_scales_row_major,
-    const int32_t* efficient_lm_head_qzeros,
-    const int32_t* efficient_lm_head_g_idx,
+    const uint16_t efficient_lm_head_down_proj_weight[tmac::hls::kEagle4LmRankMax * tmac::hls::kEagle4LmHiddenMax],
+    const int32_t efficient_lm_head_qweight_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxInPacks],
+    const uint16_t efficient_lm_head_scales_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxGroups],
+    const int32_t efficient_lm_head_qzeros[tmac::hls::kLmMaxVocabPacked * tmac::hls::kLmMaxGroups],
+    const int32_t efficient_lm_head_g_idx[tmac::hls::kEagle4LmRankMax],
     const uint16_t* lm_head_weight,
     int efficient_lm_rank,
     int efficient_lm_vocab_size,
@@ -821,6 +822,28 @@ void eagle4_draft_impl(
     int64_t uram_side_indexs[kCdtFusedMaxBatch * kHlsMaxNodeCount];
 #pragma HLS BIND_STORAGE variable=uram_side_indexs type=ram_2p impl=uram
 
+    // BRAM staging: efficient LM-head quantized weights (prefetched once at entry)
+    constexpr int kLmGroupSize = 64;
+    constexpr int kLmMaxInPacks = kEagle4LmRankMax / 8;
+    constexpr int kLmMaxGroups = (kEagle4LmRankMax + kLmGroupSize - 1) / kLmGroupSize;
+    constexpr int kLmMaxVocabPacked = (kLmTcVocab + 7) / 8;
+
+    int32_t bram_efficient_qweight[kLmTcVocab * kLmMaxInPacks];
+    uint16_t bram_efficient_scales[kLmTcVocab * kLmMaxGroups];
+    int32_t bram_efficient_qzeros[kLmMaxVocabPacked * kLmMaxGroups];
+    int32_t bram_efficient_g_idx[kEagle4LmRankMax];
+#pragma HLS BIND_STORAGE variable=bram_efficient_qweight type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=bram_efficient_scales type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=bram_efficient_qzeros type=ram_2p impl=bram
+#pragma HLS ARRAY_PARTITION variable=bram_efficient_qweight type=cyclic factor=128 dim=1
+#pragma HLS ARRAY_PARTITION variable=bram_efficient_scales type=cyclic factor=128 dim=1
+#pragma HLS ARRAY_PARTITION variable=bram_efficient_qzeros type=cyclic factor=128 dim=1
+#pragma HLS ARRAY_PARTITION variable=bram_efficient_g_idx type=complete dim=1
+
+    const int lm_in_packs = efficient_lm_rank / 8;
+    const int lm_groups = (efficient_lm_rank + kLmGroupSize - 1) / kLmGroupSize;
+    const int lm_vocab_packed = (efficient_lm_vocab_size + 7) / 8;
+
     int loop_start_depth = 0;
     const int step_flat  = batch_size * max_tree_width;
     const int topk_flat  = batch_size * max_tree_width * node_top_k;
@@ -831,6 +854,38 @@ void eagle4_draft_impl(
 
     // ── Pre-loop: AXI → BRAM/URAM (one-time prefetch) ────────────────────
     {
+    load_lm_qweight:
+        for (int i = 0; i < efficient_lm_vocab_size * lm_in_packs; ++i) {
+            #pragma HLS loop_tripcount min=1 max=kLmTcVocab*(kEagle4LmRankMax/8) avg=kLmTcVocab*(kEagle4LmRankMax/8)
+            #pragma HLS PIPELINE II=1
+            bram_efficient_qweight[i] = efficient_lm_head_qweight_row_major[i];
+        }
+    load_lm_scales:
+        for (int i = 0; i < efficient_lm_vocab_size * lm_groups; ++i) {
+            #pragma HLS loop_tripcount min=1 max=kLmTcVocab*((kEagle4LmRankMax+kLmGroupSize-1)/kLmGroupSize) avg=kLmTcVocab*((kEagle4LmRankMax+kLmGroupSize-1)/kLmGroupSize)
+            #pragma HLS PIPELINE II=1
+            bram_efficient_scales[i] = efficient_lm_head_scales_row_major[i];
+        }
+        if (efficient_lm_head_qzeros != nullptr) {
+        load_lm_qzeros:
+            for (int i = 0; i < lm_vocab_packed * lm_groups; ++i) {
+                #pragma HLS loop_tripcount min=1 max=(kLmTcVocab+7)/8*((kEagle4LmRankMax+kLmGroupSize-1)/kLmGroupSize) avg=(kLmTcVocab+7)/8*((kEagle4LmRankMax+kLmGroupSize-1)/kLmGroupSize)
+                #pragma HLS PIPELINE II=1
+                bram_efficient_qzeros[i] = efficient_lm_head_qzeros[i];
+            }
+        }
+    load_lm_gidx:
+        for (int i = 0; i < kEagle4LmRankMax; ++i) {
+            #pragma HLS loop_tripcount min=kEagle4LmRankMax max=kEagle4LmRankMax avg=kEagle4LmRankMax
+            #pragma HLS PIPELINE II=1
+            if (i < efficient_lm_rank) {
+                bram_efficient_g_idx[i] =
+                    (efficient_lm_head_g_idx != nullptr) ? efficient_lm_head_g_idx[i] : (i / kLmGroupSize);
+            } else {
+                bram_efficient_g_idx[i] = 0;
+            }
+        }
+
     load_step_tokens:
         for (int i = 0; i < step_flat; ++i) {
             #pragma HLS loop_tripcount min=1 max=kMaxStepFlat avg=kTcStepFlat
@@ -1130,10 +1185,10 @@ orchestrator_depth_loop:
             bram_rope_cos_vals, bram_rope_sin_vals,
             hbm_k, hbm_v,
             efficient_lm_head_down_proj_weight,
-            efficient_lm_head_qweight_row_major,
-            efficient_lm_head_scales_row_major,
-            efficient_lm_head_qzeros,
-            efficient_lm_head_g_idx,
+            bram_efficient_qweight,
+            bram_efficient_scales,
+            bram_efficient_qzeros,
+            bram_efficient_g_idx,
             lm_head_weight,
             efficient_lm_rank,
             efficient_lm_vocab_size,
@@ -1424,11 +1479,11 @@ void eagle4_draft(
     const tmac::hls::RopeConfig<tmac::hls::NUM_HEADS, tmac::hls::NUM_KV_HEADS, tmac::hls::HEAD_DIM>* rope_cfg_table,
     tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_k,
     tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_v,
-    const uint16_t* efficient_lm_head_down_proj_weight,
-    const int32_t* efficient_lm_head_qweight_row_major,
-    const uint16_t* efficient_lm_head_scales_row_major,
-    const int32_t* efficient_lm_head_qzeros,
-    const int32_t* efficient_lm_head_g_idx,
+    const uint16_t efficient_lm_head_down_proj_weight[tmac::hls::kEagle4LmRankMax * tmac::hls::kEagle4LmHiddenMax],
+    const int32_t efficient_lm_head_qweight_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxInPacks],
+    const uint16_t efficient_lm_head_scales_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxGroups],
+    const int32_t efficient_lm_head_qzeros[tmac::hls::kLmMaxVocabPacked * tmac::hls::kLmMaxGroups],
+    const int32_t efficient_lm_head_g_idx[tmac::hls::kEagle4LmRankMax],
     const uint16_t* lm_head_weight,
     int efficient_lm_rank,
     int efficient_lm_vocab_size,

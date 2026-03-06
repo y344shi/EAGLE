@@ -178,6 +178,7 @@ void eagle_tier1_top_eagle4_l0(
     int current_depth,
     const int* parent_indices_per_layer
 ) {
+#pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
 
 #pragma HLS DATAFLOW
     hls_stream<vec_t<VEC_W>> s_hidden_norm_in("s_hidden_norm_in");

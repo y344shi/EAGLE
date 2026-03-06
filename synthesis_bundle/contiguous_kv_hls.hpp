@@ -74,6 +74,7 @@ void contiguous_kv_gather(
     hls_stream<vec_t<VEC_W>> v_out[kContiguousKvTreeWidth]
 ) {
 #pragma HLS INLINE off
+#pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
     constexpr int VECS_PER_TOKEN = (NUM_KV_HEADS * HEAD_DIM) / VEC_W;
     static_assert((NUM_KV_HEADS * HEAD_DIM) % VEC_W == 0, "KV width must align to VEC_W");
 
@@ -154,6 +155,7 @@ void contiguous_kv_write_and_gather(
     hls_stream<vec_t<VEC_W>> v_out[kContiguousKvTreeWidth]
 ) {
 #pragma HLS INLINE off
+#pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
     // Write first (so self-token is in HBM for gather phase 3).
     contiguous_kv_write<HEAD_DIM, NUM_KV_HEADS>(
         k_in, v_in, hbm_k, hbm_v,

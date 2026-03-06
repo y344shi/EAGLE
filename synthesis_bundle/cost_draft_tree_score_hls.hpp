@@ -91,6 +91,19 @@ void e4d_score_core(
     int64_t* output_tokens               // [batch_size, node_top_k] (optional)
 ) {
 #pragma HLS INLINE off
+#pragma HLS BIND_STORAGE variable=topk_probas_sampling type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=topk_tokens_sampling type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=last_layer_scores type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=input_hidden_states type=ram_2p impl=bram
+#pragma HLS ARRAY_PARTITION variable=input_hidden_states type=cyclic factor=16 dim=1
+#pragma HLS BIND_STORAGE variable=curr_layer_scores type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=sort_layer_scores type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=sort_layer_indices type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=cache_topk_indices type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=parent_indices_in_layer type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=output_hidden_states type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=remapped_topk_tokens_sampling type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=output_tokens type=ram_2p impl=bram
     const int total_topk = tree_width * node_top_k;
     if (total_topk > kCdtSortWidth || total_topk <= 0) {
         return;

@@ -67,11 +67,11 @@ void eagle_tier1_lm_top(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& hidden_
                         const wide_vec_t* lm_w6,
                         const wide_vec_t* lm_w7,
                         float* reasoning_state_out,
-                        const uint16_t* efficient_lm_head_down_proj_weight,
-                        const int32_t* efficient_lm_head_qweight_row_major,
-                        const uint16_t* efficient_lm_head_scales_row_major,
-                        const int32_t* efficient_lm_head_qzeros,
-                        const int32_t* efficient_lm_head_g_idx,
+                        const uint16_t efficient_lm_head_down_proj_weight[tmac::hls::kEagle4LmRankMax * tmac::hls::kEagle4LmHiddenMax],
+                        const int32_t efficient_lm_head_qweight_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxInPacks],
+                        const uint16_t efficient_lm_head_scales_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxGroups],
+                        const int32_t efficient_lm_head_qzeros[tmac::hls::kLmMaxVocabPacked * tmac::hls::kLmMaxGroups],
+                        const int32_t efficient_lm_head_g_idx[tmac::hls::kEagle4LmRankMax],
                         const uint16_t* lm_head_weight,
                         int efficient_lm_rank,
                         int efficient_lm_vocab_size,
@@ -171,11 +171,11 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
                                const float rope_sin_vals[tmac::hls::HEAD_DIM / 2],
                                tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_k,
                                tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_v,
-                               const uint16_t* efficient_lm_head_down_proj_weight,
-                               const int32_t* efficient_lm_head_qweight_row_major,
-                               const uint16_t* efficient_lm_head_scales_row_major,
-                               const int32_t* efficient_lm_head_qzeros,
-                               const int32_t* efficient_lm_head_g_idx,
+                               const uint16_t efficient_lm_head_down_proj_weight[tmac::hls::kEagle4LmRankMax * tmac::hls::kEagle4LmHiddenMax],
+                               const int32_t efficient_lm_head_qweight_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxInPacks],
+                               const uint16_t efficient_lm_head_scales_row_major[tmac::hls::kLmTcVocab * tmac::hls::kLmMaxGroups],
+                               const int32_t efficient_lm_head_qzeros[tmac::hls::kLmMaxVocabPacked * tmac::hls::kLmMaxGroups],
+                               const int32_t efficient_lm_head_g_idx[tmac::hls::kEagle4LmRankMax],
                                const uint16_t* lm_head_weight,
                                int efficient_lm_rank,
                                int efficient_lm_vocab_size,
@@ -186,6 +186,19 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
                                int prefix_len,
                                int current_depth,
                                const int* parent_indices_per_layer) {
+#pragma HLS INLINE off
+#pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=efficient_lm_head_qweight_row_major type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=efficient_lm_head_scales_row_major type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=efficient_lm_head_qzeros type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=efficient_lm_head_g_idx type=ram_2p impl=bram
+#pragma HLS ARRAY_PARTITION variable=efficient_lm_head_qweight_row_major type=cyclic factor=128 dim=1
+#pragma HLS ARRAY_PARTITION variable=efficient_lm_head_scales_row_major type=cyclic factor=128 dim=1
+#pragma HLS ARRAY_PARTITION variable=efficient_lm_head_qzeros type=cyclic factor=128 dim=1
+#pragma HLS ARRAY_PARTITION variable=efficient_lm_head_g_idx type=complete dim=1
+#pragma HLS BIND_STORAGE variable=reasoning_state_out type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=candidate_indices_out type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=gathered_logits_out type=ram_2p impl=bram
     int rank = efficient_lm_rank;
     int vocab = efficient_lm_vocab_size;
     int topk = efficient_lm_num_candidates;
@@ -218,7 +231,12 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
     int topk_tokens[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];
     float topk_probas[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];
 #pragma HLS ARRAY_PARTITION variable=logits_hidden cyclic factor=16 dim=2
-#pragma HLS ARRAY_PARTITION variable=low_rank cyclic factor=16 dim=2
+#pragma HLS ARRAY_PARTITION variable=low_rank type=complete dim=0
+#pragma HLS ARRAY_PARTITION variable=candidate_indices type=complete dim=0
+#pragma HLS ARRAY_PARTITION variable=candidate_scores type=complete dim=0
+#pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
+#pragma HLS ARRAY_PARTITION variable=topk_tokens type=complete dim=0
+#pragma HLS ARRAY_PARTITION variable=topk_probas type=complete dim=0
 
     collect_logits_stream(logits_out, logits_hidden);
 
@@ -237,7 +255,7 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
         efficient_lm_head_g_idx,
         rank,
         vocab,
-        128,
+        64,
         nullptr,
         topk,
         candidate_indices,
