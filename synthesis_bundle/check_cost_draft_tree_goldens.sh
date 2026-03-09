@@ -14,9 +14,10 @@ usage() {
 Usage: $(basename "$0") [options] [case_dir]
 
 Options:
-  --dry-run   Parse-only checks (no numerical TB execution)
-  --full      Run full TB comparisons (default)
-  -h, --help  Show this help
+  --dry-run      Parse-only checks (no numerical TB execution)
+  --full         Run full TB comparisons (default)
+  --require-e2e  Require draft E2E case + sidecars and sanity-check core keys
+  -h, --help     Show this help
 USAGE
 }
 
@@ -24,6 +25,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN_ONLY=1; shift ;;
     --full) DRY_RUN_ONLY=0; shift ;;
+    --require-e2e) REQUIRE_E2E=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
       CASE_DIR="$1"
@@ -34,6 +36,12 @@ done
 
 CXX="${CXX:-g++}"
 CXXFLAGS=(-std=c++17 -I.)
+HOST_LINK_INCLUDES=(
+  -include eagle4_lm_head_hls.cpp
+  -include eagle_tier1_lm_top.cpp
+  -include eagle_tier1_top.cpp
+  -include cost_draft_tree_fused_wiring_hls.cpp
+)
 
 cd "${ROOT_DIR}"
 
@@ -43,6 +51,9 @@ if [[ ${DRY_RUN_ONLY} -eq 1 ]]; then
   echo "[info] mode           : dry-run parser checks"
 else
   echo "[info] mode           : full TB comparisons"
+fi
+if [[ ${REQUIRE_E2E} -eq 1 ]]; then
+  echo "[info] require_e2e    : enabled"
 fi
 
 echo "[info] compiling dry-run checkers..."
@@ -152,6 +163,61 @@ for spec in "${SPECS[@]}"; do
     invalid=$((invalid + 1))
   fi
 done
+
+if [[ ${REQUIRE_E2E} -eq 1 ]]; then
+  e2e_case="${CASE_DIR}/cost_draft_tree_draft_e2e_case.txt"
+  e2e_k="${CASE_DIR}/cost_draft_tree_draft_e2e_prefix_k_layer0.fp16.bin"
+  e2e_v="${CASE_DIR}/cost_draft_tree_draft_e2e_prefix_v_layer0.fp16.bin"
+  for f in "${e2e_case}" "${e2e_k}" "${e2e_v}"; do
+    if [[ ! -s "${f}" ]]; then
+      echo "[missing] $(basename "${f}")"
+      missing=$((missing + 1))
+    fi
+  done
+  if [[ -s "${e2e_case}" ]]; then
+    if "${PYTHON:-python3}" - "${e2e_case}" > /tmp/cdt_e2e_case_check.log 2>&1 <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+required = {
+    "meta",
+    "expected_output_tokens",
+    "expected_output_scores",
+    "recurrent_topk_tokens",
+    "policy_next_tree_width",
+    "policy_next_verify_num",
+}
+seen = set()
+with path.open("r", encoding="utf-8") as f:
+    for raw in f:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            raise SystemExit(f"invalid line: {line}")
+        key = parts[0]
+        count = int(parts[1])
+        payload = parts[2:]
+        if len(payload) != count:
+            raise SystemExit(f"payload size mismatch for key={key}")
+        seen.add(key)
+
+missing = sorted(required - seen)
+if missing:
+    raise SystemExit("missing keys: " + ",".join(missing))
+print("[e2e-ok] core E2E keys present")
+PY
+    then
+      sed -n '1,2p' /tmp/cdt_e2e_case_check.log
+    else
+      echo "[invalid] cost_draft_tree_draft_e2e_case.txt"
+      cat /tmp/cdt_e2e_case_check.log
+      invalid=$((invalid + 1))
+    fi
+  fi
+fi
 
 manifest="${CASE_DIR}/cost_draft_tree_case_manifest.txt"
 if [[ -f "${manifest}" ]]; then

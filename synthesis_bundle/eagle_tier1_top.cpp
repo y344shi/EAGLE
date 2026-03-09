@@ -180,6 +180,11 @@ void eagle_tier1_top_eagle4_l0(
 ) {
 #pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
 
+    // float hidden_norm_gamma[] = 
+    // float embed_norm_gamma[] = 
+    // float post_attn_norm_gamma[] = 
+    // float final_norm_gamma[] = 
+
 #pragma HLS DATAFLOW
     hls_stream<vec_t<VEC_W>> s_hidden_norm_in("s_hidden_norm_in");
     hls_stream<vec_t<VEC_W>> s_hidden_residual("s_hidden_residual");

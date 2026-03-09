@@ -275,7 +275,7 @@ inline void e4d_score_with_tokens(
         output_tokens);
 }
 
-// Backward-compatible wrappers used by existing testbenches/docs.
+// Backward-compatible aliases used by existing TBs/scripts.
 inline void cost_draft_tree_layer_score_hls(
     const float* topk_probas_sampling,
     const float* last_layer_scores,
@@ -291,7 +291,6 @@ inline void cost_draft_tree_layer_score_hls(
     int64_t* cache_topk_indices,
     int64_t* parent_indices_in_layer,
     float* output_hidden_states) {
-#pragma HLS INLINE
     e4d_score(
         topk_probas_sampling,
         last_layer_scores,
@@ -330,7 +329,6 @@ inline void cost_draft_tree_layer_score_hls_with_tokens(
     float* output_hidden_states,
     int64_t* remapped_topk_tokens_sampling,
     int64_t* output_tokens) {
-#pragma HLS INLINE
     e4d_score_with_tokens(
         topk_probas_sampling,
         topk_tokens_sampling,
