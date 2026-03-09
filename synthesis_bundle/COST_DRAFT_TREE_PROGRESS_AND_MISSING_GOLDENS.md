@@ -42,7 +42,23 @@ Tracks implementation progress and missing CUDA/H100 golden artifacts for CostDr
 - [done] `cost_draft_tree_update_case.txt`
 - [done] `cost_draft_tree_controller_case.txt`
 - [done] `cost_draft_tree_fused_wiring_case.txt`
+- [done] `cost_draft_tree_multilayer_orchestrator_case.txt`
 - [done] `cost_draft_tree_case_manifest.txt`
+
+## True E2E capture checklist (draft flow)
+- [required] `cost_draft_tree_draft_e2e_case.txt`
+- [required] `cost_draft_tree_draft_e2e_prefix_k_layer0.fp16.bin`
+- [required] `cost_draft_tree_draft_e2e_prefix_v_layer0.fp16.bin`
+- [required] profile roots:
+  - mid/default at `<case_dir>/`
+  - low at `<case_dir>/feature_low/`
+  - high at `<case_dir>/feature_high/`
+- [required] each profile must pass full and dry-run:
+  - `check_cost_draft_tree_goldens.sh --require-e2e <profile_case_dir>`
+- [required] cross-profile consistency:
+  - `expected_output_tokens` must match
+  - `recurrent_topk_tokens` must match
+  - `expected_output_scores` max abs delta <= 1e-4
 
 ## Runtime tensor gap status (from earlier capture contract)
 - [done] Tier1 runtime tensors captured: `tensor_005/006/007/011/014`

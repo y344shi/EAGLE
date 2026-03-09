@@ -29,7 +29,7 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
 
     for(int k=0; k < HIDDEN_DIM; k++) {
         #pragma HLS PIPELINE II=1
-        gamma_local[k] = gamma[k];
+        gamma_local[k] = gamma[k]; // gamma_local = [4, 65, 42, 3, 6 ,1 ... 5];
     }
 
     // rms norm each of TREE_WIDTH tokens

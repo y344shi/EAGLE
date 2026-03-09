@@ -265,6 +265,83 @@ void e4d_score_with_tokens(
         output_tokens);
 }
 
+// Backward-compatible aliases used by existing TBs/scripts.
+inline void cost_draft_tree_layer_score_hls(
+    const float* topk_probas_sampling,
+    const float* last_layer_scores,
+    const float* input_hidden_states,
+    int batch_size,
+    int node_top_k,
+    int tree_width,
+    int hidden_size,
+    int cumu_count,
+    float* curr_layer_scores,
+    float* sort_layer_scores,
+    int64_t* sort_layer_indices,
+    int64_t* cache_topk_indices,
+    int64_t* parent_indices_in_layer,
+    float* output_hidden_states) {
+    e4d_score(
+        topk_probas_sampling,
+        last_layer_scores,
+        input_hidden_states,
+        batch_size,
+        node_top_k,
+        tree_width,
+        hidden_size,
+        cumu_count,
+        curr_layer_scores,
+        sort_layer_scores,
+        sort_layer_indices,
+        cache_topk_indices,
+        parent_indices_in_layer,
+        output_hidden_states);
+}
+
+inline void cost_draft_tree_layer_score_hls_with_tokens(
+    const float* topk_probas_sampling,
+    const int64_t* topk_tokens_sampling,
+    const float* last_layer_scores,
+    const float* input_hidden_states,
+    const int64_t* hot_token_id,
+    int64_t hot_token_vocab_size,
+    bool use_hot_token_id,
+    int batch_size,
+    int node_top_k,
+    int tree_width,
+    int hidden_size,
+    int cumu_count,
+    float* curr_layer_scores,
+    float* sort_layer_scores,
+    int64_t* sort_layer_indices,
+    int64_t* cache_topk_indices,
+    int64_t* parent_indices_in_layer,
+    float* output_hidden_states,
+    int64_t* remapped_topk_tokens_sampling,
+    int64_t* output_tokens) {
+    e4d_score_with_tokens(
+        topk_probas_sampling,
+        topk_tokens_sampling,
+        last_layer_scores,
+        input_hidden_states,
+        hot_token_id,
+        hot_token_vocab_size,
+        use_hot_token_id,
+        batch_size,
+        node_top_k,
+        tree_width,
+        hidden_size,
+        cumu_count,
+        curr_layer_scores,
+        sort_layer_scores,
+        sort_layer_indices,
+        cache_topk_indices,
+        parent_indices_in_layer,
+        output_hidden_states,
+        remapped_topk_tokens_sampling,
+        output_tokens);
+}
+
 } // namespace hls
 } // namespace tmac
 

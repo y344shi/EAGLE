@@ -194,6 +194,59 @@ batch_loop:
     }
 }
 
+// Backward-compatible alias used by existing TBs/scripts.
+inline void cost_draft_tree_update_state_hls(
+    const float* topk_probas,
+    const int64_t* topk_tokens,
+    const float* sorted_scores,
+    const int64_t* sorted_indexs,
+    const int64_t* parent_indexs,
+    const int64_t* topk_indexs,
+    int batch_size,
+    int node_top_k,
+    int tree_width,
+    int cumu_count,
+    int verify_num,
+    int curr_depth,
+    int max_node_count,
+    int max_verify_num,
+    int64_t* cumu_tokens,
+    float* cumu_scores,
+    int64_t* cumu_deltas,
+    int64_t* prev_indexs,
+    int64_t* next_indexs,
+    int64_t* side_indexs,
+    float* output_scores,
+    int64_t* output_tokens,
+    float* work_scores,
+    float* sort_scores) {
+    e4d_update_state(
+        topk_probas,
+        topk_tokens,
+        sorted_scores,
+        sorted_indexs,
+        parent_indexs,
+        topk_indexs,
+        batch_size,
+        node_top_k,
+        tree_width,
+        cumu_count,
+        verify_num,
+        curr_depth,
+        max_node_count,
+        max_verify_num,
+        cumu_tokens,
+        cumu_scores,
+        cumu_deltas,
+        prev_indexs,
+        next_indexs,
+        side_indexs,
+        output_scores,
+        output_tokens,
+        work_scores,
+        sort_scores);
+}
+
 } // namespace hls
 } // namespace tmac
 

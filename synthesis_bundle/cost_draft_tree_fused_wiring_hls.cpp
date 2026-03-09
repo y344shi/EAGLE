@@ -1634,3 +1634,169 @@ void eagle4_draft(
         initial_topk_tokens,
         initial_hidden_states);
 }
+
+void eagle4_draft_bs1_fixed(
+    int tree_depth,
+    int curr_depth_start,
+    int prefix_len,
+    int fixed_tree_width,
+    int fixed_verify_num,
+    int* io_cumu_count,
+    int* final_tree_width,
+    int* final_verify_num,
+    int64_t* step_input_tokens,
+    float* step_input_hidden_states,
+    float* step_last_layer_scores,
+    int64_t* step_topk_indexs_prev,
+    float* step_topk_probas_sampling,
+    int64_t* step_topk_tokens_sampling,
+    const tmac::hls::pack512* w_q,     const float* s_q,
+    const tmac::hls::pack512* w_k,     const float* s_k,
+    const tmac::hls::pack512* w_v,     const float* s_v,
+    const tmac::hls::pack512* w_o,     const float* s_o,
+    const tmac::hls::pack512* w_gate,  const float* gate_scales,
+    const tmac::hls::pack512* w_up,    const float* up_scales,
+    const tmac::hls::pack512* w_down,  const float* down_scales,
+    const float* hidden_norm_gamma,
+    const float* embed_norm_gamma,
+    const float* post_attn_norm_gamma,
+    const float* final_norm_gamma,
+    const tmac::hls::RopeConfig<tmac::hls::NUM_HEADS, tmac::hls::NUM_KV_HEADS, tmac::hls::HEAD_DIM>* rope_cfg_table,
+    tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_k,
+    tmac::hls::vec_t<tmac::hls::VEC_W>* hbm_v,
+    const uint16_t* efficient_lm_head_down_proj_weight,
+    const int32_t* efficient_lm_head_qweight_row_major,
+    const uint16_t* efficient_lm_head_scales_row_major,
+    const int32_t* efficient_lm_head_qzeros,
+    const int32_t* efficient_lm_head_g_idx,
+    const uint16_t* lm_head_weight,
+    int efficient_lm_rank,
+    int efficient_lm_vocab_size,
+    const int64_t* hot_token_id,
+    int64_t hot_token_vocab_size,
+    bool use_hot_token_id,
+    int64_t* cumu_tokens,
+    float* cumu_scores,
+    int64_t* cumu_deltas,
+    int64_t* prev_indexs,
+    int64_t* next_indexs,
+    int64_t* side_indexs,
+    float* output_scores,
+    int64_t* output_tokens,
+    float* work_scores,
+    float* sort_scores,
+    float* output_hidden_states,
+    int64_t* cache_topk_indices,
+    float* dbg_curr_layer_scores,
+    float* dbg_sort_layer_scores,
+    int64_t* dbg_sort_layer_indices,
+    int64_t* dbg_parent_indices_in_layer,
+    int64_t* dbg_remapped_topk_tokens,
+    int* executed_depths,
+    bool* stopped_early,
+    bool enable_initial_loop,
+    const float* initial_logits,
+    const int64_t* initial_candidate_indices,
+    int initial_logits_width,
+    const float* initial_topk_probas,
+    const int64_t* initial_topk_tokens,
+    const float* initial_hidden_states) {
+#pragma HLS INLINE off
+    const int batch_size = tmac::hls::kE4dTransitionBatchSize;
+    const int node_top_k = tmac::hls::kE4dTransitionNodeTopK;
+    const int hidden_size = tmac::hls::kE4dTransitionHiddenSize;
+    const int max_node_count = tmac::hls::kE4dTransitionMaxNodeCount;
+    const int max_verify_num = tmac::hls::kE4dTransitionMaxVerifyNum;
+    const int max_tree_width = tmac::hls::kE4dTransitionMaxTreeWidth;
+
+    int io_tree_width_local = tmac::hls::e4d_clamp_int(fixed_tree_width, 1, max_tree_width);
+    io_tree_width_local = tmac::hls::e4d_clamp_int(io_tree_width_local, 1, node_top_k);
+    int io_verify_num_local = tmac::hls::e4d_clamp_int(fixed_verify_num, 1, max_verify_num);
+
+    int io_cumu_count_local = 0;
+    if (io_cumu_count != nullptr) {
+        io_cumu_count_local = *io_cumu_count;
+    }
+    io_cumu_count_local = tmac::hls::e4d_clamp_int(io_cumu_count_local, 0, max_node_count);
+
+    tmac::hls::eagle4_draft_impl(
+        tree_depth,
+        curr_depth_start,
+        nullptr,
+        nullptr,
+        nullptr,
+        0,
+        false,
+        step_input_tokens,
+        step_input_hidden_states,
+        step_last_layer_scores,
+        step_topk_indexs_prev,
+        step_topk_probas_sampling,
+        step_topk_tokens_sampling,
+        w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales, w_up, up_scales, w_down,
+        down_scales,
+        hidden_norm_gamma,
+        embed_norm_gamma,
+        post_attn_norm_gamma,
+        final_norm_gamma,
+        rope_cfg_table,
+        hbm_k,
+        hbm_v,
+        efficient_lm_head_down_proj_weight,
+        efficient_lm_head_qweight_row_major,
+        efficient_lm_head_scales_row_major,
+        efficient_lm_head_qzeros,
+        efficient_lm_head_g_idx,
+        lm_head_weight,
+        efficient_lm_rank,
+        efficient_lm_vocab_size,
+        prefix_len,
+        hot_token_id,
+        hot_token_vocab_size,
+        use_hot_token_id,
+        batch_size,
+        node_top_k,
+        hidden_size,
+        &io_tree_width_local,
+        &io_verify_num_local,
+        &io_cumu_count_local,
+        max_node_count,
+        max_verify_num,
+        max_tree_width,
+        cumu_tokens,
+        cumu_scores,
+        cumu_deltas,
+        prev_indexs,
+        next_indexs,
+        side_indexs,
+        output_scores,
+        output_tokens,
+        work_scores,
+        sort_scores,
+        output_hidden_states,
+        cache_topk_indices,
+        dbg_curr_layer_scores,
+        dbg_sort_layer_scores,
+        dbg_sort_layer_indices,
+        dbg_parent_indices_in_layer,
+        dbg_remapped_topk_tokens,
+        executed_depths,
+        stopped_early,
+        enable_initial_loop,
+        initial_logits,
+        initial_candidate_indices,
+        initial_logits_width,
+        initial_topk_probas,
+        initial_topk_tokens,
+        initial_hidden_states);
+
+    if (io_cumu_count != nullptr) {
+        *io_cumu_count = io_cumu_count_local;
+    }
+    if (final_tree_width != nullptr) {
+        *final_tree_width = io_tree_width_local;
+    }
+    if (final_verify_num != nullptr) {
+        *final_verify_num = io_verify_num_local;
+    }
+}
