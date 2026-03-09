@@ -126,7 +126,7 @@ done
 
 if [[ ${RUN_CHECK} -eq 1 ]]; then
   echo "[self-check] running full TB checks against dumped cases..."
-  "${SCRIPT_DIR}/check_cost_draft_tree_goldens.sh" "${OUTPUT_DIR}"
+  bash "${SCRIPT_DIR}/check_cost_draft_tree_goldens.sh" "${OUTPUT_DIR}"
 fi
 
 echo "[PASS] All CostDraftTree dump files generated with expected names/order."

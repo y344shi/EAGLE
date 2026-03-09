@@ -439,28 +439,6 @@ void e4d_slm_topk(
     }
 
 slm_batch_loop:
-#ifndef __SYNTHESIS__
-    if (batch_size > 0 && tree_width > 0 && hidden_size > 0) {
-        std::fprintf(stderr, "[e4d_slm_topk] embed_ptr=%s, hidden[0..3]={%.6f,%.6f,%.6f,%.6f}",
-                     input_embed_states ? "non-null" : "NULL",
-                     input_hidden_states[0], input_hidden_states[1],
-                     input_hidden_states[2], input_hidden_states[3]);
-        if (input_embed_states) {
-            std::fprintf(stderr, ", embed[0..3]={%.6f,%.6f,%.6f,%.6f}",
-                         input_embed_states[0], input_embed_states[1],
-                         input_embed_states[2], input_embed_states[3]);
-            // Check if token 0 and token 1 embeds differ
-            if (tree_width > 1) {
-                int diffs = 0;
-                for (int i = 0; i < hidden_size; ++i) {
-                    if (input_embed_states[i] != input_embed_states[hidden_size + i]) ++diffs;
-                }
-                std::fprintf(stderr, ", embed_t0_vs_t1_diffs=%d/%d", diffs, hidden_size);
-            }
-        }
-        std::fprintf(stderr, "\n");
-    }
-#endif
     for (int b = 0; b < batch_size; ++b) {
 #pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
         hls_stream<vec_t<VEC_W>> hidden_in_stream("cdt_hidden_in_stream");
@@ -710,6 +688,49 @@ prefill_fc_stream_out_loop:
     }
 }
 
+// Build recurrent embed states from token IDs using fp16 embed table.
+// Returns false if any token ID is invalid for the embed vocab.
+bool e4d_lookup_recurrent_embed_states(
+    const int64_t* step_input_tokens,          // packed [batch, tree_width]
+    int batch_size,
+    int tree_width,
+    int hidden_size,
+    const uint16_t* draft_embed_tokens_weight, // fp16 [kEagle4FullVocab, hidden]
+    float* embed_states_out                     // packed [batch, tree_width, hidden]
+) {
+#pragma HLS INLINE off
+    if (step_input_tokens == nullptr || draft_embed_tokens_weight == nullptr ||
+        embed_states_out == nullptr) {
+        return false;
+    }
+    if (batch_size <= 0 || tree_width <= 0 || hidden_size <= 0) {
+        return false;
+    }
+
+lookup_embed_batch_loop:
+    for (int b = 0; b < batch_size; ++b) {
+#pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
+    lookup_embed_token_loop:
+        for (int t = 0; t < tree_width; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
+            const int64_t token_id = step_input_tokens[b * tree_width + t];
+            if (token_id < 0 || token_id >= kEagle4FullVocab) {
+                return false;
+            }
+            const int64_t emb_row = token_id * hidden_size;
+            const int64_t dst_row = (static_cast<int64_t>(b) * tree_width + t) * hidden_size;
+        lookup_embed_hidden_loop:
+            for (int h = 0; h < hidden_size; ++h) {
+#pragma HLS loop_tripcount min=HIDDEN max=HIDDEN avg=HIDDEN
+#pragma HLS PIPELINE II = 1
+                const uint16_t w = draft_embed_tokens_weight[emb_row + h];
+                embed_states_out[dst_row + h] = eagle4_fp16_to_float(w);
+            }
+        }
+    }
+    return true;
+}
+
 void eagle4_draft_impl(
     int tree_depth,
     int curr_depth_start,
@@ -752,6 +773,7 @@ void eagle4_draft_impl(
     const uint16_t* lm_head_weight,
     int efficient_lm_rank,
     int efficient_lm_vocab_size,
+    const uint16_t* draft_embed_tokens_weight,
 
     // Contiguous KV context
     int prefix_len,
@@ -851,7 +873,8 @@ void eagle4_draft_impl(
         final_norm_gamma == nullptr || hbm_k == nullptr || hbm_v == nullptr ||
         efficient_lm_head_down_proj_weight == nullptr ||
         efficient_lm_head_qweight_row_major == nullptr ||
-        efficient_lm_head_scales_row_major == nullptr || lm_head_weight == nullptr) {
+        efficient_lm_head_scales_row_major == nullptr || lm_head_weight == nullptr ||
+        draft_embed_tokens_weight == nullptr) {
         return;
     }
     if (hidden_size > HIDDEN || max_tree_width > TREE_WIDTH ||
@@ -1032,6 +1055,9 @@ map_accept_nodes_loop:
     float bram_step_input_hidden_states[kHlsHiddenBatch * TREE_WIDTH * HIDDEN];
 #pragma HLS BIND_STORAGE variable=bram_step_input_hidden_states type=ram_2p impl=bram
 #pragma HLS ARRAY_PARTITION variable=bram_step_input_hidden_states type=cyclic factor=16 dim=1
+    float bram_step_input_embed_states[kHlsHiddenBatch * TREE_WIDTH * HIDDEN];
+#pragma HLS BIND_STORAGE variable=bram_step_input_embed_states type=ram_2p impl=bram
+#pragma HLS ARRAY_PARTITION variable=bram_step_input_embed_states type=cyclic factor=16 dim=1
     float bram_output_hidden_states[kHlsHiddenBatch * kCdtFusedMaxNodeTopK * HIDDEN];
 #pragma HLS BIND_STORAGE variable=bram_output_hidden_states type=ram_2p impl=bram
 
@@ -1462,9 +1488,19 @@ orchestrator_depth_loop:
 
         // Stage A/B: SLM forward and LM-head top-k for current frontier.
         const int current_depth = curr_depth_start + d;
+        const bool embed_ok = e4d_lookup_recurrent_embed_states(
+            bram_step_input_tokens,
+            batch_size,
+            curr_tree_width,
+            hidden_size,
+            draft_embed_tokens_weight,
+            bram_step_input_embed_states);
+        if (!embed_ok) {
+            return;
+        }
         e4d_slm_topk(
             bram_step_input_hidden_states,
-            prefill_input_embed_states,  // optional recurrent embed seed from caller
+            bram_step_input_embed_states,
             batch_size,
             curr_tree_width,
             hidden_size,
@@ -1793,6 +1829,7 @@ void eagle4_draft(
     const uint16_t* lm_head_weight,
     int efficient_lm_rank,
     int efficient_lm_vocab_size,
+    const uint16_t* draft_embed_tokens_weight,
     int prefix_len,
     bool enable_accepted_kv_compact,
     const int64_t* accepted_draft_node_ids,
@@ -1883,6 +1920,7 @@ void eagle4_draft(
 #pragma HLS INTERFACE m_axi port=efficient_lm_head_qzeros offset=slave bundle=gmem14
 #pragma HLS INTERFACE m_axi port=efficient_lm_head_g_idx offset=slave bundle=gmem15
 #pragma HLS INTERFACE m_axi port=lm_head_weight offset=slave bundle=gmem15
+#pragma HLS INTERFACE m_axi port=draft_embed_tokens_weight offset=slave bundle=gmem_embed
 #pragma HLS INTERFACE m_axi port=hot_token_id offset=slave bundle=gmem_hot
 
 #pragma HLS INTERFACE m_axi port=io_tree_width offset=slave bundle=gmem_io
@@ -1973,6 +2011,7 @@ void eagle4_draft(
         lm_head_weight,
         efficient_lm_rank,
         efficient_lm_vocab_size,
+        draft_embed_tokens_weight,
         prefix_len,
         enable_accepted_kv_compact,
         accepted_draft_node_ids,

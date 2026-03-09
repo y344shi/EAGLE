@@ -17,6 +17,7 @@ constexpr int kCdtFusedMaxBatch = 128;
 constexpr int kCdtFusedMaxNodeTopK = 16;
 constexpr int kHlsMaxNodeCount = 4032; // matches Python MAX_Node_Count worst case
 constexpr int kHlsHiddenBatch  = 1;    // current iteration uses batch=1 for hidden arrays
+constexpr int kEagle4FullVocab = 128256;
 
 // Tripcount policy for HLS synthesis latency estimation.
 // Configuration: batch=1, node_top_k=8, depth=16, tree_width=TREE_WIDTH(4).
@@ -355,6 +356,14 @@ void e4d_apply_policy(
     int* next_verify_num,
     bool* stop_signal);
 
+void e4d_prefill_fc(
+    const float* input_hidden_states_3h,   // [batch, 3 * hidden]
+    const pack512* fc_weight,              // packed [3*hidden -> hidden]
+    const float* fc_scales,                // grouped scales
+    int batch_size,
+    int hidden_size,
+    float* projected_hidden_states);       // [batch, hidden]
+
 void eagle4_draft_impl(
     int tree_depth,
     int curr_depth_start,
@@ -397,6 +406,7 @@ void eagle4_draft_impl(
     const uint16_t* lm_head_weight,
     int efficient_lm_rank,
     int efficient_lm_vocab_size,
+    const uint16_t* draft_embed_tokens_weight, // fp16 [kEagle4FullVocab, hidden]
 
     // Contiguous KV context
     int prefix_len,
@@ -512,6 +522,7 @@ void eagle4_draft(
     const uint16_t* lm_head_weight,
     int efficient_lm_rank,
     int efficient_lm_vocab_size,
+    const uint16_t* draft_embed_tokens_weight,
     int prefix_len,
     bool enable_accepted_kv_compact,
     const int64_t* accepted_draft_node_ids,

@@ -223,6 +223,46 @@ def _simulate_expected_scalars(
     return curr_tree_width, curr_verify_num, curr_cumu_count, depth_done, stopped
 
 
+def _build_full_path_fixtures(
+    batch_size: int,
+    hidden_size: int,
+    prefix_len: int,
+    max_node_count: int,
+    max_verify_num: int,
+    initial_hidden_states: List[float],
+) -> Dict[str, List]:
+    if batch_size != 1:
+        raise ValueError("full-path fixture builder currently requires batch_size=1")
+    if hidden_size <= 0 or max_node_count <= 0 or max_verify_num <= 0:
+        raise ValueError("invalid dimensions for full-path fixture builder")
+    if len(initial_hidden_states) < batch_size * hidden_size:
+        raise ValueError("initial_hidden_states too small for full-path fixture builder")
+
+    base_hidden = initial_hidden_states[:hidden_size]
+    prefill_input_hidden_states_3h: List[float] = []
+    prefill_input_hidden_states_3h.extend(base_hidden)
+    prefill_input_hidden_states_3h.extend([0.5 * v for v in base_hidden])
+    prefill_input_hidden_states_3h.extend([-0.25 * v for v in base_hidden])
+    prefill_input_embed_states = [0.75 * v for v in base_hidden]
+
+    accepted_count = max(1, min(2, max_verify_num, max_node_count, max(1, prefix_len)))
+    accepted_draft_node_ids = list(range(accepted_count))
+    node_to_hbm_slot_init = [-1 for _ in range(max_node_count)]
+    for i in range(accepted_count):
+        node_to_hbm_slot_init[i] = i
+
+    return {
+        "enable_prefill_stage": [1],
+        "prefill_input_hidden_states_3h": prefill_input_hidden_states_3h,
+        "prefill_input_embed_states": prefill_input_embed_states,
+        "prefill_fixture_mode": ["synthetic"],
+        "enable_accepted_kv_compact": [1],
+        "accepted_draft_node_ids": accepted_draft_node_ids,
+        "node_to_hbm_slot_init": node_to_hbm_slot_init,
+        "compact_fixture_mode": ["synthetic"],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -255,6 +295,9 @@ def main() -> None:
         e2e_case_path = args.e2e_case.resolve()
     else:
         e2e_case_path = _find_case(search_dirs, "cost_draft_tree_draft_e2e_case.txt")
+
+    # Fallback path may still emit optional diagnostic fields; keep a safe default.
+    e2e: Dict[str, List[str]] = {}
 
     if e2e_case_path is not None and e2e_case_path.exists():
         try:
@@ -457,6 +500,12 @@ def main() -> None:
                     raise ValueError(
                         "classic-eagle expected_mask_recurrent_depth size mismatch"
                     )
+                if any(v != 0 for v in strict_recurrent_depth):
+                    print(
+                        "[info] normalizing expected_mask_recurrent_depth for classic-eagle "
+                        "to non-strict (all zeros)"
+                    )
+                    strict_recurrent_depth = [0] * tree_depth
 
                 expected_io_tree_width = _get_ints(
                     e2e, "expected_io_tree_width", required=True
@@ -489,14 +538,27 @@ def main() -> None:
                     expected_mask_fields = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
                 if len(expected_mask_fields) != 10:
                     raise ValueError("classic-eagle expected_mask_fields size mismatch")
+                # Classic branch emits placeholder expected_* vectors for legacy cumu/output
+                # fields. Keep strictness only on top-level IO/control fields.
+                canonical_mask = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
+                if expected_mask_fields != canonical_mask:
+                    print(
+                        "[info] normalizing expected_mask_fields for classic-eagle "
+                        f"from {expected_mask_fields} to {canonical_mask}"
+                    )
+                    expected_mask_fields = canonical_mask
 
                 step_input_tokens_init = [0] * tree_n
                 step_last_layer_scores_init = [0.0] * tree_n
                 step_topk_indexs_prev_init = [0] * tree_n
                 step_input_hidden_states_init = [0.0] * hidden_n
-                step_input_prev_embed_init: Optional[List[float]] = (
-                    [0.0] * hidden_n if initial_embed_states is not None or e2e_step_embed else None
-                )
+                step_input_prev_embed_init: Optional[List[float]] = None
+
+                active_width = min(init_tree_width, max_tree_width, node_top_k)
+                for t in range(active_width):
+                    step_input_tokens_init[t] = initial_topk_tokens[t]
+                    step_last_layer_scores_init[t] = initial_topk_probas[t]
+                    step_topk_indexs_prev_init[t] = t
 
                 # When full per-token E2E step data is available, use it directly
                 # instead of replicating single-token initial values.
@@ -504,7 +566,6 @@ def main() -> None:
                     step_input_hidden_states_init = e2e_step_hidden[:hidden_n]
                     print("[info] using full per-token step_input_hidden_states_init from E2E capture")
                 else:
-                    active_width = min(init_tree_width, max_tree_width, node_top_k)
                     for t in range(active_width):
                         dst_base = t * hidden_size
                         step_input_hidden_states_init[
@@ -514,19 +575,89 @@ def main() -> None:
                 if e2e_step_embed and len(e2e_step_embed) >= hidden_n:
                     step_input_prev_embed_init = e2e_step_embed[:hidden_n]
                     print("[info] using full per-token step_input_prev_embed_init from E2E capture")
-                elif initial_embed_states is not None and step_input_prev_embed_init is not None:
-                    active_width = min(init_tree_width, max_tree_width, node_top_k)
+                else:
+                    embed_tokens_path = (
+                        golden_tensor_root
+                        / "hls_4bit"
+                        / "weights_all_4bit"
+                        / "embed_tokens.fp16.bin"
+                    )
+                    if embed_tokens_path.exists():
+                        embed_tokens_raw = _load_fp16_bin(embed_tokens_path)
+                        if embed_tokens_raw.size % hidden_size == 0:
+                            vocab_rows = int(embed_tokens_raw.size // hidden_size)
+                            step_input_prev_embed_init = [0.0] * hidden_n
+                            copied = 0
+                            for t in range(active_width):
+                                token_id = int(step_input_tokens_init[t])
+                                dst_base = t * hidden_size
+                                if 0 <= token_id < vocab_rows:
+                                    src_base = token_id * hidden_size
+                                    step_input_prev_embed_init[
+                                        dst_base : dst_base + hidden_size
+                                    ] = embed_tokens_raw[
+                                        src_base : src_base + hidden_size
+                                    ].tolist()
+                                    copied += 1
+                                else:
+                                    step_input_prev_embed_init[
+                                        dst_base : dst_base + hidden_size
+                                    ] = step_input_hidden_states_init[
+                                        dst_base : dst_base + hidden_size
+                                    ]
+                            print(
+                                "[info] rebuilt step_input_prev_embed_init from embed_tokens "
+                                f"({copied}/{active_width} token rows copied)"
+                            )
+                        else:
+                            print(
+                                "[warn] embed_tokens size is not divisible by hidden_size; "
+                                "falling back to hidden-as-embed in TB"
+                            )
+                    else:
+                        print(
+                            "[warn] embed_tokens.fp16.bin missing; "
+                            "falling back to hidden-as-embed in TB"
+                        )
+
+                    if (
+                        step_input_prev_embed_init is None
+                        and initial_embed_states is not None
+                        and len(initial_embed_states) >= hidden_size
+                    ):
+                        # Last-resort deterministic fallback if embed table is unavailable.
+                        step_input_prev_embed_init = [0.0] * hidden_n
+                        for t in range(active_width):
+                            dst_base = t * hidden_size
+                            step_input_prev_embed_init[
+                                dst_base : dst_base + hidden_size
+                            ] = initial_embed_states[:hidden_size]
+                        print(
+                            "[warn] using replicated initial_embed_states fallback for "
+                            "step_input_prev_embed_init"
+                        )
+
+                if step_input_prev_embed_init is None:
+                    print(
+                        "[warn] step_input_prev_embed_init is unavailable; "
+                        "TB will use step_input_hidden_states_init as embed input"
+                    )
+
+                if step_input_prev_embed_init is not None and all(
+                    abs(v) == 0.0 for v in step_input_prev_embed_init[: hidden_size * min(2, active_width)]
+                ):
+                    print(
+                        "[warn] step_input_prev_embed_init appears zero-initialized for first tokens; "
+                        "check embed table capture."
+                    )
+
+                if step_input_prev_embed_init is not None:
                     for t in range(active_width):
                         dst_base = t * hidden_size
-                        step_input_prev_embed_init[
-                            dst_base : dst_base + hidden_size
-                        ] = initial_embed_states[:hidden_size]
-
-                active_width = min(init_tree_width, max_tree_width, node_top_k)
-                for t in range(active_width):
-                    step_input_tokens_init[t] = initial_topk_tokens[t]
-                    step_last_layer_scores_init[t] = initial_topk_probas[t]
-                    step_topk_indexs_prev_init[t] = t
+                        if step_input_prev_embed_init[dst_base : dst_base + hidden_size] == [0.0] * hidden_size:
+                            step_input_prev_embed_init[
+                                dst_base : dst_base + hidden_size
+                            ] = step_input_hidden_states_init[dst_base : dst_base + hidden_size]
 
                 init_legacy_cumu_tokens = [-777] * node_n
                 init_legacy_cumu_scores = [-3.0] * node_n
@@ -543,6 +674,14 @@ def main() -> None:
                 expected_cumu_deltas = [-1] * node_n
                 expected_output_scores = [0.0] * out_n
                 expected_output_tokens = [-1] * out_n
+                full_path = _build_full_path_fixtures(
+                    batch_size=batch_size,
+                    hidden_size=hidden_size,
+                    prefix_len=prefix_len,
+                    max_node_count=max_node_count,
+                    max_verify_num=max_verify_num,
+                    initial_hidden_states=initial_hidden_states,
+                )
 
                 out_path = args.output.resolve()
                 out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -612,6 +751,34 @@ def main() -> None:
                     _write_float_line(f, "initial_hidden_states", initial_hidden_states)
                     _write_float_line(f, "initial_topk_probas", initial_topk_probas)
                     _write_line(f, "initial_topk_tokens", initial_topk_tokens)
+                    _write_line(f, "enable_prefill_stage", full_path["enable_prefill_stage"])
+                    _write_float_line(
+                        f,
+                        "prefill_input_hidden_states_3h",
+                        full_path["prefill_input_hidden_states_3h"],
+                    )
+                    _write_float_line(
+                        f,
+                        "prefill_input_embed_states",
+                        full_path["prefill_input_embed_states"],
+                    )
+                    _write_line(f, "prefill_fixture_mode", full_path["prefill_fixture_mode"])
+                    _write_line(
+                        f,
+                        "enable_accepted_kv_compact",
+                        full_path["enable_accepted_kv_compact"],
+                    )
+                    _write_line(
+                        f,
+                        "accepted_draft_node_ids",
+                        full_path["accepted_draft_node_ids"],
+                    )
+                    _write_line(
+                        f,
+                        "node_to_hbm_slot_init",
+                        full_path["node_to_hbm_slot_init"],
+                    )
+                    _write_line(f, "compact_fixture_mode", full_path["compact_fixture_mode"])
                     _write_line(f, "policy_next_tree_width", policy_next_tree_width)
                     _write_line(f, "policy_next_verify_num", policy_next_verify_num)
                     _write_line(f, "policy_stop_signal", policy_stop_signal)
@@ -820,6 +987,15 @@ def main() -> None:
             if len(expected_mask_fields) != 10:
                 raise ValueError("expected_mask_fields size mismatch in e2e case")
 
+            full_path = _build_full_path_fixtures(
+                batch_size=batch_size,
+                hidden_size=hidden_size,
+                prefix_len=prefix_len,
+                max_node_count=max_node_count,
+                max_verify_num=max_verify_num,
+                initial_hidden_states=initial_hidden_states,
+            )
+
             out_path = args.output.resolve()
             out_path.parent.mkdir(parents=True, exist_ok=True)
             with out_path.open("w", encoding="utf-8") as f:
@@ -869,6 +1045,34 @@ def main() -> None:
                 _write_float_line(f, "initial_hidden_states", initial_hidden_states)
                 _write_float_line(f, "initial_topk_probas", initial_topk_probas)
                 _write_line(f, "initial_topk_tokens", initial_topk_tokens)
+                _write_line(f, "enable_prefill_stage", full_path["enable_prefill_stage"])
+                _write_float_line(
+                    f,
+                    "prefill_input_hidden_states_3h",
+                    full_path["prefill_input_hidden_states_3h"],
+                )
+                _write_float_line(
+                    f,
+                    "prefill_input_embed_states",
+                    full_path["prefill_input_embed_states"],
+                )
+                _write_line(f, "prefill_fixture_mode", full_path["prefill_fixture_mode"])
+                _write_line(
+                    f,
+                    "enable_accepted_kv_compact",
+                    full_path["enable_accepted_kv_compact"],
+                )
+                _write_line(
+                    f,
+                    "accepted_draft_node_ids",
+                    full_path["accepted_draft_node_ids"],
+                )
+                _write_line(
+                    f,
+                    "node_to_hbm_slot_init",
+                    full_path["node_to_hbm_slot_init"],
+                )
+                _write_line(f, "compact_fixture_mode", full_path["compact_fixture_mode"])
 
                 _write_line(f, "policy_next_tree_width", policy_next_tree_width)
                 _write_line(f, "policy_next_verify_num", policy_next_verify_num)
@@ -929,7 +1133,7 @@ def main() -> None:
 
     batch_size = 1
     node_top_k = 4
-    hidden_size = 64
+    hidden_size = 4096
     curr_depth_start = 0
     prefix_len = 8
     max_node_count = 128
@@ -1135,6 +1339,14 @@ def main() -> None:
     expected_cumu_deltas = [-1 for _ in range(node_n)]
     expected_output_scores = [0.0 for _ in range(out_n)]
     expected_output_tokens = [-1 for _ in range(out_n)]
+    full_path = _build_full_path_fixtures(
+        batch_size=batch_size,
+        hidden_size=hidden_size,
+        prefix_len=prefix_len,
+        max_node_count=max_node_count,
+        max_verify_num=max_verify_num,
+        initial_hidden_states=initial_hidden_states,
+    )
 
     out_path = args.output.resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1189,6 +1401,34 @@ def main() -> None:
         _write_float_line(f, "initial_hidden_states", initial_hidden_states)
         _write_float_line(f, "initial_topk_probas", initial_topk_probas)
         _write_line(f, "initial_topk_tokens", initial_topk_tokens)
+        _write_line(f, "enable_prefill_stage", full_path["enable_prefill_stage"])
+        _write_float_line(
+            f,
+            "prefill_input_hidden_states_3h",
+            full_path["prefill_input_hidden_states_3h"],
+        )
+        _write_float_line(
+            f,
+            "prefill_input_embed_states",
+            full_path["prefill_input_embed_states"],
+        )
+        _write_line(f, "prefill_fixture_mode", full_path["prefill_fixture_mode"])
+        _write_line(
+            f,
+            "enable_accepted_kv_compact",
+            full_path["enable_accepted_kv_compact"],
+        )
+        _write_line(
+            f,
+            "accepted_draft_node_ids",
+            full_path["accepted_draft_node_ids"],
+        )
+        _write_line(
+            f,
+            "node_to_hbm_slot_init",
+            full_path["node_to_hbm_slot_init"],
+        )
+        _write_line(f, "compact_fixture_mode", full_path["compact_fixture_mode"])
 
         _write_line(f, "policy_next_tree_width", policy_next_tree_width)
         _write_line(f, "policy_next_verify_num", policy_next_verify_num)

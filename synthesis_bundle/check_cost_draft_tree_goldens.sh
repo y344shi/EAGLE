@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CASE_DIR="${ROOT_DIR}"
 DRY_RUN_ONLY=0
 
+# Orchestrator TB allocates large local buffers in non-synthesis C++ simulation.
+# Ensure enough stack to avoid host-side segfaults in full checks.
+ulimit -s unlimited || true
+
 usage() {
   cat <<USAGE
 Usage: $(basename "$0") [options] [case_dir]
@@ -42,11 +46,29 @@ else
 fi
 
 echo "[info] compiling dry-run checkers..."
-"${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_score_tb.cpp -o /tmp/cdt_score_tb_check
-"${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_update_tb.cpp -o /tmp/cdt_update_tb_check
-"${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_controller_tb.cpp -o /tmp/cdt_controller_tb_check
-"${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_fused_wiring_tb.cpp -o /tmp/cdt_fused_wiring_tb_check
-"${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_multilayer_orchestrator_tb.cpp -o /tmp/cdt_multilayer_orch_tb_check
+"${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_score_tb.cpp cost_draft_tree_score_hls.cpp -o /tmp/cdt_score_tb_check
+"${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_update_tb.cpp cost_draft_tree_update_hls.cpp -o /tmp/cdt_update_tb_check
+"${CXX}" "${CXXFLAGS[@]}" cost_draft_tree_controller_tb.cpp cost_draft_tree_controller_hls.cpp -o /tmp/cdt_controller_tb_check
+"${CXX}" "${CXXFLAGS[@]}" \
+  cost_draft_tree_fused_wiring_tb.cpp \
+  cost_draft_tree_fused_wiring_hls.cpp \
+  cost_draft_tree_score_hls.cpp \
+  cost_draft_tree_update_hls.cpp \
+  cost_draft_tree_controller_hls.cpp \
+  eagle4_lm_head_hls.cpp \
+  eagle_tier1_lm_top.cpp \
+  eagle_tier1_top.cpp \
+  -o /tmp/cdt_fused_wiring_tb_check
+"${CXX}" "${CXXFLAGS[@]}" \
+  cost_draft_tree_multilayer_orchestrator_tb.cpp \
+  cost_draft_tree_fused_wiring_hls.cpp \
+  cost_draft_tree_score_hls.cpp \
+  cost_draft_tree_update_hls.cpp \
+  cost_draft_tree_controller_hls.cpp \
+  eagle4_lm_head_hls.cpp \
+  eagle_tier1_lm_top.cpp \
+  eagle_tier1_top.cpp \
+  -o /tmp/cdt_multilayer_orch_tb_check
 
 declare -a SPECS=(
   "cost_draft_tree_score_case.txt|/tmp/cdt_score_tb_check"
@@ -81,6 +103,33 @@ for spec in "${SPECS[@]}"; do
   echo "[check] ${rel}"
   read -r -a cmd_parts <<< "${cmd_prefix}"
   run_fail_log="/tmp/cdt_fullrun.log"
+  if [[ ${DRY_RUN_ONLY} -eq 0 && "${rel}" == "cost_draft_tree_multilayer_orchestrator_case.txt" ]]; then
+    capture_backend="$(awk '$1=="capture_backend"{for(i=3;i<=NF;++i) printf "%s%s",$i,(i<NF?" ":""); print ""}' "${file}" 2>/dev/null || true)"
+    if [[ "${capture_backend}" != "eagle4_classic" && "${capture_backend}" != "classic_eagle" ]]; then
+      echo "[invalid] ${rel}: full run requires capture_backend=eagle4_classic|classic_eagle (got='${capture_backend:-none}')"
+      invalid=$((invalid + 1))
+      continue
+    fi
+    required_keys=(
+      "enable_prefill_stage"
+      "prefill_input_hidden_states_3h"
+      "prefill_input_embed_states"
+      "enable_accepted_kv_compact"
+      "accepted_draft_node_ids"
+      "node_to_hbm_slot_init"
+    )
+    missing_fixture=0
+    for key in "${required_keys[@]}"; do
+      if ! awk -v k="${key}" '$1==k{found=1} END{exit(found?0:1)}' "${file}"; then
+        echo "[invalid] ${rel}: missing required full-path fixture key '${key}'"
+        missing_fixture=1
+      fi
+    done
+    if [[ ${missing_fixture} -ne 0 ]]; then
+      invalid=$((invalid + 1))
+      continue
+    fi
+  fi
   if [[ ${DRY_RUN_ONLY} -eq 1 ]]; then
     run_fail_log="/tmp/cdt_dryrun.log"
     if "${cmd_parts[@]}" "${file}" --dry-run >"${run_fail_log}" 2>&1; then
