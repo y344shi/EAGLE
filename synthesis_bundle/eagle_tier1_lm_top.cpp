@@ -1,6 +1,11 @@
 #include "eagle_tier1_lm_top.hpp"
 #include <limits>
 
+#ifndef __SYNTHESIS__
+#include <cstdio>
+Eagle4LmDebugDump* g_eagle4_lm_debug_dump = nullptr;
+#endif
+
 // Super-wrapper: Tier1 transformer -> 8-way LM head (single token, batch slot 0).
 namespace {
 
@@ -214,15 +219,6 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
 #pragma HLS STREAM variable=reasoning_out depth=64
 #pragma HLS STREAM variable=logits_out depth=64
 
-    tmac::hls::eagle_tier1_top_eagle4_l0(hidden_in_stream, embed_in_stream, reasoning_out, logits_out,
-                              w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales,
-                              w_up, up_scales, w_down, down_scales, hidden_norm_gamma, embed_norm_gamma,
-                              post_attn_norm_gamma, final_norm_gamma,
-                              rope_cos_vals, rope_sin_vals, hbm_k, hbm_v,
-                              prefix_len, current_depth, parent_indices_per_layer);
-
-    sink_reasoning_stream(reasoning_out, reasoning_state_out);
-
     float logits_hidden[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax];
     float low_rank[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmRankMax];
     int candidate_indices[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];
@@ -237,8 +233,33 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
 #pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
 #pragma HLS ARRAY_PARTITION variable=topk_tokens type=complete dim=0
 #pragma HLS ARRAY_PARTITION variable=topk_probas type=complete dim=0
+#pragma HLS DATAFLOW
 
+    tmac::hls::eagle_tier1_top_eagle4_l0(hidden_in_stream, embed_in_stream, reasoning_out, logits_out,
+                              w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales,
+                              w_up, up_scales, w_down, down_scales, hidden_norm_gamma, embed_norm_gamma,
+                              post_attn_norm_gamma, final_norm_gamma,
+                              rope_cos_vals, rope_sin_vals, hbm_k, hbm_v,
+                              prefix_len, current_depth, parent_indices_per_layer);
+
+    sink_reasoning_stream(reasoning_out, reasoning_state_out);
     collect_logits_stream(logits_out, logits_hidden);
+
+#ifndef __SYNTHESIS__
+    if (g_eagle4_lm_debug_dump) {
+        auto* d = g_eagle4_lm_debug_dump;
+        d->rank = rank;
+        d->vocab = vocab;
+        d->topk = topk;
+        // tensor_110: logits_hidden (SLM output after final norm)
+        std::memcpy(d->logits_hidden, logits_hidden, sizeof(d->logits_hidden));
+        // tensor_109: reasoning_state (SLM reasoning branch output)
+        std::memcpy(d->reasoning_state, reasoning_state_out,
+                    sizeof(float) * tmac::hls::TREE_WIDTH * tmac::hls::HIDDEN);
+        fprintf(stderr, "[eagle4-lm-dump] logits_hidden[0][0..3] = %f %f %f %f\n",
+                logits_hidden[0][0], logits_hidden[0][1], logits_hidden[0][2], logits_hidden[0][3]);
+    }
+#endif
 
     tmac::hls::eagle4_lm_down_project(
         logits_hidden,
@@ -246,6 +267,16 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
         low_rank,
         tmac::hls::HIDDEN,
         rank);
+
+#ifndef __SYNTHESIS__
+    if (g_eagle4_lm_debug_dump) {
+        auto* d = g_eagle4_lm_debug_dump;
+        // tensor_131: low_rank (after down projection)
+        std::memcpy(d->low_rank, low_rank, sizeof(d->low_rank));
+        fprintf(stderr, "[eagle4-lm-dump] low_rank[0][0..3] = %f %f %f %f\n",
+                low_rank[0][0], low_rank[0][1], low_rank[0][2], low_rank[0][3]);
+    }
+#endif
 
     tmac::hls::eagle4_lm_candidate_logits_row4(
         low_rank,
@@ -261,6 +292,21 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
         candidate_indices,
         candidate_scores);
 
+#ifndef __SYNTHESIS__
+    if (g_eagle4_lm_debug_dump) {
+        auto* d = g_eagle4_lm_debug_dump;
+        // tensor_133: candidate_indices (GPTQ top-k candidate token IDs)
+        std::memcpy(d->candidate_indices, candidate_indices, sizeof(d->candidate_indices));
+        std::memcpy(d->candidate_scores, candidate_scores, sizeof(d->candidate_scores));
+        fprintf(stderr, "[eagle4-lm-dump] candidate_indices[0][0..3] = %d %d %d %d\n",
+                candidate_indices[0][0], candidate_indices[0][1],
+                candidate_indices[0][2], candidate_indices[0][3]);
+        fprintf(stderr, "[eagle4-lm-dump] candidate_scores[0][0..3] = %f %f %f %f\n",
+                candidate_scores[0][0], candidate_scores[0][1],
+                candidate_scores[0][2], candidate_scores[0][3]);
+    }
+#endif
+
     tmac::hls::eagle4_lm_gather_dot_fp16(
         logits_hidden,
         lm_head_weight,
@@ -268,6 +314,17 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
         gathered_logits,
         tmac::hls::HIDDEN,
         topk);
+
+#ifndef __SYNTHESIS__
+    if (g_eagle4_lm_debug_dump) {
+        auto* d = g_eagle4_lm_debug_dump;
+        // tensor_134: gathered_logits (full lm_head dot products for candidates)
+        std::memcpy(d->gathered_logits, gathered_logits, sizeof(d->gathered_logits));
+        fprintf(stderr, "[eagle4-lm-dump] gathered_logits[0][0..3] = %f %f %f %f\n",
+                gathered_logits[0][0], gathered_logits[0][1],
+                gathered_logits[0][2], gathered_logits[0][3]);
+    }
+#endif
 
     tmac::hls::eagle4_lm_softmax_topk(
         candidate_indices,
@@ -277,6 +334,22 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
         topk_probas,
         best_id,
         best_score);
+
+#ifndef __SYNTHESIS__
+    if (g_eagle4_lm_debug_dump) {
+        auto* d = g_eagle4_lm_debug_dump;
+        // Final softmax output
+        std::memcpy(d->topk_tokens, topk_tokens, sizeof(d->topk_tokens));
+        std::memcpy(d->topk_probas, topk_probas, sizeof(d->topk_probas));
+        d->valid = true;
+        fprintf(stderr, "[eagle4-lm-dump] topk_tokens[0][0..3] = %d %d %d %d\n",
+                topk_tokens[0][0], topk_tokens[0][1],
+                topk_tokens[0][2], topk_tokens[0][3]);
+        fprintf(stderr, "[eagle4-lm-dump] topk_probas[0][0..3] = %f %f %f %f\n",
+                topk_probas[0][0], topk_probas[0][1],
+                topk_probas[0][2], topk_probas[0][3]);
+    }
+#endif
 
     // Output: TREE_WIDTH * topk entries, laid out [t0_c0, t0_c1, ..., t1_c0, t1_c1, ...]
     if (candidate_indices_out != nullptr) {

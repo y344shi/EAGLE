@@ -344,15 +344,51 @@ def main() -> None:
                         f"classic-eagle prefix sidecar missing: {prefix_k_src} / {prefix_v_src}"
                     )
 
-                tensor_007 = tensor_dir / "tensor_007_EAGLE_INPUT_prev_hidden_ALL.bin"
-                initial_hidden_raw = _load_fp16_bin(tensor_007)
-                if initial_hidden_raw.size < batch_size * hidden_size:
-                    raise ValueError(
-                        f"tensor_007 too small: got={initial_hidden_raw.size} need>={batch_size * hidden_size}"
+                # Prefer SLM inputs captured during E2E runtime over golden tensor files.
+                e2e_step_hidden = _get_floats(e2e, "step_input_hidden_states_init", required=False)
+                e2e_step_embed = _get_floats(e2e, "step_input_prev_embed_init", required=False)
+                e2e_initial_hidden = _get_floats(e2e, "initial_hidden_states", required=False)
+
+                if e2e_initial_hidden and len(e2e_initial_hidden) >= batch_size * hidden_size:
+                    initial_hidden_states = e2e_initial_hidden[: batch_size * hidden_size]
+                    print("[info] using initial_hidden_states from E2E capture")
+                else:
+                    tensor_007 = tensor_dir / "tensor_007_EAGLE_INPUT_prev_hidden_ALL.bin"
+                    initial_hidden_raw = _load_fp16_bin(tensor_007)
+                    if initial_hidden_raw.size < batch_size * hidden_size:
+                        raise ValueError(
+                            f"tensor_007 too small: got={initial_hidden_raw.size} "
+                            f"need>={batch_size * hidden_size}"
+                        )
+                    initial_hidden_states = (
+                        initial_hidden_raw[: batch_size * hidden_size]
+                        .astype(np.float32)
+                        .tolist()
                     )
-                initial_hidden_states = (
-                    initial_hidden_raw[: batch_size * hidden_size].astype(np.float32).tolist()
-                )
+                    print("[info] using initial_hidden_states from golden tensor_007")
+
+                # Load prev_embed (token embeddings) — separate from prev_hidden.
+                initial_embed_states: Optional[List[float]] = None
+                if e2e_step_embed:
+                    # Embed was captured during E2E runtime — extract first token.
+                    initial_embed_states = e2e_step_embed[:hidden_size]
+                    print("[info] using initial_embed_states from E2E capture")
+                else:
+                    tensor_006 = tensor_dir / "tensor_006_EAGLE_INPUT_prev_embed_ALL.bin"
+                    if tensor_006.exists():
+                        initial_embed_raw = _load_fp16_bin(tensor_006)
+                        if initial_embed_raw.size >= batch_size * hidden_size:
+                            initial_embed_states = (
+                                initial_embed_raw[: batch_size * hidden_size]
+                                .astype(np.float32)
+                                .tolist()
+                            )
+                            print("[info] using initial_embed_states from golden tensor_006")
+                        else:
+                            print(
+                                f"[warn] tensor_006 too small ({initial_embed_raw.size}), "
+                                f"falling back to hidden-as-embed"
+                            )
 
                 initial_topk_probas = _get_floats(
                     e2e, "initial_topk_probas", required=False
@@ -458,15 +494,39 @@ def main() -> None:
                 step_last_layer_scores_init = [0.0] * tree_n
                 step_topk_indexs_prev_init = [0] * tree_n
                 step_input_hidden_states_init = [0.0] * hidden_n
+                step_input_prev_embed_init: Optional[List[float]] = (
+                    [0.0] * hidden_n if initial_embed_states is not None or e2e_step_embed else None
+                )
+
+                # When full per-token E2E step data is available, use it directly
+                # instead of replicating single-token initial values.
+                if e2e_step_hidden and len(e2e_step_hidden) >= hidden_n:
+                    step_input_hidden_states_init = e2e_step_hidden[:hidden_n]
+                    print("[info] using full per-token step_input_hidden_states_init from E2E capture")
+                else:
+                    active_width = min(init_tree_width, max_tree_width, node_top_k)
+                    for t in range(active_width):
+                        dst_base = t * hidden_size
+                        step_input_hidden_states_init[
+                            dst_base : dst_base + hidden_size
+                        ] = initial_hidden_states[:hidden_size]
+
+                if e2e_step_embed and len(e2e_step_embed) >= hidden_n:
+                    step_input_prev_embed_init = e2e_step_embed[:hidden_n]
+                    print("[info] using full per-token step_input_prev_embed_init from E2E capture")
+                elif initial_embed_states is not None and step_input_prev_embed_init is not None:
+                    active_width = min(init_tree_width, max_tree_width, node_top_k)
+                    for t in range(active_width):
+                        dst_base = t * hidden_size
+                        step_input_prev_embed_init[
+                            dst_base : dst_base + hidden_size
+                        ] = initial_embed_states[:hidden_size]
+
                 active_width = min(init_tree_width, max_tree_width, node_top_k)
                 for t in range(active_width):
                     step_input_tokens_init[t] = initial_topk_tokens[t]
                     step_last_layer_scores_init[t] = initial_topk_probas[t]
                     step_topk_indexs_prev_init[t] = t
-                    dst_base = t * hidden_size
-                    step_input_hidden_states_init[
-                        dst_base : dst_base + hidden_size
-                    ] = initial_hidden_states[:hidden_size]
 
                 init_legacy_cumu_tokens = [-777] * node_n
                 init_legacy_cumu_scores = [-3.0] * node_n
@@ -538,6 +598,10 @@ def main() -> None:
                     _write_float_line(
                         f, "step_input_hidden_states_init", step_input_hidden_states_init
                     )
+                    if step_input_prev_embed_init is not None:
+                        _write_float_line(
+                            f, "step_input_prev_embed_init", step_input_prev_embed_init
+                        )
                     _write_float_line(
                         f, "step_last_layer_scores_init", step_last_layer_scores_init
                     )
@@ -556,6 +620,12 @@ def main() -> None:
                     _write_line(
                         f, "expected_mask_recurrent_depth", strict_recurrent_depth
                     )
+                    # Pass through E2E SLM output diagnostics (tensor_110 etc.)
+                    for diag_key in ("e2e_step0_logits_hidden", "e2e_step0_reasoning_hidden"):
+                        diag_vals = _get_floats(e2e, diag_key, required=False)
+                        if diag_vals:
+                            _write_float_line(f, diag_key, diag_vals)
+                            print(f"[info] wrote {diag_key} ({len(diag_vals)} floats)")
                     _write_line(f, "init_legacy_cumu_tokens", init_legacy_cumu_tokens)
                     _write_float_line(f, "init_legacy_cumu_scores", init_legacy_cumu_scores)
                     _write_line(f, "init_legacy_cumu_deltas", init_legacy_cumu_deltas)
@@ -638,6 +708,12 @@ def main() -> None:
             step_input_hidden_states_init = _get_floats(
                 e2e, "step_input_hidden_states_init", required=True
             )
+            step_input_prev_embed_init = _get_floats(
+                e2e, "step_input_prev_embed_init", required=False
+            )
+            if step_input_prev_embed_init and len(step_input_prev_embed_init) != hidden_n:
+                print("[warn] step_input_prev_embed_init size mismatch, ignoring")
+                step_input_prev_embed_init = []
             if len(step_input_hidden_states_init) != hidden_n:
                 raise ValueError("step_input_hidden_states_init size mismatch in e2e case")
             step_last_layer_scores_init = _get_floats(
@@ -781,6 +857,10 @@ def main() -> None:
 
                 _write_line(f, "step_input_tokens_init", step_input_tokens_init)
                 _write_float_line(f, "step_input_hidden_states_init", step_input_hidden_states_init)
+                if step_input_prev_embed_init:
+                    _write_float_line(
+                        f, "step_input_prev_embed_init", step_input_prev_embed_init
+                    )
                 _write_float_line(f, "step_last_layer_scores_init", step_last_layer_scores_init)
                 _write_line(f, "step_topk_indexs_prev_init", step_topk_indexs_prev_init)
 
@@ -797,6 +877,15 @@ def main() -> None:
                 _write_float_line(f, "recurrent_topk_probas", recurrent_topk_probas)
                 _write_line(f, "recurrent_topk_tokens", recurrent_topk_tokens)
                 _write_line(f, "expected_mask_recurrent_depth", strict_recurrent_depth)
+
+                # Pass through E2E SLM output diagnostics (tensor_110 etc.)
+                for diag_key in ("e2e_step0_logits_hidden", "e2e_step0_reasoning_hidden"):
+                    diag_vals = _get_floats(e2e, diag_key, required=False)
+                    if diag_vals:
+                        _write_float_line(f, diag_key, diag_vals)
+                        print(f"[info] wrote {diag_key} ({len(diag_vals)} floats)")
+                    else:
+                        print(f"[info] {diag_key} not found in E2E case")
 
                 _write_line(f, "init_legacy_cumu_tokens", init_legacy_cumu_tokens)
                 _write_float_line(f, "init_legacy_cumu_scores", init_legacy_cumu_scores)
@@ -1108,6 +1197,12 @@ def main() -> None:
         _write_float_line(f, "recurrent_topk_probas", recurrent_topk_probas)
         _write_line(f, "recurrent_topk_tokens", recurrent_topk_tokens)
         _write_line(f, "expected_mask_recurrent_depth", strict_recurrent_depth)
+
+        # Pass through E2E SLM output diagnostics (tensor_110 etc.)
+        for diag_key in ("e2e_step0_logits_hidden", "e2e_step0_reasoning_hidden"):
+            diag_vals = _get_floats(e2e, diag_key, required=False)
+            if diag_vals:
+                _write_float_line(f, diag_key, diag_vals)
 
         _write_line(f, "init_legacy_cumu_tokens", init_legacy_cumu_tokens)
         _write_float_line(f, "init_legacy_cumu_scores", init_legacy_cumu_scores)

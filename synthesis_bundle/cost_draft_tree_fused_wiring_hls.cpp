@@ -1,4 +1,7 @@
 #include "cost_draft_tree_fused_wiring_hls.hpp"
+#ifndef __SYNTHESIS__
+#include <cstdio>
+#endif
 
 namespace tmac {
 namespace hls {
@@ -386,6 +389,7 @@ next_layer_batch_loop:
 // The SLM path owns top-k candidate generation; outputs are packed to fused-step layout.
 void e4d_slm_topk(
     const float* input_hidden_states,          // packed [batch, tree_width, hidden]
+    const float* input_embed_states,           // packed [batch, tree_width, hidden] or nullptr (falls back to hidden)
     int batch_size,
     int tree_width,
     int hidden_size,
@@ -435,6 +439,28 @@ void e4d_slm_topk(
     }
 
 slm_batch_loop:
+#ifndef __SYNTHESIS__
+    if (batch_size > 0 && tree_width > 0 && hidden_size > 0) {
+        std::fprintf(stderr, "[e4d_slm_topk] embed_ptr=%s, hidden[0..3]={%.6f,%.6f,%.6f,%.6f}",
+                     input_embed_states ? "non-null" : "NULL",
+                     input_hidden_states[0], input_hidden_states[1],
+                     input_hidden_states[2], input_hidden_states[3]);
+        if (input_embed_states) {
+            std::fprintf(stderr, ", embed[0..3]={%.6f,%.6f,%.6f,%.6f}",
+                         input_embed_states[0], input_embed_states[1],
+                         input_embed_states[2], input_embed_states[3]);
+            // Check if token 0 and token 1 embeds differ
+            if (tree_width > 1) {
+                int diffs = 0;
+                for (int i = 0; i < hidden_size; ++i) {
+                    if (input_embed_states[i] != input_embed_states[hidden_size + i]) ++diffs;
+                }
+                std::fprintf(stderr, ", embed_t0_vs_t1_diffs=%d/%d", diffs, hidden_size);
+            }
+        }
+        std::fprintf(stderr, "\n");
+    }
+#endif
     for (int b = 0; b < batch_size; ++b) {
 #pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
         hls_stream<vec_t<VEC_W>> hidden_in_stream("cdt_hidden_in_stream");
@@ -456,15 +482,18 @@ slm_batch_loop:
                 for (int lane = 0; lane < VEC_W; ++lane) {
 #pragma HLS UNROLL
                     const int h = hv * VEC_W + lane;
-                    float v = 0.0f;
+                    float hv_val = 0.0f;
+                    float ev_val = 0.0f;
                     if (t < tree_width && h < hidden_size) {
                         const int64_t src =
                             (static_cast<int64_t>(b) * tree_width + t) * hidden_size + h;
-                        v = input_hidden_states[src];
+                        hv_val = input_hidden_states[src];
+                        ev_val = (input_embed_states != nullptr)
+                                     ? input_embed_states[src]
+                                     : hv_val;
                     }
-                    hidden_vec[lane] = v;
-                    // Embedding stream fallback: reuse hidden stream when embed lookup is external.
-                    embed_vec[lane] = v;
+                    hidden_vec[lane] = hv_val;
+                    embed_vec[lane] = ev_val;
                 }
 
                 hidden_in_stream.write(hidden_vec);
@@ -524,6 +553,32 @@ slm_batch_loop:
     slm_copy_topk_loop_t:
         for (int t = 0; t < tree_width; ++t) {
 #pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
+            float max_logit = -1.0e30f;
+        slm_topk_max_loop_k:
+            for (int k = 0; k < node_top_k; ++k) {
+#pragma HLS loop_tripcount min=kTcTopK max=kTcTopK avg=kTcTopK
+#pragma HLS PIPELINE II = 1
+                const int src = t * node_top_k + k;
+                const float v = gathered_logits[src];
+                if (v > max_logit) {
+                    max_logit = v;
+                }
+            }
+
+            float exp_vals[kCdtFusedMaxNodeTopK];
+#pragma HLS ARRAY_PARTITION variable = exp_vals complete
+            float sum_exp = 0.0f;
+        slm_topk_exp_loop_k:
+            for (int k = 0; k < node_top_k; ++k) {
+#pragma HLS loop_tripcount min=kTcTopK max=kTcTopK avg=kTcTopK
+#pragma HLS PIPELINE II = 1
+                const int src = t * node_top_k + k;
+                const float e = std::exp(gathered_logits[src] - max_logit);
+                exp_vals[k] = e;
+                sum_exp += e;
+            }
+            const float inv_sum = (sum_exp > 0.0f) ? (1.0f / sum_exp) : 0.0f;
+
         slm_copy_topk_loop_k:
             for (int k = 0; k < node_top_k; ++k) {
 #pragma HLS loop_tripcount min=kTcTopK max=kTcTopK avg=kTcTopK
@@ -531,7 +586,7 @@ slm_batch_loop:
                 const int src = t * node_top_k + k;
                 const int dst = b * (tree_width * node_top_k) + src;
                 topk_tokens_sampling_out[dst] = static_cast<int64_t>(candidate_indices[src]);
-                topk_probas_sampling_out[dst] = gathered_logits[src];
+                topk_probas_sampling_out[dst] = exp_vals[k] * inv_sum;
             }
         }
     }
@@ -599,6 +654,62 @@ void e4d_apply_policy(
     }
 }
 
+// Draft-prefill projection: [batch=1, 3H] -> [batch=1, H] using existing LUTMAC dense projection.
+void e4d_prefill_fc(
+    const float* input_hidden_states_3h,   // [batch, 3 * hidden]
+    const pack512* fc_weight,              // packed [3*hidden -> hidden]
+    const float* fc_scales,                // grouped scales
+    int batch_size,
+    int hidden_size,
+    float* projected_hidden_states) {      // [batch, hidden]
+#pragma HLS INLINE off
+    if (input_hidden_states_3h == nullptr || fc_weight == nullptr ||
+        fc_scales == nullptr || projected_hidden_states == nullptr) {
+        return;
+    }
+    // Current pipeline milestone assumes batch_size=1 and hidden_size==HIDDEN.
+    if (batch_size != 1 || hidden_size != HIDDEN) {
+        return;
+    }
+
+    hls_stream<vec_t<VEC_W>> s_fc_in("s_fc_in");
+    hls_stream<vec_t<VEC_W>> s_fc_out("s_fc_out");
+
+prefill_fc_stream_in_loop:
+    for (int hv = 0; hv < (HIDDEN * 3) / VEC_W; ++hv) {
+#pragma HLS loop_tripcount min=(HIDDEN*3)/VEC_W max=(HIDDEN*3)/VEC_W avg=(HIDDEN*3)/VEC_W
+#pragma HLS PIPELINE II=1
+        vec_t<VEC_W> v;
+#pragma HLS ARRAY_PARTITION variable=v complete
+    prefill_fc_stream_in_lane:
+        for (int lane = 0; lane < VEC_W; ++lane) {
+#pragma HLS UNROLL
+            const int idx = hv * VEC_W + lane;
+            v[lane] = input_hidden_states_3h[idx];
+        }
+        s_fc_in.write(v);
+    }
+
+    dense_projection_production_scaled_batched<0, 1, HIDDEN * 3, HIDDEN, 128, TMAC_USE_TMAC_QKV>(
+        s_fc_in,
+        s_fc_out,
+        fc_weight,
+        fc_scales);
+
+prefill_fc_stream_out_loop:
+    for (int hv = 0; hv < HIDDEN / VEC_W; ++hv) {
+#pragma HLS loop_tripcount min=HIDDEN/VEC_W max=HIDDEN/VEC_W avg=HIDDEN/VEC_W
+#pragma HLS PIPELINE II=1
+        vec_t<VEC_W> v = s_fc_out.read();
+    prefill_fc_stream_out_lane:
+        for (int lane = 0; lane < VEC_W; ++lane) {
+#pragma HLS UNROLL
+            const int idx = hv * VEC_W + lane;
+            projected_hidden_states[idx] = v[lane];
+        }
+    }
+}
+
 void eagle4_draft_impl(
     int tree_depth,
     int curr_depth_start,
@@ -644,6 +755,10 @@ void eagle4_draft_impl(
 
     // Contiguous KV context
     int prefix_len,
+    bool enable_accepted_kv_compact,
+    const int64_t* accepted_draft_node_ids,
+    int accepted_draft_node_count,
+    int64_t* node_to_hbm_slot,
 
     // Hot-token remap config
     const int64_t* hot_token_id,
@@ -694,17 +809,24 @@ void eagle4_draft_impl(
     // If enabled:
     //   - use caller-provided initial_topk_* if present,
     //   - otherwise compute initial_topk_* from initial_logits (+ optional candidate remap).
-    // initial_hidden_states must be [batch, hidden] from previous verify output.
+    // initial_hidden_states must be [batch, hidden] unless prefill-stage is enabled.
     bool enable_initial_loop,// = false,
     const float* initial_logits,// = nullptr,             // [batch, initial_logits_width]
     const int64_t* initial_candidate_indices,// = nullptr,// [batch, initial_logits_width] optional
     int initial_logits_width,// = 0,
     const float* initial_topk_probas,// = nullptr,        // [batch, node_top_k] optional
     const int64_t* initial_topk_tokens,// = nullptr,      // [batch, node_top_k] optional
-    const float* initial_hidden_states// = nullptr       // [batch, hidden]
+    const float* initial_hidden_states,// = nullptr       // [batch, hidden]
+
+    // Optional draft-prefill stage (3H -> H projection + one SLM forward).
+    bool enable_prefill_stage,// = false
+    const float* prefill_input_hidden_states_3h,// = nullptr // [batch, 3 * hidden]
+    const float* prefill_input_embed_states,// = nullptr      // [batch, hidden]
+    const pack512* prefill_fc_weight,// = nullptr             // packed [3*hidden -> hidden]
+    const float* prefill_fc_scales// = nullptr                // grouped scales
 ) {
 #pragma HLS INLINE off
-    if (tree_depth <= 0 || batch_size <= 0 || batch_size > kCdtFusedMaxBatch ||
+    if (tree_depth <= 0 || batch_size <= 0 || batch_size > kHlsHiddenBatch ||
         node_top_k <= 0 || hidden_size <= 0) {
         return;
     }
@@ -736,13 +858,108 @@ void eagle4_draft_impl(
         node_top_k > kCdtFusedMaxNodeTopK || node_top_k > kEagle4LmTopKMax) {
         return;
     }
+    if (enable_accepted_kv_compact) {
+        if (accepted_draft_node_count < 0 ||
+            accepted_draft_node_count > max_verify_num ||
+            accepted_draft_node_count > kContiguousKvMaxAccepted) {
+            return;
+        }
+        if (accepted_draft_node_count > 0 &&
+            (accepted_draft_node_ids == nullptr || node_to_hbm_slot == nullptr)) {
+            return;
+        }
+    }
+
+    const int accepted_compact_count =
+        (enable_accepted_kv_compact && accepted_draft_node_count > 0)
+            ? accepted_draft_node_count
+            : 0;
+    // Conservative upper-bound for compact/write slot validation.
+    const int max_hbm_token_count =
+        prefix_len + max_node_count +
+        (curr_depth_start + tree_depth + 1) * max_tree_width + kContiguousKvMaxAccepted;
+    if (max_hbm_token_count <= 0) {
+        return;
+    }
+
+    int64_t accepted_draft_kv_slots[kContiguousKvMaxAccepted];
+#pragma HLS BIND_STORAGE variable=accepted_draft_kv_slots type=ram_2p impl=bram
+map_accept_nodes_loop:
+    for (int i = 0; i < kContiguousKvMaxAccepted; ++i) {
+#pragma HLS loop_tripcount min=1 max=kContiguousKvMaxAccepted avg=kContiguousKvMaxAccepted/2
+#pragma HLS PIPELINE II = 1
+        accepted_draft_kv_slots[i] = -1;
+    }
+    if (accepted_compact_count > 0) {
+    map_accept_nodes_loop_used:
+        for (int i = 0; i < kContiguousKvMaxAccepted; ++i) {
+#pragma HLS loop_tripcount min=1 max=kContiguousKvMaxAccepted avg=kContiguousKvMaxAccepted/2
+#pragma HLS PIPELINE II = 1
+            if (i >= accepted_compact_count) {
+                break;
+            }
+            const int64_t draft_node_id = accepted_draft_node_ids[i];
+            if (draft_node_id < 0 || draft_node_id >= max_node_count) {
+                return;
+            }
+            const int64_t mapped_slot = node_to_hbm_slot[draft_node_id];
+            if (mapped_slot < 0 || mapped_slot >= max_hbm_token_count) {
+                return;
+            }
+            accepted_draft_kv_slots[i] = mapped_slot;
+        }
+    }
+    if (accepted_compact_count > 0) {
+        const bool compact_ok = contiguous_kv_compact_accepted<
+            HEAD_DIM, NUM_KV_HEADS, kContiguousKvMaxAccepted>(
+                hbm_k,
+                hbm_v,
+                prefix_len,
+                accepted_draft_kv_slots,
+                accepted_compact_count,
+                max_hbm_token_count);
+        if (!compact_ok) {
+            return;
+        }
+    }
+    const int effective_prefix_len = prefix_len + accepted_compact_count;
+    if (effective_prefix_len < 0 || effective_prefix_len >= max_hbm_token_count) {
+        return;
+    }
+    if (node_to_hbm_slot != nullptr) {
+    node_map_init_loop:
+        for (int i = 0; i < kHlsMaxNodeCount; ++i) {
+#pragma HLS loop_tripcount min=kTcMaxNodeCount max=kTcMaxNodeCount avg=kTcMaxNodeCount
+#pragma HLS PIPELINE II = 1
+            if (i < max_node_count) {
+                node_to_hbm_slot[i] = -1;
+            }
+        }
+    }
+
+    const bool run_prefill_stage =
+        enable_prefill_stage &&
+        enable_initial_loop &&
+        prefill_input_hidden_states_3h != nullptr &&
+        prefill_input_embed_states != nullptr &&
+        prefill_fc_weight != nullptr &&
+        prefill_fc_scales != nullptr;
+    if (enable_prefill_stage && !run_prefill_stage) {
+        return;
+    }
+
+    const float* initial_hidden_states_ptr = initial_hidden_states;
+    const float* initial_topk_probas_ptr = initial_topk_probas;
+    const int64_t* initial_topk_tokens_ptr = initial_topk_tokens;
 
     const bool has_initial_topk =
-        (initial_topk_probas != nullptr && initial_topk_tokens != nullptr);
+        run_prefill_stage ||
+        (initial_topk_probas_ptr != nullptr && initial_topk_tokens_ptr != nullptr);
     const bool has_initial_logits = (initial_logits != nullptr && initial_logits_width > 0);
     const bool run_initial_loop = enable_initial_loop && (has_initial_topk || has_initial_logits);
 
-    if (enable_initial_loop && (!run_initial_loop || initial_hidden_states == nullptr)) {
+    if (enable_initial_loop &&
+        (!run_initial_loop || (!run_prefill_stage && initial_hidden_states_ptr == nullptr))) {
         return;
     }
 
@@ -800,6 +1017,16 @@ void eagle4_draft_impl(
 #pragma HLS BIND_STORAGE variable=bram_rope_cos_vals type=ram_2p impl=bram
     float bram_rope_sin_vals[HEAD_DIM / 2];
 #pragma HLS BIND_STORAGE variable=bram_rope_sin_vals type=ram_2p impl=bram
+    float s_prefill_hidden_projected[kHlsHiddenBatch * HIDDEN];
+    float s_prefill_embed_states[kHlsHiddenBatch * HIDDEN];
+    float s_prefill_reasoning_hidden[kHlsHiddenBatch * HIDDEN];
+    float s_prefill_topk_probas[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
+    int64_t s_prefill_topk_tokens[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
+#pragma HLS BIND_STORAGE variable=s_prefill_hidden_projected type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=s_prefill_embed_states type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=s_prefill_reasoning_hidden type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=s_prefill_topk_probas type=ram_2p impl=bram
+#pragma HLS BIND_STORAGE variable=s_prefill_topk_tokens type=ram_2p impl=bram
 
     // ── BRAM staging: hidden state arrays (kHlsHiddenBatch=1 active) ─────
     float bram_step_input_hidden_states[kHlsHiddenBatch * TREE_WIDTH * HIDDEN];
@@ -978,6 +1205,68 @@ void eagle4_draft_impl(
         }
     }
 
+    if (run_prefill_stage) {
+    prefill_topk_zero_loop:
+        for (int i = 0; i < kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK; ++i) {
+#pragma HLS loop_tripcount min=kTcInitScratchSize max=kTcInitScratchSize avg=kTcInitScratchSize
+#pragma HLS PIPELINE II=1
+            s_prefill_topk_probas[i] = 0.0f;
+            s_prefill_topk_tokens[i] = 0;
+        }
+    prefill_embed_copy_loop:
+        for (int i = 0; i < batch_size * hidden_size; ++i) {
+#pragma HLS loop_tripcount min=HIDDEN max=HIDDEN avg=HIDDEN
+#pragma HLS PIPELINE II=1
+            s_prefill_embed_states[i] = prefill_input_embed_states[i];
+        }
+
+        // Project [batch, 3H] captured target features into draft hidden width.
+        e4d_prefill_fc(
+            prefill_input_hidden_states_3h,
+            prefill_fc_weight,
+            prefill_fc_scales,
+            batch_size,
+            hidden_size,
+            s_prefill_hidden_projected);
+
+        // Prefill SLM uses the shared rope table (single config for current pipeline).
+        e4d_slm_topk(
+            s_prefill_hidden_projected,
+            s_prefill_embed_states,
+            batch_size,
+            1,
+            hidden_size,
+            node_top_k,
+            w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales, w_up, up_scales,
+            w_down, down_scales,
+            hidden_norm_gamma, embed_norm_gamma, post_attn_norm_gamma, final_norm_gamma,
+            bram_rope_cos_vals, bram_rope_sin_vals,
+            hbm_k, hbm_v,
+            efficient_lm_head_down_proj_weight,
+            bram_efficient_qweight,
+            bram_efficient_scales,
+            bram_efficient_qzeros,
+            bram_efficient_g_idx,
+            lm_head_weight,
+            efficient_lm_rank,
+            efficient_lm_vocab_size,
+            effective_prefix_len,
+            curr_depth_start,
+            parent_indices_accum,
+            s_prefill_reasoning_hidden,
+            s_prefill_topk_probas,
+            s_prefill_topk_tokens);
+        if (node_to_hbm_slot != nullptr && max_node_count > 0) {
+            const int root_slot = effective_prefix_len + curr_depth_start * max_tree_width;
+            if (root_slot >= 0 && root_slot < max_hbm_token_count) {
+                node_to_hbm_slot[0] = root_slot;
+            }
+        }
+        initial_hidden_states_ptr = s_prefill_reasoning_hidden;
+        initial_topk_probas_ptr = s_prefill_topk_probas;
+        initial_topk_tokens_ptr = s_prefill_topk_tokens;
+    }
+
     if (run_initial_loop) {
         if (has_initial_topk) {
             // Copy external data into local scratch so the pointer below is always
@@ -986,8 +1275,8 @@ void eagle4_draft_impl(
             for (int i = 0; i < kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK; ++i) {
 #pragma HLS loop_tripcount min=kTcInitScratchSize max=kTcInitScratchSize avg=kTcInitScratchSize
 #pragma HLS PIPELINE II = 1
-                s_initial_topk_probas[i] = initial_topk_probas[i];
-                s_initial_topk_tokens[i] = initial_topk_tokens[i];
+                s_initial_topk_probas[i] = initial_topk_probas_ptr[i];
+                s_initial_topk_tokens[i] = initial_topk_tokens_ptr[i];
             }
         } else {
             e4d_softmax_topk(
@@ -1018,7 +1307,7 @@ void eagle4_draft_impl(
             s_initial_topk_probas,
             s_initial_topk_tokens,
             initial_last_layer_scores,
-            initial_hidden_states,
+            initial_hidden_states_ptr,
             hot_token_id,
             hot_token_vocab_size,
             use_hot_token_id,
@@ -1175,6 +1464,7 @@ orchestrator_depth_loop:
         const int current_depth = curr_depth_start + d;
         e4d_slm_topk(
             bram_step_input_hidden_states,
+            prefill_input_embed_states,  // optional recurrent embed seed from caller
             batch_size,
             curr_tree_width,
             hidden_size,
@@ -1192,12 +1482,28 @@ orchestrator_depth_loop:
             lm_head_weight,
             efficient_lm_rank,
             efficient_lm_vocab_size,
-            prefix_len,
+            effective_prefix_len,
             current_depth,
             parent_indices_accum,
             bram_step_input_hidden_states,
             bram_step_topk_probas_sampling,
             bram_step_topk_tokens_sampling);
+        if (node_to_hbm_slot != nullptr) {
+            const int slot_base = effective_prefix_len + current_depth * max_tree_width;
+        update_node_to_hbm_loop:
+            for (int t = 0; t < TREE_WIDTH; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
+#pragma HLS PIPELINE II = 1
+                if (t < curr_tree_width) {
+                    const int64_t node_id = bram_step_topk_indexs_prev[t];  // batch=1
+                    const int slot = slot_base + t;
+                    if (node_id >= 0 && node_id < max_node_count &&
+                        slot >= 0 && slot < max_hbm_token_count) {
+                        node_to_hbm_slot[node_id] = slot;
+                    }
+                }
+            }
+        }
 
         // Stage C: fused score/update for one depth.
         e4d_fused_step(
@@ -1488,6 +1794,10 @@ void eagle4_draft(
     int efficient_lm_rank,
     int efficient_lm_vocab_size,
     int prefix_len,
+    bool enable_accepted_kv_compact,
+    const int64_t* accepted_draft_node_ids,
+    int accepted_draft_node_count,
+    int64_t* node_to_hbm_slot,
     const int64_t* hot_token_id,
     int64_t hot_token_vocab_size,
     bool use_hot_token_id,
@@ -1525,7 +1835,12 @@ void eagle4_draft(
     int initial_logits_width,
     const float* initial_topk_probas,
     const int64_t* initial_topk_tokens,
-    const float* initial_hidden_states) {
+    const float* initial_hidden_states,
+    bool enable_prefill_stage,
+    const float* prefill_input_hidden_states_3h,
+    const float* prefill_input_embed_states,
+    const tmac::hls::pack512* prefill_fc_weight,
+    const float* prefill_fc_scales) {
 #pragma HLS INLINE off
 #pragma HLS INTERFACE m_axi port=policy_next_tree_width offset=slave bundle=gmem_policy
 #pragma HLS INTERFACE m_axi port=policy_next_verify_num offset=slave bundle=gmem_policy
@@ -1559,6 +1874,8 @@ void eagle4_draft(
 #pragma HLS INTERFACE m_axi port=rope_cfg_table offset=slave bundle=gmem_cfg
 #pragma HLS INTERFACE m_axi port=hbm_k offset=slave bundle=gmem8
 #pragma HLS INTERFACE m_axi port=hbm_v offset=slave bundle=gmem9
+#pragma HLS INTERFACE m_axi port=accepted_draft_node_ids offset=slave bundle=gmem_kv_compact
+#pragma HLS INTERFACE m_axi port=node_to_hbm_slot offset=slave bundle=gmem_kv_compact
 
 #pragma HLS INTERFACE m_axi port=efficient_lm_head_down_proj_weight offset=slave bundle=gmem11
 #pragma HLS INTERFACE m_axi port=efficient_lm_head_qweight_row_major offset=slave bundle=gmem12
@@ -1598,6 +1915,10 @@ void eagle4_draft(
 #pragma HLS INTERFACE m_axi port=initial_topk_probas offset=slave bundle=gmem_init2
 #pragma HLS INTERFACE m_axi port=initial_topk_tokens offset=slave bundle=gmem_init3
 #pragma HLS INTERFACE m_axi port=initial_hidden_states offset=slave bundle=gmem_init4
+#pragma HLS INTERFACE m_axi port=prefill_input_hidden_states_3h offset=slave bundle=gmem_prefill0
+#pragma HLS INTERFACE m_axi port=prefill_input_embed_states offset=slave bundle=gmem_prefill1
+#pragma HLS INTERFACE m_axi port=prefill_fc_weight offset=slave bundle=gmem_prefill2
+#pragma HLS INTERFACE m_axi port=prefill_fc_scales offset=slave bundle=gmem_prefill3
 
 #pragma HLS INTERFACE s_axilite port=tree_depth bundle=control
 #pragma HLS INTERFACE s_axilite port=curr_depth_start bundle=control
@@ -1606,6 +1927,8 @@ void eagle4_draft(
 #pragma HLS INTERFACE s_axilite port=efficient_lm_rank bundle=control
 #pragma HLS INTERFACE s_axilite port=efficient_lm_vocab_size bundle=control
 #pragma HLS INTERFACE s_axilite port=prefix_len bundle=control
+#pragma HLS INTERFACE s_axilite port=enable_accepted_kv_compact bundle=control
+#pragma HLS INTERFACE s_axilite port=accepted_draft_node_count bundle=control
 #pragma HLS INTERFACE s_axilite port=hot_token_vocab_size bundle=control
 #pragma HLS INTERFACE s_axilite port=use_hot_token_id bundle=control
 #pragma HLS INTERFACE s_axilite port=batch_size bundle=control
@@ -1615,6 +1938,7 @@ void eagle4_draft(
 #pragma HLS INTERFACE s_axilite port=max_verify_num bundle=control
 #pragma HLS INTERFACE s_axilite port=max_tree_width bundle=control
 #pragma HLS INTERFACE s_axilite port=enable_initial_loop bundle=control
+#pragma HLS INTERFACE s_axilite port=enable_prefill_stage bundle=control
 #pragma HLS INTERFACE s_axilite port=initial_logits_width bundle=control
 #pragma HLS INTERFACE s_axilite port=return bundle=control
 
@@ -1650,6 +1974,10 @@ void eagle4_draft(
         efficient_lm_rank,
         efficient_lm_vocab_size,
         prefix_len,
+        enable_accepted_kv_compact,
+        accepted_draft_node_ids,
+        accepted_draft_node_count,
+        node_to_hbm_slot,
         hot_token_id,
         hot_token_vocab_size,
         use_hot_token_id,
@@ -1687,5 +2015,10 @@ void eagle4_draft(
         initial_logits_width,
         initial_topk_probas,
         initial_topk_tokens,
-        initial_hidden_states);
+        initial_hidden_states,
+        enable_prefill_stage,
+        prefill_input_hidden_states_3h,
+        prefill_input_embed_states,
+        prefill_fc_weight,
+        prefill_fc_scales);
 }

@@ -5,7 +5,9 @@
 #include <cstring>
 #include <cmath>
 #include <limits>
+#ifdef __SYNTHESIS__
 #include <hls_half.h>
+#endif
 #include "tmac_utils.hpp"
 
 namespace tmac {
@@ -25,9 +27,28 @@ constexpr int kLmMaxVocabPacked = (kLmTcVocab + 7) / 8;
 
 inline float eagle4_fp16_to_float(uint16_t h) {
 #pragma HLS INLINE
+#ifdef __SYNTHESIS__
     half fp16_val;
     std::memcpy(&fp16_val, &h, sizeof(half));
     return static_cast<float>(fp16_val);
+#else
+    // Software IEEE-754 fp16 decode for desktop compilation.
+    uint32_t sign = (h >> 15) & 1;
+    uint32_t exp5 = (h >> 10) & 0x1f;
+    uint32_t frac = h & 0x3ff;
+    float result;
+    if (exp5 == 0) {
+        // subnormal or zero
+        result = std::ldexp(static_cast<float>(frac), -24);
+    } else if (exp5 == 0x1f) {
+        // inf / nan
+        result = (frac == 0) ? std::numeric_limits<float>::infinity()
+                             : std::numeric_limits<float>::quiet_NaN();
+    } else {
+        result = std::ldexp(static_cast<float>(frac + 1024), exp5 - 25);
+    }
+    return sign ? -result : result;
+#endif
 }
 
 inline int eagle4_lowest_slot(const float* scores, int topk) {

@@ -2,9 +2,35 @@
 #define TMAC_EAGLE_TIER1_LM_TOP_HPP
 
 #include <cstdint>
+#include <cstring>
 
 #include "eagle_tier1_top.hpp"
 #include "eagle4_lm_head_hls.hpp"
+
+// ---------- Simulation-only intermediate tensor dump infrastructure ----------
+#ifndef __SYNTHESIS__
+struct Eagle4LmDebugDump {
+    // SLM layer outputs (materialized from streams)
+    float logits_hidden[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax];   // tensor_110
+    float reasoning_state[tmac::hls::TREE_WIDTH * tmac::hls::HIDDEN];             // tensor_109
+
+    // LM head intermediates
+    float low_rank[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmRankMax];           // tensor_131
+    int   candidate_indices[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];  // tensor_133
+    float candidate_scores[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];   // candidate GPTQ scores
+    float gathered_logits[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];    // tensor_134
+    int   topk_tokens[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];        // final token IDs
+    float topk_probas[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];        // final probabilities
+
+    int rank = 0;
+    int vocab = 0;
+    int topk = 0;
+    bool valid = false;
+};
+
+// Set this pointer before calling eagle_tier1_lm_top_eagle4 to capture intermediates.
+extern Eagle4LmDebugDump* g_eagle4_lm_debug_dump;
+#endif // __SYNTHESIS__
 
 // LM-head compatibility modes:
 // - EAGLE4 efficient LM-head path is the integration target.

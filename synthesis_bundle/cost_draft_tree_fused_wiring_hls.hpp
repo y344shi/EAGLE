@@ -102,6 +102,80 @@ void e4d_fused_step(
     int64_t* dbg_remapped_topk_tokens       // [batch, tree_width * node_top_k]
 );
 
+// Backward-compatible wrapper for legacy fused-step TB entrypoint.
+inline void cost_draft_tree_fused_step_hls(
+    const float* topk_probas_sampling,
+    const int64_t* topk_tokens_sampling,
+    const float* last_layer_scores,
+    const float* input_hidden_states,
+    const int64_t* hot_token_id,
+    int64_t hot_token_vocab_size,
+    bool use_hot_token_id,
+    const int64_t* topk_indexs_prev,
+    int batch_size,
+    int node_top_k,
+    int tree_width,
+    int hidden_size,
+    int cumu_count,
+    int verify_num,
+    int curr_depth,
+    int max_node_count,
+    int max_verify_num,
+    int64_t* cumu_tokens,
+    float* cumu_scores,
+    int64_t* cumu_deltas,
+    int64_t* prev_indexs,
+    int64_t* next_indexs,
+    int64_t* side_indexs,
+    float* output_scores,
+    int64_t* output_tokens,
+    float* work_scores,
+    float* sort_scores,
+    float* output_hidden_states,
+    int64_t* cache_topk_indices,
+    float* dbg_curr_layer_scores,
+    float* dbg_sort_layer_scores,
+    int64_t* dbg_sort_layer_indices,
+    int64_t* dbg_parent_indices_in_layer,
+    int64_t* dbg_remapped_topk_tokens) {
+#pragma HLS INLINE
+    e4d_fused_step(
+        topk_probas_sampling,
+        topk_tokens_sampling,
+        last_layer_scores,
+        input_hidden_states,
+        hot_token_id,
+        hot_token_vocab_size,
+        use_hot_token_id,
+        topk_indexs_prev,
+        batch_size,
+        node_top_k,
+        tree_width,
+        hidden_size,
+        cumu_count,
+        verify_num,
+        curr_depth,
+        max_node_count,
+        max_verify_num,
+        cumu_tokens,
+        cumu_scores,
+        cumu_deltas,
+        prev_indexs,
+        next_indexs,
+        side_indexs,
+        output_scores,
+        output_tokens,
+        work_scores,
+        sort_scores,
+        output_hidden_states,
+        cache_topk_indices,
+        dbg_curr_layer_scores,
+        dbg_sort_layer_scores,
+        dbg_sort_layer_indices,
+        dbg_parent_indices_in_layer,
+        dbg_remapped_topk_tokens);
+}
+
 // Fixed tree-width policy helper for orchestrator usage.
 // The policy keeps tree_width/verify_num unchanged and never stops early.
 struct E4dFixedPolicy {
@@ -174,10 +248,42 @@ void e4d_prep_next_inputs(
     int64_t* next_topk_indexs_prev        // packed [batch, next_tree_width]
 );
 
+inline void cost_draft_tree_prep_next_inputs_hls(
+    const float* output_scores,
+    const int64_t* output_tokens,
+    const float* output_hidden_states,
+    const int64_t* cache_topk_indices,
+    int batch_size,
+    int node_top_k,
+    int hidden_size,
+    int next_tree_width,
+    int max_tree_width,
+    int64_t* next_input_tokens,
+    float* next_last_layer_scores,
+    float* next_input_hidden_states,
+    int64_t* next_topk_indexs_prev) {
+#pragma HLS INLINE
+    e4d_prep_next_inputs(
+        output_scores,
+        output_tokens,
+        output_hidden_states,
+        cache_topk_indices,
+        batch_size,
+        node_top_k,
+        hidden_size,
+        next_tree_width,
+        max_tree_width,
+        next_input_tokens,
+        next_last_layer_scores,
+        next_input_hidden_states,
+        next_topk_indexs_prev);
+}
+
 // Run EAGLE4 SLM forward + LM-head top-k for one draft depth.
 // The SLM path owns top-k candidate generation; outputs are packed to fused-step layout.
 void e4d_slm_topk(
     const float* input_hidden_states,          // packed [batch, tree_width, hidden]
+    const float* input_embed_states,           // packed [batch, tree_width, hidden] or nullptr (falls back to hidden)
     int batch_size,
     int tree_width,
     int hidden_size,
@@ -294,6 +400,10 @@ void eagle4_draft_impl(
 
     // Contiguous KV context
     int prefix_len,
+    bool enable_accepted_kv_compact,
+    const int64_t* accepted_draft_node_ids, // [accepted_draft_node_count] draft-node IDs from previous verify
+    int accepted_draft_node_count,
+    int64_t* node_to_hbm_slot,              // [max_node_count], persistent mapping draft_node_id -> hbm_slot_id
 
     // Hot-token remap config
     const int64_t* hot_token_id,
@@ -344,14 +454,23 @@ void eagle4_draft_impl(
     // If enabled:
     //   - use caller-provided initial_topk_* if present,
     //   - otherwise compute initial_topk_* from initial_logits (+ optional candidate remap).
-    // initial_hidden_states must be [batch, hidden] from previous verify output.
+    // initial_hidden_states must be [batch, hidden] unless prefill-stage is enabled.
     bool enable_initial_loop,// = false,
     const float* initial_logits,// = nullptr,             // [batch, initial_logits_width]
     const int64_t* initial_candidate_indices,// = nullptr,// [batch, initial_logits_width] optional
     int initial_logits_width,// = 0,
     const float* initial_topk_probas,// = nullptr,        // [batch, node_top_k] optional
     const int64_t* initial_topk_tokens,// = nullptr,      // [batch, node_top_k] optional
-    const float* initial_hidden_states// = nullptr       // [batch, hidden]
+    const float* initial_hidden_states,// = nullptr       // [batch, hidden]
+
+    // Optional draft-prefill stage (3H -> H projection + one SLM forward).
+    // When enabled, initial_topk_* and initial_hidden_states are generated internally
+    // from these inputs and override external initial_* tensors.
+    bool enable_prefill_stage,// = false
+    const float* prefill_input_hidden_states_3h,// = nullptr // [batch, 3 * hidden]
+    const float* prefill_input_embed_states,// = nullptr      // [batch, hidden]
+    const pack512* prefill_fc_weight,// = nullptr             // packed [3*hidden -> hidden]
+    const float* prefill_fc_scales// = nullptr                // grouped scales for prefill_fc_weight
 );
 
 } // namespace hls
@@ -394,6 +513,10 @@ void eagle4_draft(
     int efficient_lm_rank,
     int efficient_lm_vocab_size,
     int prefix_len,
+    bool enable_accepted_kv_compact,
+    const int64_t* accepted_draft_node_ids,
+    int accepted_draft_node_count,
+    int64_t* node_to_hbm_slot,
     const int64_t* hot_token_id,
     int64_t hot_token_vocab_size,
     bool use_hot_token_id,
@@ -431,6 +554,11 @@ void eagle4_draft(
     int initial_logits_width,
     const float* initial_topk_probas,
     const int64_t* initial_topk_tokens,
-    const float* initial_hidden_states);
+    const float* initial_hidden_states,
+    bool enable_prefill_stage,
+    const float* prefill_input_hidden_states_3h,
+    const float* prefill_input_embed_states,
+    const tmac::hls::pack512* prefill_fc_weight,
+    const float* prefill_fc_scales);
 
 #endif // TMAC_COST_DRAFT_TREE_FUSED_WIRING_HLS_HPP
