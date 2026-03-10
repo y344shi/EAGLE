@@ -40,6 +40,64 @@ inline float scale_pow2(float x) {
     return x * (1.0f / static_cast<float>(1 << SCALE_EXP));
 }
 
+// ============================================================
+// INT2 (2-bit) weight primitives
+// pack512 stores 256 INT2 weights (2 bits each, LSB-first).
+// Symmetric encoding: raw [0,3] -> signed [-2,-1,0,1] (zero_point = 2).
+// ============================================================
+
+// Extract raw 2-bit weight at lane idx from pack512 (0..255). Range [0,3].
+inline uint8_t get_w2_raw(const pack512& p, int idx) {
+#ifdef __SYNTHESIS__
+    const int bit = idx * 2;
+    ap_uint<2> raw = p.range(bit + 1, bit);
+    return static_cast<uint8_t>(raw);
+#else
+    const int byte_idx = idx >> 2;
+    const int shift = (idx & 3) * 2;
+    return (p.bytes[byte_idx] >> shift) & 0x3;
+#endif
+}
+
+// Symmetric decode: raw [0,3] -> signed int8 [-2,-1,0,1]
+inline int8_t decode_w2(uint8_t raw) { return static_cast<int8_t>(raw) - 2; }
+
+// Build 4-entry LUT for INT2 symmetric (zero_point=2).
+// lut_raw4[raw] = a_scaled * (raw - 2)
+inline void build_lut_raw4(float a_scaled, float lut_raw4[4]) {
+#pragma HLS INLINE
+#pragma HLS ARRAY_PARTITION variable=lut_raw4 complete
+    lut_raw4[0] = a_scaled * -2.0f;  // raw=0 -> w=-2
+    lut_raw4[1] = -a_scaled;          // raw=1 -> w=-1
+    lut_raw4[2] = 0.0f;               // raw=2 -> w=0
+    lut_raw4[3] =  a_scaled;          // raw=3 -> w=1
+}
+
+// LUT-MAC broadcast (INT2): one scalar × OUT_W INT2 weights accumulated into OUT_W outputs.
+// OUT_W must be <= 256 (pack512 holds 256 INT2 weights).
+template <int SCALE_EXP, int OUT_W, bool ENABLE_TMAC = true>
+void lut_mac_broadcast_w2(float a_scalar,
+                           const pack512& w_pkt,
+                           vec_t<OUT_W>& acc_vec) {
+#pragma HLS INLINE
+    static_assert(OUT_W <= 256, "pack512 stores at most 256 int2 weights");
+    static_assert(OUT_W % VEC_W == 0, "OUT_W must align to VEC_W");
+
+    const float a_scaled = scale_pow2<SCALE_EXP>(a_scalar);
+    float lut_raw4[4];
+    build_lut_raw4(a_scaled, lut_raw4);
+
+    for (int lane = 0; lane < OUT_W; ++lane) {
+#pragma HLS UNROLL factor=16
+        const uint8_t w_raw = get_w2_raw(w_pkt, lane);
+        if constexpr (ENABLE_TMAC) {
+            acc_vec[lane] += lut_raw4[w_raw];
+        } else {
+            acc_vec[lane] += a_scaled * static_cast<float>(decode_w2(w_raw));
+        }
+    }
+}
+
 inline void build_lut_pos(float a_scaled, float lut_pos[9]) {
 #pragma HLS INLINE
 #pragma HLS ARRAY_PARTITION variable = lut_pos complete
@@ -585,6 +643,275 @@ void dense_projection_production_scaled_raw(hls_stream<vec_t<VEC_W>>& a_stream,
             out_vec[j] = sum;
         }
         c_stream.write(out_vec);
+    }
+}
+
+// ============================================================
+// INT2 dense projection functions
+// TILE = 256: one pack512 covers 256 INT2 output lanes per input scalar k.
+// OUT_DIM must be a multiple of 256.
+// Weight layout: weights[t * INPUT_DIM + k] = pack512 with 256 INT2 weights
+//   for tile t (output lanes [t*256 .. (t+1)*256-1]) and input index k.
+// ============================================================
+
+// Non-batched INT2 scaled projection.
+template <int SCALE_EXP, int INPUT_DIM, int OUT_DIM = 256, int GROUP_SIZE = 128, bool ENABLE_TMAC = false>
+void dense_projection_production_scaled_w2(hls_stream<vec_t<VEC_W>>& a_stream,
+                                            hls_stream<vec_t<VEC_W>>& c_stream,
+                                            const pack512* weights,
+                                            const float* scales) {
+    static_assert(INPUT_DIM % VEC_W == 0, "INPUT_DIM must be multiple of VEC_W");
+    static_assert(GROUP_SIZE % VEC_W == 0, "GROUP_SIZE must be multiple of VEC_W");
+    static_assert(INPUT_DIM % GROUP_SIZE == 0, "INPUT_DIM must be multiple of GROUP_SIZE");
+    static_assert(OUT_DIM % 256 == 0, "OUT_DIM must be multiple of INT2 tile size (256)");
+
+    constexpr int TILE = 256;
+    constexpr int TILES = OUT_DIM / TILE;
+    constexpr int NUM_GROUPS = INPUT_DIM / GROUP_SIZE;
+
+    static float a_buffer[INPUT_DIM];
+#pragma HLS BIND_STORAGE variable=a_buffer type=ram_2p impl=bram
+
+    static pack512 weights_tile_bram[INPUT_DIM];
+#pragma HLS BIND_STORAGE variable=weights_tile_bram type=ram_2p impl=bram
+
+    static float scales_tile_bram[NUM_GROUPS][TILE];
+#pragma HLS BIND_STORAGE variable=scales_tile_bram type=ram_2p impl=bram
+#pragma HLS ARRAY_PARTITION variable=scales_tile_bram cyclic factor=VEC_W dim=2
+
+    float acc_banks[4][TILE];
+#pragma HLS ARRAY_PARTITION variable=acc_banks complete dim=1
+#pragma HLS ARRAY_PARTITION variable=acc_banks cyclic factor=VEC_W dim=2
+
+    vec_t<VEC_W> current_input_chunk;
+w2_ingest_a:
+    for (int k = 0; k < INPUT_DIM; k += VEC_W) {
+#pragma HLS loop_tripcount min=INPUT_DIM/VEC_W max=INPUT_DIM/VEC_W avg=INPUT_DIM/VEC_W
+        current_input_chunk = a_stream.read();
+        for (int j = 0; j < VEC_W; ++j) {
+#pragma HLS PIPELINE II=1
+            a_buffer[k + j] = current_input_chunk[j];
+        }
+    }
+
+    float lut_raw4[4];
+#pragma HLS ARRAY_PARTITION variable=lut_raw4 complete
+
+w2_tile:
+    for (int t = 0; t < TILES; ++t) {
+#pragma HLS loop_tripcount min=TILES max=TILES avg=TILES
+w2_init_acc:
+        for (int b = 0; b < 4; ++b) {
+#pragma HLS loop_tripcount min=4 max=4 avg=4
+            for (int i = 0; i < TILE; ++i) {
+#pragma HLS UNROLL factor=VEC_W
+                acc_banks[b][i] = 0.0f;
+            }
+        }
+w2_load_weights:
+        for (int k = 0; k < INPUT_DIM; ++k) {
+#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM avg=INPUT_DIM
+#pragma HLS PIPELINE II=1
+            weights_tile_bram[k] = weights[t * INPUT_DIM + k];
+        }
+w2_load_scales:
+        for (int g = 0; g < NUM_GROUPS; ++g) {
+#pragma HLS loop_tripcount min=NUM_GROUPS max=NUM_GROUPS avg=NUM_GROUPS
+            for (int l = 0; l < TILE; ++l) {
+#pragma HLS PIPELINE II=1
+                scales_tile_bram[g][l] = scales[(g * TILES + t) * TILE + l];
+            }
+        }
+w2_compute_group:
+        for (int g = 0; g < NUM_GROUPS; ++g) {
+#pragma HLS loop_tripcount min=NUM_GROUPS max=NUM_GROUPS avg=NUM_GROUPS
+w2_compute_k:
+            for (int kg = 0; kg < GROUP_SIZE; ++kg) {
+#pragma HLS loop_tripcount min=GROUP_SIZE max=GROUP_SIZE avg=GROUP_SIZE
+#pragma HLS PIPELINE II=1
+                const int k = g * GROUP_SIZE + kg;
+                const float a_scalar = a_buffer[k];
+                const int bank = k & 0x3;
+                const pack512 w_pkt = weights_tile_bram[k];
+
+                if constexpr (ENABLE_TMAC) {
+                    build_lut_raw4(scale_pow2<SCALE_EXP>(a_scalar), lut_raw4);
+                }
+w2_compute_lane:
+                for (int lane = 0; lane < TILE; ++lane) {
+#pragma HLS UNROLL factor=VEC_W
+                    const uint8_t w_raw = get_w2_raw(w_pkt, lane);
+                    const float scale_val = scales_tile_bram[g][lane];
+                    float prod;
+                    if constexpr (ENABLE_TMAC) {
+                        prod = lut_raw4[w_raw] * scale_val;
+                    } else {
+                        prod = scale_pow2<SCALE_EXP>(a_scalar) * static_cast<float>(decode_w2(w_raw)) * scale_val;
+                    }
+                    acc_banks[bank][lane] += prod;
+                }
+            }
+        }
+w2_store_oc:
+        for (int oc = 0; oc < TILE / VEC_W; ++oc) {
+#pragma HLS PIPELINE II=1
+            vec_t<VEC_W> out_vec;
+            for (int j = 0; j < VEC_W; ++j) {
+#pragma HLS UNROLL
+                const int lane = oc * VEC_W + j;
+                out_vec[j] = acc_banks[0][lane] + acc_banks[1][lane] +
+                             acc_banks[2][lane] + acc_banks[3][lane];
+            }
+            c_stream.write(out_vec);
+        }
+    }
+}
+
+// Batched INT2 scaled projection.
+// Mirrors dense_projection_production_scaled_batched but with TILE=256 (INT2 packing).
+template <int SCALE_EXP, int BATCH_SIZE = 1, int INPUT_DIM = 256, int OUT_DIM = 256,
+          int GROUP_SIZE = 128, bool ENABLE_TMAC = false>
+void dense_projection_production_scaled_batched_w2(hls_stream<vec_t<VEC_W>>& a_stream,
+                                                    hls_stream<vec_t<VEC_W>>& c_stream,
+                                                    const pack512* weights,
+                                                    const float* scales) {
+    static_assert(INPUT_DIM % VEC_W == 0, "INPUT_DIM must be multiple of VEC_W");
+    static_assert(GROUP_SIZE % VEC_W == 0, "GROUP_SIZE must be multiple of VEC_W");
+    static_assert(OUT_DIM % 256 == 0, "OUT_DIM must be multiple of INT2 tile size (256)");
+
+    constexpr int TILE = 256;
+    constexpr int TILES = OUT_DIM / TILE;
+    constexpr int NUM_GROUPS = INPUT_DIM / GROUP_SIZE;
+    constexpr int SCALES_PER_TILE = NUM_GROUPS * TILE;
+    constexpr int NUM_BANKS = 8;
+
+    static float a_buffer[BATCH_SIZE][INPUT_DIM];
+#pragma HLS BIND_STORAGE variable=a_buffer type=ram_2p impl=bram
+
+    static float out_buffer[BATCH_SIZE][OUT_DIM];
+#pragma HLS BIND_STORAGE variable=out_buffer type=ram_2p impl=bram
+
+    static pack512 weights_tile_bram[INPUT_DIM];
+#pragma HLS BIND_STORAGE variable=weights_tile_bram type=ram_2p impl=bram
+
+    static float scales_tile_bram[SCALES_PER_TILE];
+#pragma HLS BIND_STORAGE variable=scales_tile_bram type=ram_2p impl=bram
+#pragma HLS ARRAY_PARTITION variable=scales_tile_bram cyclic factor=TILE dim=1
+
+    // Accumulators indexed [lane][bank] for better pipelining.
+    vec_t<NUM_BANKS> acc_banks[TILE];
+#pragma HLS ARRAY_PARTITION variable=acc_banks complete dim=0
+
+    vec_t<VEC_W> current_input_chunk;
+
+w2b_ingest_a:
+    for (int b = 0; b < BATCH_SIZE; ++b) {
+#pragma HLS loop_tripcount min=BATCH_SIZE max=BATCH_SIZE avg=BATCH_SIZE
+        for (int k = 0; k < INPUT_DIM; k += VEC_W) {
+#pragma HLS loop_tripcount min=INPUT_DIM/VEC_W max=INPUT_DIM/VEC_W avg=INPUT_DIM/VEC_W
+            current_input_chunk = a_stream.read();
+            for (int j = 0; j < VEC_W; ++j) {
+#pragma HLS PIPELINE II=1
+                a_buffer[b][k + j] = current_input_chunk[j];
+            }
+        }
+    }
+
+    float lut_pos[3];  // lut_pos[0]=-2a, [1]=-a, [2]=a  (entry 2 is 0)
+#pragma HLS ARRAY_PARTITION variable=lut_pos complete
+
+w2b_tile:
+    for (int t = 0; t < TILES; ++t) {
+#pragma HLS loop_tripcount min=TILES max=TILES avg=TILES
+w2b_load_weights:
+        for (int k = 0; k < INPUT_DIM; ++k) {
+#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM avg=INPUT_DIM
+#pragma HLS PIPELINE II=1
+            weights_tile_bram[k] = weights[t * INPUT_DIM + k];
+        }
+w2b_load_scales:
+        for (int g = 0; g < NUM_GROUPS; ++g) {
+#pragma HLS loop_tripcount min=NUM_GROUPS max=NUM_GROUPS avg=NUM_GROUPS
+            for (int l = 0; l < TILE; ++l) {
+#pragma HLS loop_tripcount min=TILE max=TILE avg=TILE
+#pragma HLS PIPELINE II=1
+                const int bram_addr = g * TILE + l;
+                scales_tile_bram[bram_addr] = scales[(g * TILES + t) * TILE + l];
+            }
+        }
+w2b_compute_b:
+        for (int b = 0; b < BATCH_SIZE; ++b) {
+#pragma HLS loop_tripcount min=BATCH_SIZE max=BATCH_SIZE avg=BATCH_SIZE
+w2b_init_acc:
+            for (int i = 0; i < TILE; ++i) {
+#pragma HLS UNROLL
+                for (int bi = 0; bi < NUM_BANKS; ++bi) {
+#pragma HLS UNROLL
+                    acc_banks[i][bi] = 0.0f;
+                }
+            }
+w2b_compute_k:
+            for (int k = 0; k < INPUT_DIM; ++k) {
+#pragma HLS loop_tripcount min=INPUT_DIM max=INPUT_DIM avg=INPUT_DIM
+#pragma HLS PIPELINE II=1
+                const float a_scalar = a_buffer[b][k];
+                const int group = k / GROUP_SIZE;
+                const pack512 w_pkt = weights_tile_bram[k];
+                const int scale_base = group * TILE;
+                const int bank = k & (NUM_BANKS - 1);
+
+                const float a_sc = scale_pow2<SCALE_EXP>(a_scalar);
+                // 3-entry shortcut: raw=2 -> prod=0 avoids one multiply
+                if constexpr (ENABLE_TMAC) {
+                    lut_pos[0] = a_sc * -2.0f;
+                    lut_pos[1] = -a_sc;
+                    lut_pos[2] =  a_sc;
+                }
+w2b_compute_lane:
+                for (int lane = 0; lane < TILE; ++lane) {
+#pragma HLS UNROLL
+                    const uint8_t w_raw = get_w2_raw(w_pkt, lane);
+                    const float scale_val = scales_tile_bram[scale_base + lane];
+                    float prod;
+                    if constexpr (ENABLE_TMAC) {
+                        // raw=2 -> w=0; raw=0->lut_pos[0], raw=1->lut_pos[1], raw=3->lut_pos[2]
+                        if (w_raw == 2) {
+                            prod = 0.0f;
+                        } else {
+                            prod = (w_raw < 2 ? lut_pos[w_raw] : lut_pos[2]) * scale_val;
+                        }
+                    } else {
+                        prod = a_sc * static_cast<float>(decode_w2(w_raw)) * scale_val;
+                    }
+                    acc_banks[lane][bank] += prod;
+                }
+            }
+w2b_store_buf:
+            for (int lane = 0; lane < TILE; ++lane) {
+#pragma HLS UNROLL
+                float sum = 0.0f;
+                for (int bi = 0; bi < NUM_BANKS; ++bi) {
+#pragma HLS UNROLL
+                    sum += acc_banks[lane][bi];
+                }
+                out_buffer[b][t * TILE + lane] = sum;
+            }
+        }
+    }
+
+w2b_emit:
+    for (int b = 0; b < BATCH_SIZE; ++b) {
+#pragma HLS loop_tripcount min=BATCH_SIZE max=BATCH_SIZE avg=BATCH_SIZE
+        for (int oc = 0; oc < OUT_DIM / VEC_W; ++oc) {
+#pragma HLS loop_tripcount min=OUT_DIM/VEC_W max=OUT_DIM/VEC_W avg=OUT_DIM/VEC_W
+#pragma HLS PIPELINE II=1
+            vec_t<VEC_W> out_vec;
+            for (int j = 0; j < VEC_W; ++j) {
+#pragma HLS UNROLL
+                out_vec[j] = out_buffer[b][oc * VEC_W + j];
+            }
+            c_stream.write(out_vec);
+        }
     }
 }
 

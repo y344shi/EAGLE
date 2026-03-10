@@ -1,5 +1,13 @@
 #include "eagle_tier1_top.hpp"
 
+// TMAC_WEIGHT_BITS selects quantization bit-width for all projection weights.
+//   4 = INT4 (default, existing behaviour, 128 weights/pack512)
+//   2 = INT2 (new, 256 weights/pack512, TILE=256)
+// Override at compile time: -DTMAC_WEIGHT_BITS=2
+#ifndef TMAC_WEIGHT_BITS
+#define TMAC_WEIGHT_BITS 4
+#endif
+
 namespace tmac {
 namespace hls {
 
@@ -222,9 +230,15 @@ void eagle_tier1_top_eagle4_l0(
     stream_trip<VEC_W>(s_attn_cat, s_q_in, s_k_in, s_v_in, NUM_CHUNKS * 2);
 
     // Stage 4: Q/K/V projections with 2H input
+#if TMAC_WEIGHT_BITS == 2
+    dense_projection_production_scaled_batched_w2<0, TREE_WIDTH, QKV_INPUT, HIDDEN, 128, TMAC_USE_TMAC_QKV>(s_q_in, s_q_proj, w_q, s_q);
+    dense_projection_production_scaled_batched_w2<0, TREE_WIDTH, QKV_INPUT, NUM_KV_HEADS * HEAD_DIM, 128, TMAC_USE_TMAC_QKV>(s_k_in, s_k_proj, w_k, s_k);
+    dense_projection_production_scaled_batched_w2<0, TREE_WIDTH, QKV_INPUT, NUM_KV_HEADS * HEAD_DIM, 128, TMAC_USE_TMAC_QKV>(s_v_in, s_v_proj, w_v, s_v);
+#else
     dense_projection_production_scaled_batched<0, TREE_WIDTH, QKV_INPUT, HIDDEN, 128, TMAC_USE_TMAC_QKV>(s_q_in, s_q_proj, w_q, s_q);
     dense_projection_production_scaled_batched<0, TREE_WIDTH, QKV_INPUT, NUM_KV_HEADS * HEAD_DIM, 128, TMAC_USE_TMAC_QKV>(s_k_in, s_k_proj, w_k, s_k);
     dense_projection_production_scaled_batched<0, TREE_WIDTH, QKV_INPUT, NUM_KV_HEADS * HEAD_DIM, 128, TMAC_USE_TMAC_QKV>(s_v_in, s_v_proj, w_v, s_v);
+#endif
 
     // Stage 5: RoPE on Q/K
     rope_apply_stream<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM, TREE_WIDTH>(s_q_proj, s_q_rot, s_k_proj, s_k_rot, rope_cos_vals, rope_sin_vals);
@@ -245,7 +259,11 @@ void eagle_tier1_top_eagle4_l0(
     collect_ctx(s_context, ctx_head_streams);
 
     // Stage 8: output projection
+#if TMAC_WEIGHT_BITS == 2
+    dense_projection_production_scaled_batched_w2<0, TREE_WIDTH, HIDDEN, HIDDEN, 128, TMAC_USE_TMAC_O>(s_context, s_o_proj, w_o, s_o);
+#else
     dense_projection_production_scaled_batched<0, TREE_WIDTH, HIDDEN, HIDDEN, 128, TMAC_USE_TMAC_O>(s_context, s_o_proj, w_o, s_o);
+#endif
 
     // Stage 9: post-attn residual + post-attn RMSNorm (returns both residual and normalized stream)
     stream_add<VEC_W>(s_o_proj, s_hidden_residual, s_post_attn_residual, NUM_CHUNKS);
@@ -254,12 +272,21 @@ void eagle_tier1_top_eagle4_l0(
 
     // Stage 10: FFN gate/up + SiLU
     stream_dup<VEC_W>(s_post_attn_norm, s_gate_in, s_up_in, NUM_CHUNKS);
+#if TMAC_WEIGHT_BITS == 2
+    dense_projection_production_scaled_batched_w2<0, TREE_WIDTH, HIDDEN, INTERMEDIATE, 128, TMAC_USE_TMAC_FFN>(s_gate_in, s_gate_vec, w_gate, gate_scales);
+    dense_projection_production_scaled_batched_w2<0, TREE_WIDTH, HIDDEN, INTERMEDIATE, 128, TMAC_USE_TMAC_FFN>(s_up_in, s_up_vec, w_up, up_scales);
+#else
     dense_projection_production_scaled_batched<0, TREE_WIDTH, HIDDEN, INTERMEDIATE, 128, TMAC_USE_TMAC_FFN>(s_gate_in, s_gate_vec, w_gate, gate_scales);
     dense_projection_production_scaled_batched<0, TREE_WIDTH, HIDDEN, INTERMEDIATE, 128, TMAC_USE_TMAC_FFN>(s_up_in, s_up_vec, w_up, up_scales);
+#endif
     silu_mul_stream<VEC_W>(s_gate_vec, s_up_vec, s_swiglu, (TREE_WIDTH * INTERMEDIATE) / VEC_W);
 
     // Stage 11: down-proj to 2H and split (to_logits, for_reasoning)
+#if TMAC_WEIGHT_BITS == 2
+    dense_projection_production_scaled_batched_w2<0, TREE_WIDTH, INTERMEDIATE, DOWN_OUTPUT, 128, TMAC_USE_TMAC_FFN>(s_swiglu, s_down_2hs, w_down, down_scales);
+#else
     dense_projection_production_scaled_batched<0, TREE_WIDTH, INTERMEDIATE, DOWN_OUTPUT, 128, TMAC_USE_TMAC_FFN>(s_swiglu, s_down_2hs, w_down, down_scales);
+#endif
     split_down_2hs(s_down_2hs, s_to_logits_raw, s_for_reasoning);
 
     // Stage 12: final norm on logits stream and residual add on reasoning stream
