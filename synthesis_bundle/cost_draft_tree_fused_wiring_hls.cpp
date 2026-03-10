@@ -767,6 +767,58 @@ lookup_embed_batch_loop:
     return true;
 }
 
+template <typename T>
+void e4d_burst_load_array(
+    T* __restrict dst,
+    const T* __restrict src,
+    int n) {
+#pragma HLS INLINE off
+    if (dst == nullptr || src == nullptr || n <= 0) {
+        return;
+    }
+load_burst_loop:
+    for (int i = 0; i < n; ++i) {
+#pragma HLS PIPELINE II = 1
+        dst[i] = src[i];
+    }
+}
+
+template <typename T>
+void e4d_burst_store_array(
+    T* __restrict dst,
+    const T* __restrict src,
+    int n) {
+#pragma HLS INLINE off
+    if (dst == nullptr || src == nullptr || n <= 0) {
+        return;
+    }
+store_burst_loop:
+    for (int i = 0; i < n; ++i) {
+#pragma HLS PIPELINE II = 1
+        dst[i] = src[i];
+    }
+}
+
+void e4d_load_rope_table(
+    const RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM>* rope_cfg_table,
+    float* rope_cos_vals,
+    float* rope_sin_vals) {
+#pragma HLS INLINE off
+    if (rope_cfg_table == nullptr || rope_cos_vals == nullptr || rope_sin_vals == nullptr) {
+        return;
+    }
+load_rope_cos_loop:
+    for (int i = 0; i < HEAD_DIM / 2; ++i) {
+#pragma HLS PIPELINE II = 1
+        rope_cos_vals[i] = rope_cfg_table->cos_vals[i];
+    }
+load_rope_sin_loop:
+    for (int i = 0; i < HEAD_DIM / 2; ++i) {
+#pragma HLS PIPELINE II = 1
+        rope_sin_vals[i] = rope_cfg_table->sin_vals[i];
+    }
+}
+
 void eagle4_draft_impl(
     int tree_depth,
     int curr_depth_start,
@@ -1131,97 +1183,28 @@ map_accept_nodes_loop:
     const int work_flat  = batch_size * (curr_verify_num + node_top_k);
 
     // ── Pre-loop: AXI → BRAM/URAM (one-time prefetch) ────────────────────
+    // Parallelized into DATAFLOW burst stages so large arrays can be fetched concurrently.
     {
-    load_step_tokens:
-        for (int i = 0; i < step_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxStepFlat avg=kTcStepFlat
-            #pragma HLS PIPELINE II=1
-            bram_step_input_tokens[i] = step_input_tokens[i];
-        }
-    load_step_scores:
-        for (int i = 0; i < step_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxStepFlat avg=kTcStepFlat
-            #pragma HLS PIPELINE II=1
-            bram_step_last_layer_scores[i] = step_last_layer_scores[i]; 
-        }
-    load_step_prev:
-        for (int i = 0; i < step_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxStepFlat avg=kTcStepFlat
-            #pragma HLS PIPELINE II=1
-            bram_step_topk_indexs_prev[i] = step_topk_indexs_prev[i]; 
-        }
-    load_step_probas:
-        for (int i = 0; i < topk_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxTopkFlat avg=kTcTopkFlat
-            #pragma HLS PIPELINE II=1
-            bram_step_topk_probas_sampling[i] = step_topk_probas_sampling[i];
-        }
-    load_step_toks:
-        for (int i = 0; i < topk_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxTopkFlat avg=kTcTopkFlat
-            #pragma HLS PIPELINE II=1
-            bram_step_topk_tokens_sampling[i] = step_topk_tokens_sampling[i];
-        }
-    load_hid_in:
-        for (int i = 0; i < hid_step; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxHidStep avg=kTcHidStep
-            #pragma HLS PIPELINE II=1
-            bram_step_input_hidden_states[i] = step_input_hidden_states[i];
-        }
-    load_work_scores:
-        for (int i = 0; i < work_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxWorkFlat avg=kTcWorkFlat
-            #pragma HLS PIPELINE II=1
-            bram_work_scores[i] = work_scores[i];
-        }
-    load_rope_cos:
-        for (int i = 0; i < HEAD_DIM / 2; ++i) {
-            #pragma HLS loop_tripcount min=HEAD_DIM/2 max=HEAD_DIM/2 avg=HEAD_DIM/2
-            #pragma HLS PIPELINE II=1
-            bram_rope_cos_vals[i] = rope_cfg_table->cos_vals[i];
-        }
-    load_rope_sin:
-        for (int i = 0; i < HEAD_DIM / 2; ++i) {
-            #pragma HLS loop_tripcount min=HEAD_DIM/2 max=HEAD_DIM/2 avg=HEAD_DIM/2
-            #pragma HLS PIPELINE II=1
-            bram_rope_sin_vals[i] = rope_cfg_table->sin_vals[i];
-        }
-    load_cumu_tokens:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-            //#pragma HLS PIPELINE II=1
-            uram_cumu_tokens[i] = cumu_tokens[i];
-        }
-    load_cumu_scores:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-            //#pragma HLS PIPELINE II=1
-            uram_cumu_scores[i] = cumu_scores[i];
-        }
-    load_cumu_deltas:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-           // #pragma HLS PIPELINE II=1
-            uram_cumu_deltas[i] = cumu_deltas[i];
-        }
-    load_prev_idx:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-            //#pragma HLS PIPELINE II=1
-            uram_prev_indexs[i]  = prev_indexs[i]; 
-        }
-    load_next_idx:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-            //#pragma HLS PIPELINE II=1
-            uram_next_indexs[i]  = next_indexs[i]; 
-        }
-    load_side_idx:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-            //#pragma HLS PIPELINE II=1
-            uram_side_indexs[i]  = side_indexs[i]; 
-        }
+#pragma HLS DATAFLOW
+        e4d_burst_load_array<int64_t>(bram_step_input_tokens, step_input_tokens, step_flat);
+        e4d_burst_load_array<float>(
+            bram_step_last_layer_scores, step_last_layer_scores, step_flat);
+        e4d_burst_load_array<int64_t>(
+            bram_step_topk_indexs_prev, step_topk_indexs_prev, step_flat);
+        e4d_burst_load_array<float>(
+            bram_step_topk_probas_sampling, step_topk_probas_sampling, topk_flat);
+        e4d_burst_load_array<int64_t>(
+            bram_step_topk_tokens_sampling, step_topk_tokens_sampling, topk_flat);
+        e4d_burst_load_array<float>(
+            bram_step_input_hidden_states, step_input_hidden_states, hid_step);
+        e4d_burst_load_array<float>(bram_work_scores, work_scores, work_flat);
+        e4d_load_rope_table(rope_cfg_table, bram_rope_cos_vals, bram_rope_sin_vals);
+        e4d_burst_load_array<int64_t>(uram_cumu_tokens, cumu_tokens, node_flat);
+        e4d_burst_load_array<float>(uram_cumu_scores, cumu_scores, node_flat);
+        e4d_burst_load_array<int64_t>(uram_cumu_deltas, cumu_deltas, node_flat);
+        e4d_burst_load_array<int64_t>(uram_prev_indexs, prev_indexs, node_flat);
+        e4d_burst_load_array<int64_t>(uram_next_indexs, next_indexs, node_flat);
+        e4d_burst_load_array<int64_t>(uram_side_indexs, side_indexs, node_flat);
     }
 
     if (run_prefill_stage) {
@@ -1726,115 +1709,33 @@ orchestrator_finalize:
     }
 
     // ── Post-loop: BRAM/URAM → AXI (one-time writeback) ─────────────────
+    // Parallelized into DATAFLOW burst stages.
     {
-    wb_step_tokens:
-        for (int i = 0; i < step_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxStepFlat avg=kTcStepFlat
-            #pragma HLS PIPELINE II=1
-            step_input_tokens[i] = bram_step_input_tokens[i]; 
-        }
-    wb_step_scores:
-        for (int i = 0; i < step_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxStepFlat avg=kTcStepFlat
-            #pragma HLS PIPELINE II=1
-            step_last_layer_scores[i] = bram_step_last_layer_scores[i]; 
-        }
-    wb_step_prev:
-        for (int i = 0; i < step_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxStepFlat avg=kTcStepFlat
-            #pragma HLS PIPELINE II=1
-            step_topk_indexs_prev[i] = bram_step_topk_indexs_prev[i]; 
-        }
-    wb_step_probas:
-        for (int i = 0; i < topk_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxTopkFlat avg=kTcTopkFlat
-            #pragma HLS PIPELINE II=1
-            step_topk_probas_sampling[i] = bram_step_topk_probas_sampling[i]; 
-        }
-    wb_step_toks:
-        for (int i = 0; i < topk_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxTopkFlat avg=kTcTopkFlat
-            #pragma HLS PIPELINE II=1
-            step_topk_tokens_sampling[i] = bram_step_topk_tokens_sampling[i]; 
-        }
-    wb_hid_in:
-        for (int i = 0; i < hid_step; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxHidStep avg=kTcHidStep
-            #pragma HLS PIPELINE II=1
-            step_input_hidden_states[i] = bram_step_input_hidden_states[i]; 
-        }
-    wb_output_scores:
-        for (int i = 0; i < batch_size * node_top_k; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxOutputFlat avg=kTcOutputFlat
-            #pragma HLS PIPELINE II=1
-            output_scores[i] = bram_output_scores[i]; 
-        }
-    wb_output_tokens:
-        for (int i = 0; i < batch_size * node_top_k; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxOutputFlat avg=kTcOutputFlat
-            #pragma HLS PIPELINE II=1
-            output_tokens[i] = bram_output_tokens[i]; 
-        }
-    wb_work_scores:
-        for (int i = 0; i < work_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxWorkFlat avg=kTcWorkFlat
-            #pragma HLS PIPELINE II=1
-            work_scores[i] = bram_work_scores[i];
-        }
-    wb_sort_scores:
-        for (int i = 0; i < batch_size * curr_verify_num; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxSortFlat avg=kTcSortFlat
-            #pragma HLS PIPELINE II=1
-            sort_scores[i] = bram_sort_scores[i]; 
-        }
-    wb_cache_topk:
-        for (int i = 0; i < batch_size * node_top_k; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxOutputFlat avg=kTcOutputFlat
-            #pragma HLS PIPELINE II=1
-            cache_topk_indices[i] = bram_cache_topk_indices[i]; 
-        }
-    wb_hid_out:
-        for (int i = 0; i < hid_out; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxHidOut avg=kTcHidOut
-            #pragma HLS PIPELINE II=1
-            output_hidden_states[i] = bram_output_hidden_states[i]; 
-        }
-    wb_cumu_tokens:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-           // #pragma HLS PIPELINE II=1
-            cumu_tokens[i] = uram_cumu_tokens[i]; 
-        }
-    wb_cumu_scores:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-           // #pragma HLS PIPELINE II=1
-            cumu_scores[i] = uram_cumu_scores[i];
-        }
-    wb_cumu_deltas:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-           // #pragma HLS PIPELINE II=1
-            cumu_deltas[i] = uram_cumu_deltas[i];
-        }
-    wb_prev_idx:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-           // #pragma HLS PIPELINE II=1
-            prev_indexs[i] = uram_prev_indexs[i];
-        }
-    wb_next_idx:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-            //#pragma HLS PIPELINE II=1
-            next_indexs[i] = uram_next_indexs[i];
-        }
-    wb_side_idx:
-        for (int i = 0; i < node_flat; ++i) {
-            #pragma HLS loop_tripcount min=1 max=kMaxNodeFlat avg=kTcNodeFlat
-           // #pragma HLS PIPELINE II=1
-            side_indexs[i] = uram_side_indexs[i];
-        }
+#pragma HLS DATAFLOW
+        e4d_burst_store_array<int64_t>(step_input_tokens, bram_step_input_tokens, step_flat);
+        e4d_burst_store_array<float>(
+            step_last_layer_scores, bram_step_last_layer_scores, step_flat);
+        e4d_burst_store_array<int64_t>(
+            step_topk_indexs_prev, bram_step_topk_indexs_prev, step_flat);
+        e4d_burst_store_array<float>(
+            step_topk_probas_sampling, bram_step_topk_probas_sampling, topk_flat);
+        e4d_burst_store_array<int64_t>(
+            step_topk_tokens_sampling, bram_step_topk_tokens_sampling, topk_flat);
+        e4d_burst_store_array<float>(
+            step_input_hidden_states, bram_step_input_hidden_states, hid_step);
+        e4d_burst_store_array<float>(output_scores, bram_output_scores, batch_size * node_top_k);
+        e4d_burst_store_array<int64_t>(output_tokens, bram_output_tokens, batch_size * node_top_k);
+        e4d_burst_store_array<float>(work_scores, bram_work_scores, work_flat);
+        e4d_burst_store_array<float>(sort_scores, bram_sort_scores, batch_size * curr_verify_num);
+        e4d_burst_store_array<int64_t>(
+            cache_topk_indices, bram_cache_topk_indices, batch_size * node_top_k);
+        e4d_burst_store_array<float>(output_hidden_states, bram_output_hidden_states, hid_out);
+        e4d_burst_store_array<int64_t>(cumu_tokens, uram_cumu_tokens, node_flat);
+        e4d_burst_store_array<float>(cumu_scores, uram_cumu_scores, node_flat);
+        e4d_burst_store_array<int64_t>(cumu_deltas, uram_cumu_deltas, node_flat);
+        e4d_burst_store_array<int64_t>(prev_indexs, uram_prev_indexs, node_flat);
+        e4d_burst_store_array<int64_t>(next_indexs, uram_next_indexs, node_flat);
+        e4d_burst_store_array<int64_t>(side_indexs, uram_side_indexs, node_flat);
     }
 }
 
