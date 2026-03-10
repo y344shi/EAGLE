@@ -223,7 +223,7 @@ E4dPackedLayout32Pc build_layout(
         pc[11].alloc_bytes(sizeof(int32_t) * tmac::hls::kEagle4LmRankMax, 1);
 
     out.pc12_lm_head_weight = pc[12].alloc_bytes(
-        sizeof(uint16_t) * static_cast<int64_t>(hot_token_vocab_size) * hidden_size, 1);
+        sizeof(uint16_t) * static_cast<int64_t>(efficient_lm_vocab_size) * hidden_size, 1);
 
     out.pc13_draft_embed_tokens_weight = pc[13].alloc_bytes(
         sizeof(uint16_t) * static_cast<int64_t>(tmac::hls::kEagle4FullVocab) * hidden_size, 1);
@@ -423,12 +423,15 @@ extern "C" void eagle4_draft_packed_32pc(
     (void)layout.pc_words;
     (void)pc31;  // reserved in this revision.
 
-    const int* policy_next_tree_width = pc_word_offset_ptr<const int>(
-        pc30, layout.pc30_policy_next_tree_width);
-    const int* policy_next_verify_num = pc_word_offset_ptr<const int>(
-        pc30, layout.pc30_policy_next_verify_num);
-    const int* policy_stop_signal = pc_word_offset_ptr<const int>(
-        pc30, layout.pc30_policy_stop_signal);
+    const int* policy_next_tree_width = use_policy_schedule
+        ? pc_word_offset_ptr<const int>(pc30, layout.pc30_policy_next_tree_width)
+        : nullptr;
+    const int* policy_next_verify_num = use_policy_schedule
+        ? pc_word_offset_ptr<const int>(pc30, layout.pc30_policy_next_verify_num)
+        : nullptr;
+    const int* policy_stop_signal = use_policy_schedule
+        ? pc_word_offset_ptr<const int>(pc30, layout.pc30_policy_stop_signal)
+        : nullptr;
 
     int64_t* step_input_tokens = pc_word_offset_ptr<int64_t>(
         pc14, layout.pc14_step_input_tokens);
@@ -493,12 +496,15 @@ extern "C" void eagle4_draft_packed_32pc(
     const uint16_t* draft_embed_tokens_weight = pc_word_offset_ptr<const uint16_t>(
         pc13, layout.pc13_draft_embed_tokens_weight);
 
-    const int64_t* accepted_draft_node_ids = pc_word_offset_ptr<const int64_t>(
-        pc23, layout.pc23_accepted_draft_node_ids);
+    const int64_t* accepted_draft_node_ids =
+        (enable_accepted_kv_compact && accepted_draft_node_count > 0)
+            ? pc_word_offset_ptr<const int64_t>(pc23, layout.pc23_accepted_draft_node_ids)
+            : nullptr;
     int64_t* node_to_hbm_slot = pc_word_offset_ptr<int64_t>(
         pc23, layout.pc23_node_to_hbm_slot);
-    const int64_t* hot_token_id = pc_word_offset_ptr<const int64_t>(
-        pc30, layout.pc30_hot_token_id);
+    const int64_t* hot_token_id = use_hot_token_id
+        ? pc_word_offset_ptr<const int64_t>(pc30, layout.pc30_hot_token_id)
+        : nullptr;
 
     int* io_tree_width = pc_word_offset_ptr<int>(pc23, layout.pc23_io_tree_width);
     int* io_verify_num = pc_word_offset_ptr<int>(pc23, layout.pc23_io_verify_num);
@@ -518,26 +524,19 @@ extern "C" void eagle4_draft_packed_32pc(
     int64_t* cache_topk_indices = pc_word_offset_ptr<int64_t>(
         pc22, layout.pc22_cache_topk_indices);
 
-    float* dbg_curr_layer_scores = pc_word_offset_ptr<float>(
-        pc28, layout.pc28_dbg_curr_layer_scores);
-    float* dbg_sort_layer_scores = pc_word_offset_ptr<float>(
-        pc28, layout.pc28_dbg_sort_layer_scores);
-    int64_t* dbg_sort_layer_indices = pc_word_offset_ptr<int64_t>(
-        pc29, layout.pc29_dbg_sort_layer_indices);
-    int64_t* dbg_parent_indices_in_layer = pc_word_offset_ptr<int64_t>(
-        pc29, layout.pc29_dbg_parent_indices_in_layer);
-    int64_t* dbg_remapped_topk_tokens = pc_word_offset_ptr<int64_t>(
-        pc29, layout.pc29_dbg_remapped_topk_tokens);
+    float* dbg_curr_layer_scores = nullptr;
+    float* dbg_sort_layer_scores = nullptr;
+    int64_t* dbg_sort_layer_indices = nullptr;
+    int64_t* dbg_parent_indices_in_layer = nullptr;
+    int64_t* dbg_remapped_topk_tokens = nullptr;
     int* executed_depths = pc_word_offset_ptr<int>(pc23, layout.pc23_executed_depths);
     bool* stopped_early = pc_word_offset_ptr<bool>(pc23, layout.pc23_stopped_early);
 
     const float* initial_logits = pc_word_offset_ptr<const float>(pc24, layout.pc24_initial_logits);
     const int64_t* initial_candidate_indices = pc_word_offset_ptr<const int64_t>(
         pc25, layout.pc25_initial_candidate_indices);
-    const float* initial_topk_probas = pc_word_offset_ptr<const float>(
-        pc25, layout.pc25_initial_topk_probas);
-    const int64_t* initial_topk_tokens = pc_word_offset_ptr<const int64_t>(
-        pc25, layout.pc25_initial_topk_tokens);
+    const float* initial_topk_probas = nullptr;
+    const int64_t* initial_topk_tokens = nullptr;
     const float* initial_hidden_states = pc_word_offset_ptr<const float>(
         pc25, layout.pc25_initial_hidden_states);
 
