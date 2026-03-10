@@ -14,13 +14,13 @@ namespace tmac {
 namespace hls {
 
 constexpr int kEagle4LmHiddenMax = 4096;
-constexpr int kEagle4LmRankMax = 128;
+constexpr int kEagle4LmRankMax = 256;
 constexpr int kEagle4LmTopKMax = 16;
-constexpr int kEagle4LmGroupSize = 64;
+constexpr int kEagle4LmGroupSize = 128;
 
 // Tripcount constants for C synthesis latency estimation (only for values without existing named constants).
 constexpr int kLmTcQpackFactor = 8;   // int4 values per int32
-constexpr int kLmTcVocab       = 32000; // typical vocab size
+constexpr int kLmTcVocab       = 128256; // Llama-3.1-8B full vocab
 constexpr int kLmMaxInPacks = kEagle4LmRankMax / kLmTcQpackFactor;
 constexpr int kLmMaxGroups = (kEagle4LmRankMax + kEagle4LmGroupSize - 1) / kEagle4LmGroupSize;
 constexpr int kLmMaxVocabPacked = (kLmTcVocab + 7) / 8;
@@ -75,8 +75,8 @@ void eagle4_lm_down_project(
 void eagle4_lm_candidate_logits_row4(
     const float low_rank[TREE_WIDTH][kEagle4LmRankMax],
     const int32_t qweight_row_major[kLmTcVocab * kLmMaxInPacks],
-    const uint16_t scales_row_major[kLmTcVocab * kLmMaxGroups],    // expected [vocab, rank/group_size] (transposed/output-major)
-    const int32_t qzeros_packed[kLmMaxVocabPacked * kLmMaxGroups], // expected [ceil(vocab/8), rank/group_size] (transposed/output-major)
+    const uint16_t scales_row_major[kLmTcVocab * kLmMaxGroups],    // expected [rank/group_size, vocab] (group-major)
+    const int32_t qzeros_packed[kLmMaxVocabPacked * kLmMaxGroups], // expected [rank/group_size, ceil(vocab/8)] (group-major)
     const int32_t g_idx[kEagle4LmRankMax],
     int rank,
     int vocab,

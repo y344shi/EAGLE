@@ -117,6 +117,7 @@ int run_smoke() {
 int main(int argc, char** argv) {
     bool smoke = false;
     int run_tokens = 1;
+    int node_top_k = 4;
     std::string base_tensors = "../eagle_verified_pipeline_4bit/cpmcu_tensors/";
     std::string base_weights = "../packed_all/";
     std::string base_norms = "../eagle_verified_pipeline_4bit/hls_4bit/weights_all_4bit/";
@@ -136,6 +137,8 @@ int main(int argc, char** argv) {
             base_lm = argv[++i];
         } else if (arg == "--run-tokens" && i + 1 < argc) {
             run_tokens = std::atoi(argv[++i]);
+        } else if (arg == "--node-top-k" && i + 1 < argc) {
+            node_top_k = std::atoi(argv[++i]);
         }
     }
 
@@ -210,7 +213,7 @@ int main(int argc, char** argv) {
     const int rank_packs = rank / 8;
     const int vocab = (rank_packs > 0) ? static_cast<int>(lm_q.size() / rank_packs) : 0;
     const int groups = (GROUP_SIZE > 0) ? rank / GROUP_SIZE : 0;
-    const int topk = 512;
+    const int topk = std::max(1, std::min(node_top_k, tmac::hls::kEagle4LmTopKMax));
     if (tokens <= 0 || rank <= 0 || vocab <= 0 || groups <= 0 || lm_s.size() != static_cast<size_t>(groups) * vocab ||
         lm_g.size() != static_cast<size_t>(rank)) {
         std::cout << "[FAIL] invalid inferred LM dimensions.\n";

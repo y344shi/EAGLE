@@ -10,6 +10,13 @@
 #include "cost_draft_tree_update_hls.hpp"
 #include "eagle_tier1_lm_top.hpp"
 
+// Compile-time switch for local RMSNorm gamma usage.
+// 0: gamma arrays are provided via function arguments (existing behavior).
+// 1: gamma arrays are sourced from eagle4_norm_gamma_2bit.h constants.
+#ifndef E4D_USE_LOCAL_NORM_GAMMA
+#define E4D_USE_LOCAL_NORM_GAMMA 0
+#endif
+
 namespace tmac {
 namespace hls {
 

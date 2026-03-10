@@ -286,7 +286,7 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
         efficient_lm_head_g_idx,
         rank,
         vocab,
-        64,
+        tmac::hls::kEagle4LmGroupSize,
         nullptr,
         topk,
         candidate_indices,

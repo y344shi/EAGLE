@@ -301,12 +301,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (hidden_dim > tmac::hls::kEagle4LmHiddenMax ||
-        rank > tmac::hls::kEagle4LmRankMax ||
-        num_candidates > tmac::hls::kEagle4LmTopKMax) {
+        rank > tmac::hls::kEagle4LmRankMax) {
         std::cout << "[skip] LM checker fixtures exceed HLS kernel limits: "
                   << "hidden=" << hidden_dim << " (max " << tmac::hls::kEagle4LmHiddenMax << "), "
-                  << "rank=" << rank << " (max " << tmac::hls::kEagle4LmRankMax << "), "
-                  << "topk=" << num_candidates << " (max " << tmac::hls::kEagle4LmTopKMax << ").\n";
+                  << "rank=" << rank << " (max " << tmac::hls::kEagle4LmRankMax << ").\n";
         if (strict_dims) {
             std::cout << "[FAIL] --strict-dims requested.\n";
             return 1;
@@ -385,6 +383,7 @@ int main(int argc, char** argv) {
     const int32_t* qzeros_ptr = has_qzeros ? qzeros.data() : nullptr;
     const bool has_gidx = (g_idx.size() == static_cast<size_t>(rank));
     const int32_t* gidx_ptr = has_gidx ? g_idx.data() : nullptr;
+    const int eval_topk = std::max(1, std::min(num_candidates, tmac::hls::kEagle4LmTopKMax));
 
     float hidden_tile[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmHiddenMax] = {};
     float low_rank_tile[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmRankMax] = {};
@@ -404,7 +403,7 @@ int main(int argc, char** argv) {
     tmac::hls::eagle4_lm_down_project(hidden_tile, down_proj_fp16.data(), low_rank_tile, hidden_dim, rank);
     tmac::hls::eagle4_lm_candidate_logits_row4(
         low_rank_tile, qweight_row.data(), scales_row_fp16.data(), qzeros_ptr, gidx_ptr, rank, vocab, group_size,
-        candidate_logits_tile.data(), num_candidates, topk_idx_tile, topk_scores_tile);
+        candidate_logits_tile.data(), eval_topk, topk_idx_tile, topk_scores_tile);
 
     std::vector<float> low_rank(rank, 0.0f);
     for (int i = 0; i < rank; ++i) {
@@ -412,9 +411,9 @@ int main(int argc, char** argv) {
     }
     std::vector<float> candidate_logits(vocab, 0.0f);
     std::copy_n(candidate_logits_tile.begin(), vocab, candidate_logits.begin());
-    std::vector<int> topk_idx(num_candidates, -1);
-    std::vector<float> topk_scores(num_candidates, -std::numeric_limits<float>::infinity());
-    for (int i = 0; i < num_candidates; ++i) {
+    std::vector<int> topk_idx(eval_topk, -1);
+    std::vector<float> topk_scores(eval_topk, -std::numeric_limits<float>::infinity());
+    for (int i = 0; i < eval_topk; ++i) {
         topk_idx[static_cast<size_t>(i)] = topk_idx_tile[0][i];
         topk_scores[static_cast<size_t>(i)] = topk_scores_tile[0][i];
     }
@@ -434,13 +433,19 @@ int main(int argc, char** argv) {
     compute_diff(gathered_from_file, gathered_ref, &gather_max, &gather_mean);
 
     std::cout << "[result] token_idx=" << use_tok << " hidden=" << hidden_dim << " rank=" << rank
-              << " vocab=" << vocab << " topk=" << num_candidates << "\n";
+              << " vocab=" << vocab << " topk_ref=" << num_candidates << " topk_eval=" << eval_topk << "\n";
     std::cout << "[result] low_rank  max_abs=" << low_rank_max << " mean_abs=" << low_rank_mean << "\n";
     std::cout << "[result] cand_full max_abs=" << cand_max << " mean_abs=" << cand_mean << "\n";
     std::cout << "[result] gather    max_abs=" << gather_max << " mean_abs=" << gather_mean << "\n";
 
-    const size_t topk_set_miss = set_mismatch_count(topk_idx, candidate_idx_gold);
-    std::cout << "[result] topk_set_symmetric_diff=" << topk_set_miss << "\n";
+    size_t topk_set_miss = 0;
+    if (eval_topk == num_candidates) {
+        topk_set_miss = set_mismatch_count(topk_idx, candidate_idx_gold);
+        std::cout << "[result] topk_set_symmetric_diff=" << topk_set_miss << "\n";
+    } else {
+        std::cout << "[warn] topk set parity skipped: reference candidates=" << num_candidates
+                  << " exceeds HLS evaluator topk max=" << tmac::hls::kEagle4LmTopKMax << ".\n";
+    }
     if (!has_qzeros) {
         std::cout << "[warn] efficient_lm_head_qzeros.bin missing or shape-mismatched; used zero-point=8.\n";
     }
@@ -462,11 +467,15 @@ int main(int argc, char** argv) {
             std::cout << "[FAIL] candidate logits exceed tolerance " << tol_candidate << "\n";
             pass = false;
         }
-        if (topk_set_miss != 0) {
+        if (eval_topk == num_candidates && topk_set_miss != 0) {
             std::cout << "[FAIL] candidate topk set mismatch under --require-candidate-parity.\n";
             pass = false;
         }
-    } else if (cand_max > tol_candidate || topk_set_miss != 0) {
+        if (eval_topk != num_candidates) {
+            std::cout << "[FAIL] --require-candidate-parity requested, but reference topk exceeds HLS evaluator max.\n";
+            pass = false;
+        }
+    } else if (cand_max > tol_candidate || (eval_topk == num_candidates && topk_set_miss != 0)) {
         std::cout << "[warn] candidate scorer parity drift detected; continuing because gathered logits are within tolerance.\n";
     }
 
