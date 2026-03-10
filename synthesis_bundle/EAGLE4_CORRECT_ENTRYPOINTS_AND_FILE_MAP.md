@@ -2,10 +2,18 @@
 
 This document is the canonical map for which top-level entry points to use and which files belong to each path.
 
+## 0) Branch/Path Reality Note (2026-03-08)
+
+- This file records the intended integration map from a fuller capture/validation branch.
+- In this workspace, live HLS sources are under `hardware/EAGLE/synthesis_bundle` (not `hardware/EAGLE/eagle/hls_hw/synthesis_bundle`).
+- Capture automation files (`capture_all_goldens.sh`, `export_hls_goldens.py`, capture-enabled `engine_test.py`) may be absent in some checkouts.
+- For capture-flow recovery and exact port list, read:
+  - `notes/GOLDEN_CAPTURE_WORKFLOW_HANDOFF.md`
+
 ## 0) End-to-End Candidate-Match Testbench Record
 
 Primary end-to-end candidate-tree match bench:
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_fused_wiring_tb.cpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_fused_wiring_tb.cpp`
 
 What it checks (file-driven case):
 - top-k candidate selection outputs (`expected_cache_topk_indices`)
@@ -28,7 +36,7 @@ How this bench is run in the standard flow:
 Direct one-off command for the end-to-end candidate bench:
 - `g++ -std=c++17 -I. cost_draft_tree_fused_wiring_tb.cpp -o /tmp/cdt_fused_wiring_tb && /tmp/cdt_fused_wiring_tb --case-file <path>/cost_draft_tree_fused_wiring_case.txt`
 
-- `cd /home/y344shi/workspace/eagle4_adaptation/hardware/EAGLE/eagle/hls_hw/synthesis_bundle
+- `cd /home/y344shi/workspace/eagle4_adaptation/hardware/EAGLE/synthesis_bundle
 g++ -std=c++17 -O2 -I. cost_draft_tree_fused_wiring_tb.cpp -o /tmp/cdt_fused_wiring_tb
 /tmp/cdt_fused_wiring_tb --multi-depth-steps 3`
 
@@ -53,49 +61,49 @@ Multi-depth command:
 
 ### HLS Tier1 compute entry (EAGLE4 layer-0 parity)
 - Correct top: `eagle_tier1_top_eagle4_l0(...)`
-- File: `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/eagle_tier1_top.cpp`
+- File: `hardware/EAGLE/synthesis_bundle/eagle_tier1_top.cpp`
 
 ### HLS Tier1 + LM head entry (EAGLE4 full path)
 - Correct top: `eagle_tier1_lm_top_eagle4(...)`
-- File: `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/eagle_tier1_lm_top.cpp`
+- File: `hardware/EAGLE/synthesis_bundle/eagle_tier1_lm_top.cpp`
 
 ### Legacy wrapper (not preferred for new EAGLE4 integration)
 - Legacy mixed wrapper: `eagle_tier1_lm_top(...)`
-- File: `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/eagle_tier1_lm_top.cpp`
+- File: `hardware/EAGLE/synthesis_bundle/eagle_tier1_lm_top.cpp`
 - Notes:
   - Kept for compatibility/regression.
   - Carries legacy Eagle3-style LM ports.
 
 ### CostDraftTree fused entry
 - Correct fused step API: `cost_draft_tree_fused_step_hls(...)`
-- File: `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_fused_wiring_hls.hpp`
+- File: `hardware/EAGLE/synthesis_bundle/cost_draft_tree_fused_wiring_hls.hpp`
 
 ## 2) Required Files by Integration Path
 
 ### A) Tier1 + EAGLE4 LM head (recommended Vitis path)
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/eagle_tier1_lm_top.cpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/eagle_tier1_lm_top.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/eagle_tier1_top.cpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/eagle_tier1_top.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/eagle4_lm_head_hls.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/tmac_utils.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/attention_solver.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/fused_online_attention_pwl.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/deep_pipeline_lutmac.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/kv_cache_manager.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/rms_norm_stream.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/rope_kernel.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/stream_utils.hpp`
+- `hardware/EAGLE/synthesis_bundle/eagle_tier1_lm_top.cpp`
+- `hardware/EAGLE/synthesis_bundle/eagle_tier1_lm_top.hpp`
+- `hardware/EAGLE/synthesis_bundle/eagle_tier1_top.cpp`
+- `hardware/EAGLE/synthesis_bundle/eagle_tier1_top.hpp`
+- `hardware/EAGLE/synthesis_bundle/eagle4_lm_head_hls.hpp`
+- `hardware/EAGLE/synthesis_bundle/tmac_utils.hpp`
+- `hardware/EAGLE/synthesis_bundle/attention_solver.hpp`
+- `hardware/EAGLE/synthesis_bundle/fused_online_attention_pwl.hpp`
+- `hardware/EAGLE/synthesis_bundle/deep_pipeline_lutmac.hpp`
+- `hardware/EAGLE/synthesis_bundle/kv_cache_manager.hpp`
+- `hardware/EAGLE/synthesis_bundle/rms_norm_stream.hpp`
+- `hardware/EAGLE/synthesis_bundle/rope_kernel.hpp`
+- `hardware/EAGLE/synthesis_bundle/stream_utils.hpp`
 
 ### B) CostDraftTree fused wiring path
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_fused_wiring_hls.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_score_hls.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_update_hls.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_controller_hls.hpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_kv_cache_hls.hpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_fused_wiring_hls.hpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_score_hls.hpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_update_hls.hpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_controller_hls.hpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_kv_cache_hls.hpp`
 
 ### C) CostDraftTree case-file IO (testbench-only)
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_tb_case_io.hpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_tb_case_io.hpp`
 
 ## 3) Current Wiring Status (Important)
 
@@ -114,26 +122,26 @@ Multi-depth command:
 ## 4) Simulation / Validation Targets
 
 ### Tier1 + LM pipeline
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/test_eagle_top_eagle4.cpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/test_eagle_top_eagle4_perop.cpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/test_eagle4_lm_head.cpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/test_eagle_tier1_lm_top_eagle4.cpp`
+- `hardware/EAGLE/synthesis_bundle/test_eagle_top_eagle4.cpp`
+- `hardware/EAGLE/synthesis_bundle/test_eagle_top_eagle4_perop.cpp`
+- `hardware/EAGLE/synthesis_bundle/test_eagle4_lm_head.cpp`
+- `hardware/EAGLE/synthesis_bundle/test_eagle_tier1_lm_top_eagle4.cpp`
 
 ### CostDraftTree modules
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_score_tb.cpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_update_tb.cpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_controller_tb.cpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_fused_wiring_tb.cpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/cost_draft_tree_kv_cache_tb.cpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_score_tb.cpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_update_tb.cpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_controller_tb.cpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_fused_wiring_tb.cpp`
+- `hardware/EAGLE/synthesis_bundle/cost_draft_tree_kv_cache_tb.cpp`
 
 ### Additional module TBs (not in default `capture_all_goldens.sh` flow)
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/deep_pipeline_lutmac_tb.cpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/fused_online_attention_pwl_tb.cpp`
-- `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/fc1_compare_tb.cpp`
+- `hardware/EAGLE/synthesis_bundle/deep_pipeline_lutmac_tb.cpp`
+- `hardware/EAGLE/synthesis_bundle/fused_online_attention_pwl_tb.cpp`
+- `hardware/EAGLE/synthesis_bundle/fc1_compare_tb.cpp`
 
 ### CostDraftTree dump/check scripts
-- Dump all cases: `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/dump_all_cost_draft_tree_cases.sh`
-- Validate dumped cases: `hardware/EAGLE/eagle/hls_hw/synthesis_bundle/check_cost_draft_tree_goldens.sh`
+- Dump all cases: `hardware/EAGLE/synthesis_bundle/dump_all_cost_draft_tree_cases.sh`
+- Validate dumped cases: `hardware/EAGLE/synthesis_bundle/check_cost_draft_tree_goldens.sh`
 
 ## 5) Vitis Top Recommendation
 
@@ -151,4 +159,3 @@ Avoid using `eagle_tier1_lm_top` as primary top for new EAGLE4 builds unless you
 3. Build and pass CostDraftTree case-file checkers.
 4. If integrating tree-KV streaming in fused path, wire `cost_draft_tree_tree_kv_cache_gather_hls(...)` into `cost_draft_tree_fused_step_hls(...)`.
 5. Keep this file updated when any top function signature or wiring order changes.
-

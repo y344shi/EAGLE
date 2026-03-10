@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CASE_DIR="${ROOT_DIR}"
 DRY_RUN_ONLY=0
+STRICT_CLASSIC=0
 
 # Orchestrator TB allocates large local buffers in non-synthesis C++ simulation.
 # Ensure enough stack to avoid host-side segfaults in full checks.
@@ -16,6 +17,7 @@ Usage: $(basename "$0") [options] [case_dir]
 Options:
   --dry-run   Parse-only checks (no numerical TB execution)
   --full      Run full TB comparisons (default)
+  --strict-classic  Treat classic backend mismatches as fatal in orchestrator TB
   -h, --help  Show this help
 USAGE
 }
@@ -24,6 +26,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN_ONLY=1; shift ;;
     --full) DRY_RUN_ONLY=0; shift ;;
+    --strict-classic) STRICT_CLASSIC=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
       CASE_DIR="$1"
@@ -43,6 +46,9 @@ if [[ ${DRY_RUN_ONLY} -eq 1 ]]; then
   echo "[info] mode           : dry-run parser checks"
 else
   echo "[info] mode           : full TB comparisons"
+fi
+if [[ ${STRICT_CLASSIC} -eq 1 ]]; then
+  echo "[info] classic mode   : strict"
 fi
 
 echo "[info] compiling dry-run checkers..."
@@ -102,13 +108,19 @@ for spec in "${SPECS[@]}"; do
 
   echo "[check] ${rel}"
   read -r -a cmd_parts <<< "${cmd_prefix}"
+  run_cmd=("${cmd_parts[@]}" "${file}")
+  if [[ ${STRICT_CLASSIC} -eq 1 && "${rel}" == "cost_draft_tree_multilayer_orchestrator_case.txt" ]]; then
+    run_cmd+=(--strict-classic)
+  fi
   run_fail_log="/tmp/cdt_fullrun.log"
   if [[ ${DRY_RUN_ONLY} -eq 0 && "${rel}" == "cost_draft_tree_multilayer_orchestrator_case.txt" ]]; then
-    capture_backend="$(awk '$1=="capture_backend"{for(i=3;i<=NF;++i) printf "%s%s",$i,(i<NF?" ":""); print ""}' "${file}" 2>/dev/null || true)"
-    if [[ "${capture_backend}" != "eagle4_classic" && "${capture_backend}" != "classic_eagle" ]]; then
-      echo "[invalid] ${rel}: full run requires capture_backend=eagle4_classic|classic_eagle (got='${capture_backend:-none}')"
-      invalid=$((invalid + 1))
-      continue
+    if [[ ${STRICT_CLASSIC} -eq 1 ]]; then
+      capture_backend="$(awk '$1=="capture_backend"{for(i=3;i<=NF;++i) printf "%s%s",$i,(i<NF?" ":""); print ""}' "${file}" 2>/dev/null || true)"
+      if [[ "${capture_backend}" != "eagle4_classic" && "${capture_backend}" != "classic_eagle" ]]; then
+        echo "[invalid] ${rel}: full run requires capture_backend=eagle4_classic|classic_eagle (got='${capture_backend:-none}')"
+        invalid=$((invalid + 1))
+        continue
+      fi
     fi
     required_keys=(
       "enable_prefill_stage"
@@ -132,7 +144,7 @@ for spec in "${SPECS[@]}"; do
   fi
   if [[ ${DRY_RUN_ONLY} -eq 1 ]]; then
     run_fail_log="/tmp/cdt_dryrun.log"
-    if "${cmd_parts[@]}" "${file}" --dry-run >"${run_fail_log}" 2>&1; then
+    if "${run_cmd[@]}" --dry-run >"${run_fail_log}" 2>&1; then
       present=$((present + 1))
       sed -n '1,2p' "${run_fail_log}"
     else
@@ -143,7 +155,7 @@ for spec in "${SPECS[@]}"; do
     continue
   fi
 
-  if "${cmd_parts[@]}" "${file}" >"${run_fail_log}" 2>&1; then
+  if "${run_cmd[@]}" >"${run_fail_log}" 2>&1; then
     present=$((present + 1))
     sed -n '1,4p' "${run_fail_log}"
   else

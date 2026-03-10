@@ -12,7 +12,7 @@ import argparse
 import random
 import shutil
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
@@ -141,6 +141,16 @@ def _resolve_artifact_path(base_dir: Path, value: str) -> Path:
     return (base_dir / p).resolve()
 
 
+def _find_hls_hw_roots(anchor: Path) -> Optional[Tuple[Path, Path]]:
+    """Find canonical runtime artifact roots under hardware/EAGLE/eagle/hls_hw."""
+    for p in [anchor, *anchor.parents]:
+        golden = (p / "hardware/EAGLE/eagle/hls_hw/eagle_verified_pipeline_4bit").resolve()
+        packed = (p / "hardware/EAGLE/eagle/hls_hw/packed_all").resolve()
+        if golden.exists() and packed.exists():
+            return golden, packed
+    return None
+
+
 def _softmax_topk_from_stage(
     gathered_logits: np.ndarray,
     candidate_indices: np.ndarray,
@@ -263,6 +273,98 @@ def _build_full_path_fixtures(
     }
 
 
+def _merge_full_path_fixtures_from_e2e(
+    e2e: Dict[str, List[str]],
+    full_path: Dict[str, List],
+    batch_size: int,
+    hidden_size: int,
+    max_node_count: int,
+) -> Dict[str, List]:
+    out = dict(full_path)
+
+    enable_prefill_vals = _get_ints(e2e, "enable_prefill_stage", required=False)
+    if enable_prefill_vals:
+        enable_prefill_stage = 1 if enable_prefill_vals[0] != 0 else 0
+    else:
+        enable_prefill_stage = (
+            1
+            if (
+                "enable_prefill_stage" in out
+                and out["enable_prefill_stage"]
+                and out["enable_prefill_stage"][0] != 0
+            )
+            else 0
+        )
+    if enable_prefill_stage:
+        expected_hidden_3h = batch_size * 3 * hidden_size
+        expected_embed = batch_size * hidden_size
+        prefill_hidden = _get_floats(
+            e2e, "prefill_input_hidden_states_3h", required=False
+        )
+        prefill_embed = _get_floats(e2e, "prefill_input_embed_states", required=False)
+        if len(prefill_hidden) != expected_hidden_3h or len(prefill_embed) != expected_embed:
+            print(
+                "[warn] e2e requested prefill_stage=1 but prefill tensors are invalid; "
+                "falling back to synthetic prefill fixtures."
+            )
+            out["enable_prefill_stage"] = [1]
+            out["prefill_fixture_mode"] = ["synthetic"]
+        else:
+            out["enable_prefill_stage"] = [1]
+            out["prefill_input_hidden_states_3h"] = prefill_hidden
+            out["prefill_input_embed_states"] = prefill_embed
+            out["prefill_fixture_mode"] = ["e2e"]
+    else:
+        out["enable_prefill_stage"] = [0]
+        out["prefill_input_hidden_states_3h"] = []
+        out["prefill_input_embed_states"] = []
+        out["prefill_fixture_mode"] = ["disabled"]
+
+    enable_compact_vals = _get_ints(e2e, "enable_accepted_kv_compact", required=False)
+    if enable_compact_vals:
+        enable_compact = 1 if enable_compact_vals[0] != 0 else 0
+    else:
+        enable_compact = (
+            1
+            if (
+                "enable_accepted_kv_compact" in out
+                and out["enable_accepted_kv_compact"]
+                and out["enable_accepted_kv_compact"][0] != 0
+            )
+            else 0
+        )
+    node_to_hbm_slot_init = _get_i64s(e2e, "node_to_hbm_slot_init", required=False)
+    if len(node_to_hbm_slot_init) != max_node_count:
+        if enable_compact:
+            raise ValueError(
+                "enable_accepted_kv_compact=1 requires node_to_hbm_slot_init "
+                f"size={max_node_count}, got={len(node_to_hbm_slot_init)}"
+            )
+        node_to_hbm_slot_init = [-1 for _ in range(max_node_count)]
+
+    accepted_draft_node_ids = _get_i64s(e2e, "accepted_draft_node_ids", required=False)
+    if enable_compact:
+        if not accepted_draft_node_ids:
+            raise ValueError(
+                "enable_accepted_kv_compact=1 requires non-empty accepted_draft_node_ids"
+            )
+        for node_id in accepted_draft_node_ids:
+            if node_id < 0 or node_id >= max_node_count:
+                raise ValueError(
+                    f"accepted_draft_node_ids contains out-of-range id {node_id} "
+                    f"(max_node_count={max_node_count})"
+                )
+        out["compact_fixture_mode"] = ["e2e"]
+    else:
+        accepted_draft_node_ids = []
+        out["compact_fixture_mode"] = ["disabled"]
+
+    out["enable_accepted_kv_compact"] = [enable_compact]
+    out["accepted_draft_node_ids"] = accepted_draft_node_ids
+    out["node_to_hbm_slot_init"] = node_to_hbm_slot_init
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -279,6 +381,11 @@ def main() -> None:
         "--allow-e2e-fallback",
         action="store_true",
         help="Allow fallback to synthetic/mixed generation if e2e case is invalid.",
+    )
+    parser.add_argument(
+        "--strict-classic",
+        action="store_true",
+        help="For eagle4_classic e2e input, keep strict masks/expected vectors from capture.",
     )
     args = parser.parse_args()
 
@@ -303,6 +410,14 @@ def main() -> None:
         try:
             e2e = _parse_key_count_file(e2e_case_path)
             capture_backend = _get_strings(e2e, "capture_backend", required=False)
+            if args.strict_classic and (
+                not capture_backend
+                or capture_backend[0] not in ("eagle4_classic", "classic_eagle")
+            ):
+                raise ValueError(
+                    "strict-classic requires capture_backend=eagle4_classic|classic_eagle "
+                    "in the input e2e case"
+                )
             if capture_backend and capture_backend[0] in ("eagle4_classic", "classic_eagle"):
                 meta = _get_ints(e2e, "meta", required=True)
                 if len(meta) < 19:
@@ -351,41 +466,102 @@ def main() -> None:
                     e2e_case_path.parent, golden_tensor_root_vals[0]
                 )
                 packed_dir = (golden_tensor_root.parent / "packed_all").resolve()
+                # E2E metadata may point to an older capture tree. Prefer the local
+                # hls_hw export roots (step-1 outputs) when available.
+                hw_roots = _find_hls_hw_roots(script_dir) or _find_hls_hw_roots(
+                    e2e_case_path.parent
+                )
+                if hw_roots is not None:
+                    hw_golden_root, hw_packed_dir = hw_roots
+                    if hw_golden_root != golden_tensor_root or hw_packed_dir != packed_dir:
+                        print(
+                            "[info] overriding classic-eagle artifact roots with local hls_hw exports: "
+                            f"golden={hw_golden_root} packed={hw_packed_dir}"
+                        )
+                    golden_tensor_root = hw_golden_root
+                    packed_dir = hw_packed_dir
                 tensor_dir = golden_tensor_root / "cpmcu_tensors"
 
-                prefix_hbm_dtype = _get_strings(e2e, "prefix_hbm_dtype", required=True)
-                if prefix_hbm_dtype != ["fp16"]:
-                    raise ValueError(
-                        f"classic-eagle e2e prefix_hbm_dtype must be fp16, got={prefix_hbm_dtype}"
-                    )
-                prefix_hbm_k_file = _get_strings(e2e, "prefix_hbm_k_file", required=True)
-                prefix_hbm_v_file = _get_strings(e2e, "prefix_hbm_v_file", required=True)
-                prefix_hbm_token_count = _get_ints(e2e, "prefix_hbm_token_count", required=True)
+                prefix_hbm_dtype = _get_strings(e2e, "prefix_hbm_dtype", required=False)
+                prefix_hbm_k_file = _get_strings(e2e, "prefix_hbm_k_file", required=False)
+                prefix_hbm_v_file = _get_strings(e2e, "prefix_hbm_v_file", required=False)
+                prefix_hbm_token_count = _get_ints(
+                    e2e, "prefix_hbm_token_count", required=False
+                )
                 prefix_hbm_elems_per_token = _get_ints(
-                    e2e, "prefix_hbm_elems_per_token", required=True
+                    e2e, "prefix_hbm_elems_per_token", required=False
                 )
-                if (
-                    len(prefix_hbm_k_file) != 1
-                    or len(prefix_hbm_v_file) != 1
-                    or len(prefix_hbm_token_count) != 1
-                    or len(prefix_hbm_elems_per_token) != 1
-                ):
-                    raise ValueError("classic-eagle prefix_hbm_* field arity mismatch")
-                if prefix_hbm_token_count[0] != prefix_len:
-                    raise ValueError(
-                        f"classic-eagle prefix token count mismatch: got={prefix_hbm_token_count[0]} expected={prefix_len}"
-                    )
 
-                prefix_k_src = _resolve_artifact_path(
-                    e2e_case_path.parent, prefix_hbm_k_file[0]
+                prefix_k_src: Optional[Path] = None
+                prefix_v_src: Optional[Path] = None
+                has_prefix_meta = (
+                    prefix_hbm_dtype == ["fp16"]
+                    and len(prefix_hbm_k_file) == 1
+                    and len(prefix_hbm_v_file) == 1
+                    and len(prefix_hbm_token_count) == 1
+                    and len(prefix_hbm_elems_per_token) == 1
                 )
-                prefix_v_src = _resolve_artifact_path(
-                    e2e_case_path.parent, prefix_hbm_v_file[0]
-                )
-                if not prefix_k_src.exists() or not prefix_v_src.exists():
-                    raise FileNotFoundError(
-                        f"classic-eagle prefix sidecar missing: {prefix_k_src} / {prefix_v_src}"
+                if has_prefix_meta:
+                    if prefix_hbm_token_count[0] != prefix_len:
+                        raise ValueError(
+                            f"classic-eagle prefix token count mismatch: got={prefix_hbm_token_count[0]} expected={prefix_len}"
+                        )
+                    prefix_k_src = _resolve_artifact_path(
+                        e2e_case_path.parent, prefix_hbm_k_file[0]
                     )
+                    prefix_v_src = _resolve_artifact_path(
+                        e2e_case_path.parent, prefix_hbm_v_file[0]
+                    )
+                    if not prefix_k_src.exists() or not prefix_v_src.exists():
+                        print(
+                            "[warn] classic-eagle prefix_hbm metadata exists but sidecars are "
+                            f"missing: {prefix_k_src} / {prefix_v_src}; trying fallback search."
+                        )
+                        prefix_k_src = None
+                        prefix_v_src = None
+
+                if prefix_k_src is None or prefix_v_src is None:
+                    fallback_pairs = [
+                        (
+                            e2e_case_path.parent
+                            / "cost_draft_tree_draft_e2e_prefix_k_layer0.fp16.bin",
+                            e2e_case_path.parent
+                            / "cost_draft_tree_draft_e2e_prefix_v_layer0.fp16.bin",
+                        ),
+                        (
+                            script_dir.parents[4]
+                            / "capture/e2e_draft/cost_draft_tree_draft_e2e_prefix_k_layer0.fp16.bin",
+                            script_dir.parents[4]
+                            / "capture/e2e_draft/cost_draft_tree_draft_e2e_prefix_v_layer0.fp16.bin",
+                        ),
+                        (
+                            script_dir.parents[4]
+                            / "capture/cases/cost_draft_tree_multilayer_orchestrator_prefix_k_layer0.fp16.bin",
+                            script_dir.parents[4]
+                            / "capture/cases/cost_draft_tree_multilayer_orchestrator_prefix_v_layer0.fp16.bin",
+                        ),
+                        (
+                            script_dir / "cost_draft_tree_multilayer_orchestrator_prefix_k_layer0.fp16.bin",
+                            script_dir / "cost_draft_tree_multilayer_orchestrator_prefix_v_layer0.fp16.bin",
+                        ),
+                    ]
+                    for cand_k, cand_v in fallback_pairs:
+                        if cand_k.exists() and cand_v.exists():
+                            prefix_k_src = cand_k.resolve()
+                            prefix_v_src = cand_v.resolve()
+                            break
+                    if prefix_k_src is None or prefix_v_src is None:
+                        raise FileNotFoundError(
+                            "classic-eagle prefix sidecar missing in e2e metadata and no fallback "
+                            "prefix_k/prefix_v pair was found."
+                        )
+                    print(
+                        "[warn] classic-eagle e2e missing prefix_hbm metadata; using fallback "
+                        f"prefix sidecars: {prefix_k_src} / {prefix_v_src}"
+                    )
+                    prefix_hbm_dtype = ["fp16"]
+                    prefix_hbm_token_count = [prefix_len]
+                    prefix_hbm_elems_per_token = [hidden_size]
 
                 # Prefer SLM inputs captured during E2E runtime over golden tensor files.
                 e2e_step_hidden = _get_floats(e2e, "step_input_hidden_states_init", required=False)
@@ -500,7 +676,7 @@ def main() -> None:
                     raise ValueError(
                         "classic-eagle expected_mask_recurrent_depth size mismatch"
                     )
-                if any(v != 0 for v in strict_recurrent_depth):
+                if (not args.strict_classic) and any(v != 0 for v in strict_recurrent_depth):
                     print(
                         "[info] normalizing expected_mask_recurrent_depth for classic-eagle "
                         "to non-strict (all zeros)"
@@ -538,15 +714,28 @@ def main() -> None:
                     expected_mask_fields = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
                 if len(expected_mask_fields) != 10:
                     raise ValueError("classic-eagle expected_mask_fields size mismatch")
-                # Classic branch emits placeholder expected_* vectors for legacy cumu/output
-                # fields. Keep strictness only on top-level IO/control fields.
-                canonical_mask = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
-                if expected_mask_fields != canonical_mask:
-                    print(
-                        "[info] normalizing expected_mask_fields for classic-eagle "
-                        f"from {expected_mask_fields} to {canonical_mask}"
-                    )
-                    expected_mask_fields = canonical_mask
+                if not args.strict_classic:
+                    # Legacy classic mode keeps strictness only on top-level IO/control fields.
+                    canonical_mask = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
+                    if expected_mask_fields != canonical_mask:
+                        print(
+                            "[info] normalizing expected_mask_fields for classic-eagle "
+                            f"from {expected_mask_fields} to {canonical_mask}"
+                        )
+                        expected_mask_fields = canonical_mask
+                else:
+                    if any(v == 0 for v in expected_mask_fields):
+                        raise ValueError(
+                            "strict-classic requires expected_mask_fields to be all-ones; "
+                            f"got={expected_mask_fields}"
+                        )
+                    if tree_depth > 1:
+                        tail = strict_recurrent_depth[1:]
+                        if any(v == 0 for v in tail):
+                            raise ValueError(
+                                "strict-classic requires expected_mask_recurrent_depth[1:] "
+                                f"to be all-ones; got={strict_recurrent_depth}"
+                            )
 
                 step_input_tokens_init = [0] * tree_n
                 step_last_layer_scores_init = [0.0] * tree_n
@@ -659,21 +848,90 @@ def main() -> None:
                                 dst_base : dst_base + hidden_size
                             ] = step_input_hidden_states_init[dst_base : dst_base + hidden_size]
 
-                init_legacy_cumu_tokens = [-777] * node_n
-                init_legacy_cumu_scores = [-3.0] * node_n
-                init_legacy_cumu_deltas = [-1] * node_n
-                init_legacy_prev_indexs = [-1] * node_n
-                init_legacy_next_indexs = [-1] * node_n
-                init_legacy_side_indexs = [-1] * node_n
-                init_legacy_output_scores = [-4.0] * out_n
-                init_legacy_output_tokens = [-1] * out_n
-                init_legacy_work_scores = [-6.0] * work_n
-                init_legacy_sort_scores = [-2.0] * sort_n
-                expected_cumu_tokens = [-1] * node_n
-                expected_cumu_scores = [0.0] * node_n
-                expected_cumu_deltas = [-1] * node_n
-                expected_output_scores = [0.0] * out_n
-                expected_output_tokens = [-1] * out_n
+                if args.strict_classic:
+                    # Strict classic replay must start from the exact runtime state.
+                    init_legacy_cumu_tokens = _get_i64s(
+                        e2e, "init_legacy_cumu_tokens", required=True
+                    )
+                    init_legacy_cumu_scores = _get_floats(
+                        e2e, "init_legacy_cumu_scores", required=True
+                    )
+                    init_legacy_cumu_deltas = _get_i64s(
+                        e2e, "init_legacy_cumu_deltas", required=True
+                    )
+                    init_legacy_prev_indexs = _get_i64s(
+                        e2e, "init_legacy_prev_indexs", required=True
+                    )
+                    init_legacy_next_indexs = _get_i64s(
+                        e2e, "init_legacy_next_indexs", required=True
+                    )
+                    init_legacy_side_indexs = _get_i64s(
+                        e2e, "init_legacy_side_indexs", required=True
+                    )
+                    init_legacy_output_scores = _get_floats(
+                        e2e, "init_legacy_output_scores", required=True
+                    )
+                    init_legacy_output_tokens = _get_i64s(
+                        e2e, "init_legacy_output_tokens", required=True
+                    )
+                    init_legacy_work_scores = _get_floats(
+                        e2e, "init_legacy_work_scores", required=True
+                    )
+                    init_legacy_sort_scores = _get_floats(
+                        e2e, "init_legacy_sort_scores", required=True
+                    )
+
+                    expected_cumu_tokens = _get_i64s(
+                        e2e, "expected_cumu_tokens", required=True
+                    )
+                    expected_cumu_scores = _get_floats(
+                        e2e, "expected_cumu_scores", required=True
+                    )
+                    expected_cumu_deltas = _get_i64s(
+                        e2e, "expected_cumu_deltas", required=True
+                    )
+                    expected_output_scores = _get_floats(
+                        e2e, "expected_output_scores", required=True
+                    )
+                    expected_output_tokens = _get_i64s(
+                        e2e, "expected_output_tokens", required=True
+                    )
+                    if (
+                        len(init_legacy_cumu_tokens) != node_n
+                        or len(init_legacy_cumu_scores) != node_n
+                        or len(init_legacy_cumu_deltas) != node_n
+                        or len(init_legacy_prev_indexs) != node_n
+                        or len(init_legacy_next_indexs) != node_n
+                        or len(init_legacy_side_indexs) != node_n
+                        or len(init_legacy_output_scores) != out_n
+                        or len(init_legacy_output_tokens) != out_n
+                        or len(init_legacy_work_scores) != work_n
+                        or len(init_legacy_sort_scores) != sort_n
+                        or len(expected_cumu_tokens) != node_n
+                        or len(expected_cumu_scores) != node_n
+                        or len(expected_cumu_deltas) != node_n
+                        or len(expected_output_scores) != out_n
+                        or len(expected_output_tokens) != out_n
+                    ):
+                        raise ValueError(
+                            "classic-eagle strict init/expected array size mismatch"
+                        )
+                else:
+                    init_legacy_cumu_tokens = [-777] * node_n
+                    init_legacy_cumu_scores = [-3.0] * node_n
+                    init_legacy_cumu_deltas = [-1] * node_n
+                    init_legacy_prev_indexs = [-1] * node_n
+                    init_legacy_next_indexs = [-1] * node_n
+                    init_legacy_side_indexs = [-1] * node_n
+                    init_legacy_output_scores = [-4.0] * out_n
+                    init_legacy_output_tokens = [-1] * out_n
+                    init_legacy_work_scores = [-6.0] * work_n
+                    init_legacy_sort_scores = [-2.0] * sort_n
+                    expected_cumu_tokens = [-1] * node_n
+                    expected_cumu_scores = [0.0] * node_n
+                    expected_cumu_deltas = [-1] * node_n
+                    expected_output_scores = [0.0] * out_n
+                    expected_output_tokens = [-1] * out_n
                 full_path = _build_full_path_fixtures(
                     batch_size=batch_size,
                     hidden_size=hidden_size,
@@ -682,13 +940,22 @@ def main() -> None:
                     max_verify_num=max_verify_num,
                     initial_hidden_states=initial_hidden_states,
                 )
+                full_path = _merge_full_path_fixtures_from_e2e(
+                    e2e=e2e,
+                    full_path=full_path,
+                    batch_size=batch_size,
+                    hidden_size=hidden_size,
+                    max_node_count=max_node_count,
+                )
 
                 out_path = args.output.resolve()
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 prefix_k_dst = out_path.parent / "cost_draft_tree_multilayer_orchestrator_prefix_k_layer0.fp16.bin"
                 prefix_v_dst = out_path.parent / "cost_draft_tree_multilayer_orchestrator_prefix_v_layer0.fp16.bin"
-                shutil.copyfile(prefix_k_src, prefix_k_dst)
-                shutil.copyfile(prefix_v_src, prefix_v_dst)
+                if prefix_k_src.resolve() != prefix_k_dst.resolve():
+                    shutil.copyfile(prefix_k_src, prefix_k_dst)
+                if prefix_v_src.resolve() != prefix_v_dst.resolve():
+                    shutil.copyfile(prefix_v_src, prefix_v_dst)
 
                 with out_path.open("w", encoding="utf-8") as f:
                     f.write("# cost_draft_tree multilayer orchestrator case v2 eagle4-classic\n")
@@ -719,7 +986,12 @@ def main() -> None:
                     )
                     _write_float_line(f, "eps_abs", [eps_abs])
                     _write_float_line(f, "eps_rel", [eps_rel])
-                    _write_line(f, "gt_mode", ["mixed"])
+                    if args.strict_classic:
+                        gt_mode_vals = _get_strings(e2e, "gt_mode", required=False)
+                        gt_mode_out = gt_mode_vals[0] if gt_mode_vals else "strict"
+                        _write_line(f, "gt_mode", [gt_mode_out])
+                    else:
+                        _write_line(f, "gt_mode", ["mixed"])
                     _write_line(f, "policy_mode", ["constant"])
                     _write_line(f, "capture_backend", ["eagle4_classic"])
                     _write_line(f, "golden_tensor_root", [str(golden_tensor_root)])
@@ -994,6 +1266,13 @@ def main() -> None:
                 max_node_count=max_node_count,
                 max_verify_num=max_verify_num,
                 initial_hidden_states=initial_hidden_states,
+            )
+            full_path = _merge_full_path_fixtures_from_e2e(
+                e2e=e2e,
+                full_path=full_path,
+                batch_size=batch_size,
+                hidden_size=hidden_size,
+                max_node_count=max_node_count,
             )
 
             out_path = args.output.resolve()

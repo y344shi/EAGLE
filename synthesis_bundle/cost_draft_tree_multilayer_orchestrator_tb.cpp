@@ -37,6 +37,7 @@ enum MaskFieldIndex {
 struct CliOptions {
     std::string case_file;
     bool dry_run = false;
+    bool strict_classic = false;
     int seed = 20260226;
 };
 
@@ -214,6 +215,8 @@ bool parse_cli(int argc, char** argv, CliOptions* opts, std::string* err_msg) {
             opts->case_file = argv[++i];
         } else if (arg == "--dry-run") {
             opts->dry_run = true;
+        } else if (arg == "--strict-classic") {
+            opts->strict_classic = true;
         } else if (arg == "--seed") {
             if (i + 1 >= argc) {
                 *err_msg = "--seed requires an integer";
@@ -228,7 +231,7 @@ bool parse_cli(int argc, char** argv, CliOptions* opts, std::string* err_msg) {
         } else if (arg == "--help" || arg == "-h") {
             std::cout
                 << "Usage: cost_draft_tree_multilayer_orchestrator_tb [--case-file <path>]"
-                << " [--dry-run] [--seed <n>]\n";
+                << " [--dry-run] [--strict-classic] [--seed <n>]\n";
             return false;
         } else {
             *err_msg = "unknown argument: " + arg;
@@ -425,6 +428,8 @@ bool load_case_file(const std::string& path, CaseData* out, std::string* err_msg
     const size_t sort_n = static_cast<size_t>(out->batch_size) * out->max_verify_num;
     const size_t prefill_hidden_3h_n = static_cast<size_t>(out->batch_size) * 3 * out->hidden_size;
     const size_t prefill_embed_n = static_cast<size_t>(out->batch_size) * out->hidden_size;
+    const size_t expected_prefill_hidden_n = out->enable_prefill_stage ? prefill_hidden_3h_n : 0;
+    const size_t expected_prefill_embed_n = out->enable_prefill_stage ? prefill_embed_n : 0;
 
     int expected_stopped_early_i = 0;
 
@@ -445,9 +450,9 @@ bool load_case_file(const std::string& path, CaseData* out, std::string* err_msg
                           true) ||
         !read_i64_array(kv, "initial_topk_tokens", out_n, &out->initial_topk_tokens, err_msg,
                         true) ||
-        !read_float_array(kv, "prefill_input_hidden_states_3h", prefill_hidden_3h_n,
+        !read_float_array(kv, "prefill_input_hidden_states_3h", expected_prefill_hidden_n,
                           &out->prefill_input_hidden_states_3h, err_msg, true) ||
-        !read_float_array(kv, "prefill_input_embed_states", prefill_embed_n,
+        !read_float_array(kv, "prefill_input_embed_states", expected_prefill_embed_n,
                           &out->prefill_input_embed_states, err_msg, true) ||
         !read_i64_array(kv, "node_to_hbm_slot_init", static_cast<size_t>(out->max_node_count),
                         &out->node_to_hbm_slot_init, err_msg, true) ||
@@ -738,47 +743,50 @@ bool validate_case(const CaseData& c, std::string* err_msg) {
         *err_msg = "expected_mask_recurrent_depth size mismatch";
         return false;
     }
-    if (!c.enable_prefill_stage) {
-        *err_msg = "precondition failed: enable_prefill_stage must be true";
-        return false;
+    if (c.enable_prefill_stage) {
+        if (c.prefill_input_hidden_states_3h.size() !=
+                static_cast<size_t>(c.batch_size) * 3 * c.hidden_size ||
+            c.prefill_input_embed_states.size() !=
+                static_cast<size_t>(c.batch_size) * c.hidden_size) {
+            *err_msg = "prefill fixture tensor size mismatch";
+            return false;
+        }
+    } else {
+        if (!c.prefill_input_hidden_states_3h.empty() || !c.prefill_input_embed_states.empty()) {
+            *err_msg = "prefill tensors must be empty when enable_prefill_stage is false";
+            return false;
+        }
     }
-    if (!c.enable_accepted_kv_compact) {
-        *err_msg = "precondition failed: enable_accepted_kv_compact must be true";
-        return false;
-    }
-    if (c.prefill_input_hidden_states_3h.size() !=
-            static_cast<size_t>(c.batch_size) * 3 * c.hidden_size ||
-        c.prefill_input_embed_states.size() !=
-            static_cast<size_t>(c.batch_size) * c.hidden_size) {
-        *err_msg = "prefill fixture tensor size mismatch";
-        return false;
-    }
-    if (c.accepted_draft_node_ids.empty()) {
-        *err_msg = "accepted_draft_node_ids must be non-empty in full-path mode";
-        return false;
-    }
-    if (static_cast<int>(c.accepted_draft_node_ids.size()) > c.max_verify_num ||
-        static_cast<int>(c.accepted_draft_node_ids.size()) > kContiguousKvMaxAccepted) {
-        *err_msg = "accepted_draft_node_ids exceeds compact capacity";
-        return false;
+    if (c.enable_accepted_kv_compact) {
+        if (c.accepted_draft_node_ids.empty()) {
+            *err_msg = "accepted_draft_node_ids must be non-empty when compaction is enabled";
+            return false;
+        }
+        if (static_cast<int>(c.accepted_draft_node_ids.size()) > c.max_verify_num ||
+            static_cast<int>(c.accepted_draft_node_ids.size()) > kContiguousKvMaxAccepted) {
+            *err_msg = "accepted_draft_node_ids exceeds compact capacity";
+            return false;
+        }
     }
     if (static_cast<int>(c.node_to_hbm_slot_init.size()) != c.max_node_count) {
         *err_msg = "node_to_hbm_slot_init size mismatch";
         return false;
     }
-    for (int64_t node_id : c.accepted_draft_node_ids) {
-        if (node_id < 0 || node_id >= c.max_node_count) {
-            *err_msg = "accepted_draft_node_ids contains out-of-range node id";
-            return false;
-        }
-        const int64_t mapped_slot = c.node_to_hbm_slot_init[static_cast<size_t>(node_id)];
-        if (mapped_slot < 0) {
-            *err_msg = "accepted_draft_node_ids contains mapping miss (node_to_hbm_slot_init == -1)";
-            return false;
-        }
-        if (c.prefix_hbm_token_count > 0 && mapped_slot >= c.prefix_hbm_token_count) {
-            *err_msg = "accepted node mapping exceeds prefix_hbm_token_count";
-            return false;
+    if (c.enable_accepted_kv_compact) {
+        for (int64_t node_id : c.accepted_draft_node_ids) {
+            if (node_id < 0 || node_id >= c.max_node_count) {
+                *err_msg = "accepted_draft_node_ids contains out-of-range node id";
+                return false;
+            }
+            const int64_t mapped_slot = c.node_to_hbm_slot_init[static_cast<size_t>(node_id)];
+            if (mapped_slot < 0) {
+                *err_msg = "accepted_draft_node_ids contains mapping miss (node_to_hbm_slot_init == -1)";
+                return false;
+            }
+            if (c.prefix_hbm_token_count > 0 && mapped_slot >= c.prefix_hbm_token_count) {
+                *err_msg = "accepted node mapping exceeds prefix_hbm_token_count";
+                return false;
+            }
         }
     }
     if (!c.capture_backend.empty() &&
@@ -1415,6 +1423,14 @@ void run_orchestrator_under_test(const CaseData& c,
     const int accepted_count =
         std::min(static_cast<int>(c.accepted_draft_node_ids.size()), kContiguousKvMaxAccepted);
 
+    eagle4_draft_set_recurrent_replay(
+        c.recurrent_topk_probas.data(),
+        c.recurrent_topk_tokens.data(),
+        c.tree_depth,
+        c.batch_size,
+        c.max_tree_width,
+        c.node_top_k);
+
     eagle4_draft(
         c.tree_depth,
         c.curr_depth_start,
@@ -1500,6 +1516,8 @@ void run_orchestrator_under_test(const CaseData& c,
         c.prefill_input_embed_states.data(),
         prefill_fc_weight.data(),
         prefill_fc_scales.data());
+
+    eagle4_draft_clear_recurrent_replay();
 }
 
 bool run_slm_depth_parity(const CaseData& c,
@@ -2134,6 +2152,7 @@ bool mask_enabled(const std::vector<int>& mask, int idx) {
 }
 
 bool run_and_compare(const CaseData& c,
+                     const CliOptions& opts,
                      const SlmArtifacts& artifacts,
                      std::string* err_msg) {
     RuntimeState ref_state;
@@ -2193,6 +2212,10 @@ bool run_and_compare(const CaseData& c,
 
     const bool classic_recurrent_advisory =
         (c.capture_backend == "classic_eagle" || c.capture_backend == "eagle4_classic");
+    const float cumu_eps_abs =
+        (classic_recurrent_advisory && opts.strict_classic)
+            ? std::max(c.eps_abs, 3e-5f)
+            : c.eps_abs;
 
     auto advisory_or_fail = [&](const char* name, bool cmp_ok, bool strict_field) {
         if (cmp_ok) {
@@ -2203,7 +2226,7 @@ bool run_and_compare(const CaseData& c,
                       << " mismatch (non-strict fallback field)\n";
             return true;
         }
-        if (classic_recurrent_advisory) {
+        if (classic_recurrent_advisory && !opts.strict_classic) {
             std::cerr << "[classic-advisory] " << name
                       << " mismatch (non-fatal for classic backend)\n";
             return true;
@@ -2218,7 +2241,7 @@ bool run_and_compare(const CaseData& c,
     ok &= advisory_or_fail(
         "cumu_scores",
         compare_float_vector(
-            "cumu_scores", uut_state.cumu_scores, exp_cumu_scores, c.eps_abs, c.eps_rel),
+            "cumu_scores", uut_state.cumu_scores, exp_cumu_scores, cumu_eps_abs, c.eps_rel),
         mask_enabled(c.expected_mask_fields, kMaskCumuScores));
     ok &= advisory_or_fail(
         "cumu_deltas",
@@ -2341,7 +2364,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    if (!run_and_compare(c, artifacts, &err_msg)) {
+    if (!run_and_compare(c, opts, artifacts, &err_msg)) {
         if (!err_msg.empty()) {
             std::cerr << "[FAIL] " << err_msg << "\n";
         }

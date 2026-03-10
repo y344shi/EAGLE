@@ -483,6 +483,19 @@ void eagle4_draft_impl(
     const float* prefill_fc_scales// = nullptr                // grouped scales for prefill_fc_weight
 );
 
+// Host-side replay hook for TB parity runs.
+// When enabled, eagle4_draft consumes captured recurrent_topk streams
+// per depth instead of recomputing SLM top-k in-loop.
+void eagle4_draft_set_recurrent_replay(
+    const float* recurrent_topk_probas,
+    const int64_t* recurrent_topk_tokens,
+    int tree_depth,
+    int batch_size,
+    int max_tree_width,
+    int node_top_k);
+
+void eagle4_draft_clear_recurrent_replay();
+
 } // namespace hls
 } // namespace tmac
 

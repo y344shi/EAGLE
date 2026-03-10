@@ -6,6 +6,22 @@
 namespace tmac {
 namespace hls {
 
+#ifndef __SYNTHESIS__
+namespace {
+struct E4dRecurrentReplayState {
+    const float* recurrent_topk_probas = nullptr;
+    const int64_t* recurrent_topk_tokens = nullptr;
+    int tree_depth = 0;
+    int batch_size = 0;
+    int max_tree_width = 0;
+    int node_top_k = 0;
+    bool enabled = false;
+};
+
+E4dRecurrentReplayState g_e4d_recurrent_replay;
+}  // namespace
+#endif
+
 // Fused step wiring for one draft-tree layer in HLS:
 // 1) score/sort + parent pick + hidden gather,
 // 2) cumulative state update (cumu_tokens, prev/next/side_indexs, work/sort_scores).
@@ -73,11 +89,13 @@ void e4d_fused_step(
 
     // Inter-stage buffers (fixed upper bounds for synthesis).
     float s_curr_layer_scores[kCdtFusedMaxBatch * kCdtSortWidth];
+    float s_update_layer_scores[kCdtFusedMaxBatch * kCdtSortWidth];
     float s_sort_layer_scores[kCdtFusedMaxBatch * kCdtSortWidth];
     int64_t s_sort_layer_indices[kCdtFusedMaxBatch * kCdtSortWidth];
     int64_t s_parent_indices_in_layer[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
     int64_t s_remapped_topk_tokens[kCdtFusedMaxBatch * kCdtSortWidth];
 #pragma HLS BIND_STORAGE variable = s_curr_layer_scores type = ram_2p impl = bram
+#pragma HLS BIND_STORAGE variable = s_update_layer_scores type = ram_2p impl = bram
 #pragma HLS BIND_STORAGE variable = s_sort_layer_scores type = ram_2p impl = bram
 #pragma HLS BIND_STORAGE variable = s_sort_layer_indices type = ram_2p impl = bram
 #pragma HLS BIND_STORAGE variable = s_parent_indices_in_layer type = ram_2p impl = bram
@@ -108,9 +126,19 @@ void e4d_fused_step(
         s_remapped_topk_tokens,
         nullptr);   // output_tokens not needed (no controller)
 
+    // e4d_update_state internally applies a legacy 0.9999 scale to the first input.
+    // Pre-compensate here so persisted cumu_scores preserve the true cumulative score.
+    constexpr float kLegacyCumuScale = 0.9999f;
+scale_for_update_loop:
+    for (int i = 0; i < total_topk * batch_size; ++i) {
+#pragma HLS loop_tripcount min=1 max=kCdtFusedMaxBatch * kCdtSortWidth avg=kTcTopkFlat
+#pragma HLS PIPELINE II = 1
+        s_update_layer_scores[i] = s_curr_layer_scores[i] / kLegacyCumuScale;
+    }
+
     // Stage 2: update cumulative draft state.
     e4d_update_state(
-        topk_probas_sampling,
+        s_update_layer_scores,
         s_remapped_topk_tokens,
         s_sort_layer_scores,
         s_sort_layer_indices,
@@ -1486,44 +1514,93 @@ orchestrator_depth_loop:
             next_verify_num = e4d_clamp_int(next_verify_num, 1, max_verify_num);
         }
 
-        // Stage A/B: SLM forward and LM-head top-k for current frontier.
+        // Stage A/B: recurrent candidate generation.
+        // Default path computes SLM+LM top-k in-kernel.
+        // Host replay mode (TB-only) can inject captured recurrent_topk streams instead.
         const int current_depth = curr_depth_start + d;
-        const bool embed_ok = e4d_lookup_recurrent_embed_states(
-            bram_step_input_tokens,
-            batch_size,
-            curr_tree_width,
-            hidden_size,
-            draft_embed_tokens_weight,
-            bram_step_input_embed_states);
-        if (!embed_ok) {
-            return;
+        bool replay_loaded = false;
+#ifndef __SYNTHESIS__
+        if (g_e4d_recurrent_replay.enabled &&
+            g_e4d_recurrent_replay.recurrent_topk_probas != nullptr &&
+            g_e4d_recurrent_replay.recurrent_topk_tokens != nullptr &&
+            g_e4d_recurrent_replay.tree_depth > d &&
+            g_e4d_recurrent_replay.batch_size >= batch_size &&
+            g_e4d_recurrent_replay.max_tree_width >= max_tree_width &&
+            g_e4d_recurrent_replay.node_top_k >= node_top_k) {
+            const int replay_topk_stage_n = g_e4d_recurrent_replay.batch_size *
+                                            g_e4d_recurrent_replay.max_tree_width *
+                                            g_e4d_recurrent_replay.node_top_k;
+            const int depth_base = d * replay_topk_stage_n;
+        replay_zero_loop:
+            for (int i = 0; i < topk_flat; ++i) {
+#pragma HLS loop_tripcount min=1 max=kMaxTopkFlat avg=kTcTopkFlat
+#pragma HLS PIPELINE II = 1
+                bram_step_topk_probas_sampling[i] = 0.0f;
+                bram_step_topk_tokens_sampling[i] = 0;
+            }
+        replay_copy_loop_b:
+            for (int b = 0; b < kCdtFusedMaxBatch; ++b) {
+#pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
+                if (b >= batch_size) {
+                    break;
+                }
+                const int src_base = depth_base +
+                                     b * g_e4d_recurrent_replay.max_tree_width *
+                                         g_e4d_recurrent_replay.node_top_k;
+                const int dst_base = b * curr_tree_width * node_top_k;
+            replay_copy_loop_i:
+                for (int i = 0; i < TREE_WIDTH * kCdtFusedMaxNodeTopK; ++i) {
+#pragma HLS loop_tripcount min=1 max=kMaxTopkFlat avg=kTcTopkFlat
+#pragma HLS PIPELINE II = 1
+                    if (i < curr_tree_width * node_top_k) {
+                        bram_step_topk_probas_sampling[dst_base + i] =
+                            g_e4d_recurrent_replay.recurrent_topk_probas[src_base + i];
+                        bram_step_topk_tokens_sampling[dst_base + i] =
+                            g_e4d_recurrent_replay.recurrent_topk_tokens[src_base + i];
+                    }
+                }
+            }
+            replay_loaded = true;
         }
-        e4d_slm_topk(
-            bram_step_input_hidden_states,
-            bram_step_input_embed_states,
-            batch_size,
-            curr_tree_width,
-            hidden_size,
-            node_top_k,
-            w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales, w_up, up_scales,
-            w_down, down_scales,
-            hidden_norm_gamma, embed_norm_gamma, post_attn_norm_gamma, final_norm_gamma,
-            bram_rope_cos_vals, bram_rope_sin_vals,
-            hbm_k, hbm_v,
-            efficient_lm_head_down_proj_weight,
-            bram_efficient_qweight,
-            bram_efficient_scales,
-            bram_efficient_qzeros,
-            bram_efficient_g_idx,
-            lm_head_weight,
-            efficient_lm_rank,
-            efficient_lm_vocab_size,
-            effective_prefix_len,
-            current_depth,
-            parent_indices_accum,
-            bram_step_input_hidden_states,
-            bram_step_topk_probas_sampling,
-            bram_step_topk_tokens_sampling);
+#endif
+        if (!replay_loaded) {
+            const bool embed_ok = e4d_lookup_recurrent_embed_states(
+                bram_step_input_tokens,
+                batch_size,
+                curr_tree_width,
+                hidden_size,
+                draft_embed_tokens_weight,
+                bram_step_input_embed_states);
+            if (!embed_ok) {
+                return;
+            }
+            e4d_slm_topk(
+                bram_step_input_hidden_states,
+                bram_step_input_embed_states,
+                batch_size,
+                curr_tree_width,
+                hidden_size,
+                node_top_k,
+                w_q, s_q, w_k, s_k, w_v, s_v, w_o, s_o, w_gate, gate_scales, w_up, up_scales,
+                w_down, down_scales,
+                hidden_norm_gamma, embed_norm_gamma, post_attn_norm_gamma, final_norm_gamma,
+                bram_rope_cos_vals, bram_rope_sin_vals,
+                hbm_k, hbm_v,
+                efficient_lm_head_down_proj_weight,
+                bram_efficient_qweight,
+                bram_efficient_scales,
+                bram_efficient_qzeros,
+                bram_efficient_g_idx,
+                lm_head_weight,
+                efficient_lm_rank,
+                efficient_lm_vocab_size,
+                effective_prefix_len,
+                current_depth,
+                parent_indices_accum,
+                bram_step_input_hidden_states,
+                bram_step_topk_probas_sampling,
+                bram_step_topk_tokens_sampling);
+        }
         if (node_to_hbm_slot != nullptr) {
             const int slot_base = effective_prefix_len + current_depth * max_tree_width;
         update_node_to_hbm_loop:
@@ -1788,6 +1865,43 @@ orchestrator_finalize:
             side_indexs[i] = uram_side_indexs[i];
         }
     }
+}
+
+void eagle4_draft_set_recurrent_replay(
+    const float* recurrent_topk_probas,
+    const int64_t* recurrent_topk_tokens,
+    int tree_depth,
+    int batch_size,
+    int max_tree_width,
+    int node_top_k) {
+#ifndef __SYNTHESIS__
+    g_e4d_recurrent_replay.recurrent_topk_probas = recurrent_topk_probas;
+    g_e4d_recurrent_replay.recurrent_topk_tokens = recurrent_topk_tokens;
+    g_e4d_recurrent_replay.tree_depth = tree_depth;
+    g_e4d_recurrent_replay.batch_size = batch_size;
+    g_e4d_recurrent_replay.max_tree_width = max_tree_width;
+    g_e4d_recurrent_replay.node_top_k = node_top_k;
+    g_e4d_recurrent_replay.enabled =
+        recurrent_topk_probas != nullptr &&
+        recurrent_topk_tokens != nullptr &&
+        tree_depth > 0 &&
+        batch_size > 0 &&
+        max_tree_width > 0 &&
+        node_top_k > 0;
+#else
+    (void)recurrent_topk_probas;
+    (void)recurrent_topk_tokens;
+    (void)tree_depth;
+    (void)batch_size;
+    (void)max_tree_width;
+    (void)node_top_k;
+#endif
+}
+
+void eagle4_draft_clear_recurrent_replay() {
+#ifndef __SYNTHESIS__
+    g_e4d_recurrent_replay = E4dRecurrentReplayState{};
+#endif
 }
 
 } // namespace hls

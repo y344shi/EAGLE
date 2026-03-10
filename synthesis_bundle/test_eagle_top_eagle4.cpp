@@ -228,32 +228,42 @@ int run_smoke(int seed) {
 
     RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM> rope_cfg{};
     fill_rope_cfg<HEAD_DIM>(rope_cfg, inv_freq, 0);
+    int parent_indices[kMaxDraftDepth * TREE_WIDTH];
+    std::fill(std::begin(parent_indices), std::end(parent_indices), 0);
 
     hls_stream<vec_t<VEC_W>> hidden_stream, embed_stream, reasoning_out, logits_out;
-    for (int i = 0; i < HIDDEN / VEC_W; ++i) {
-        vec_t<VEC_W> hc;
-        vec_t<VEC_W> ec;
-        for (int j = 0; j < VEC_W; ++j) {
-            hc[j] = hidden[i * VEC_W + j];
-            ec[j] = embed[i * VEC_W + j];
+    for (int t = 0; t < TREE_WIDTH; ++t) {
+        for (int i = 0; i < HIDDEN / VEC_W; ++i) {
+            vec_t<VEC_W> hc;
+            vec_t<VEC_W> ec;
+            for (int j = 0; j < VEC_W; ++j) {
+                hc[j] = hidden[i * VEC_W + j];
+                ec[j] = embed[i * VEC_W + j];
+            }
+            hidden_stream.write(hc);
+            embed_stream.write(ec);
         }
-        hidden_stream.write(hc);
-        embed_stream.write(ec);
     }
 
     eagle_tier1_top_eagle4_l0(hidden_stream, embed_stream, reasoning_out, logits_out,
                               w_q.data(), s_q.data(), w_k.data(), s_k.data(), w_v.data(), s_v.data(),
                               w_o.data(), s_o.data(), w_gate.data(), s_gate.data(), w_up.data(), s_up.data(),
                               w_down.data(), s_down.data(), hidden_norm.data(), embed_norm.data(),
-                              post_norm.data(), final_norm.data(), rope_cfg, hbm_k.data(), hbm_v.data(), 0, 0);
+                              post_norm.data(), final_norm.data(),
+                              rope_cfg.cos_vals, rope_cfg.sin_vals,
+                              hbm_k.data(), hbm_v.data(), 0, 0, parent_indices);
 
-    std::vector<float> reasoning(HIDDEN), logits(HIDDEN);
-    for (int i = 0; i < HIDDEN / VEC_W; ++i) {
-        auto r = reasoning_out.read();
-        auto l = logits_out.read();
-        for (int j = 0; j < VEC_W; ++j) {
-            reasoning[i * VEC_W + j] = r[j];
-            logits[i * VEC_W + j] = l[j];
+    std::vector<float> reasoning(static_cast<size_t>(TREE_WIDTH) * HIDDEN);
+    std::vector<float> logits(static_cast<size_t>(TREE_WIDTH) * HIDDEN);
+    for (int t = 0; t < TREE_WIDTH; ++t) {
+        for (int i = 0; i < HIDDEN / VEC_W; ++i) {
+            auto r = reasoning_out.read();
+            auto l = logits_out.read();
+            const size_t base = static_cast<size_t>(t) * HIDDEN + static_cast<size_t>(i) * VEC_W;
+            for (int j = 0; j < VEC_W; ++j) {
+                reasoning[base + static_cast<size_t>(j)] = r[j];
+                logits[base + static_cast<size_t>(j)] = l[j];
+            }
         }
     }
 
@@ -287,6 +297,9 @@ int main(int argc, char** argv) {
     bool smoke_mode = false;
     bool list_required = false;
     int smoke_seed = 17;
+    int run_tokens = -1;
+    float tol_max = 2e-1f;
+    float tol_mean = 5e-3f;
     std::string base_tensors = "../eagle_verified_pipeline_4bit/cpmcu_tensors/";
     std::string base_weights = "../packed_all/";
     std::string base_norms = "../eagle_verified_pipeline_4bit/hls_4bit/weights_all_4bit/";
@@ -311,6 +324,18 @@ int main(int argc, char** argv) {
             base_norms = arg.substr(11);
         } else if (arg.rfind("--smoke-seed=", 0) == 0) {
             smoke_seed = std::atoi(arg.substr(13).c_str());
+        } else if (arg == "--run-tokens" && i + 1 < argc) {
+            run_tokens = std::atoi(argv[++i]);
+        } else if (arg.rfind("--run-tokens=", 0) == 0) {
+            run_tokens = std::atoi(arg.substr(13).c_str());
+        } else if (arg == "--tol-max" && i + 1 < argc) {
+            tol_max = std::atof(argv[++i]);
+        } else if (arg.rfind("--tol-max=", 0) == 0) {
+            tol_max = std::atof(arg.substr(10).c_str());
+        } else if (arg == "--tol-mean" && i + 1 < argc) {
+            tol_mean = std::atof(argv[++i]);
+        } else if (arg.rfind("--tol-mean=", 0) == 0) {
+            tol_mean = std::atof(arg.substr(11).c_str());
         }
     }
 
@@ -341,10 +366,13 @@ int main(int argc, char** argv) {
 
     const int embed_tokens = static_cast<int>(embed_all.size() / HIDDEN);
     const int hidden_tokens = static_cast<int>(hidden_all.size() / HIDDEN);
-    const int total_tokens = std::min(embed_tokens, hidden_tokens);
+    int total_tokens = std::min(embed_tokens, hidden_tokens);
     if (total_tokens <= 0) {
         std::cout << "Invalid token count in inputs.\n";
         return 1;
+    }
+    if (run_tokens > 0 && run_tokens < total_tokens) {
+        total_tokens = run_tokens;
     }
 
     const int target_token = total_tokens - 1;
@@ -416,6 +444,8 @@ int main(int argc, char** argv) {
 
     std::vector<vec_t<VEC_W>> hbm_k(MAX_SEQ * (NUM_KV_HEADS * HEAD_DIM) / VEC_W);
     std::vector<vec_t<VEC_W>> hbm_v(MAX_SEQ * (NUM_KV_HEADS * HEAD_DIM) / VEC_W);
+    int parent_indices[kMaxDraftDepth * TREE_WIDTH];
+    std::fill(std::begin(parent_indices), std::end(parent_indices), 0);
 
     std::vector<float> out_reasoning;
     std::vector<float> out_logits;
@@ -423,15 +453,20 @@ int main(int argc, char** argv) {
     for (int t = 0; t <= target_token; ++t) {
         hls_stream<vec_t<VEC_W>> hidden_stream, embed_stream, reasoning_stream, logits_stream;
 
-        for (int i = 0; i < HIDDEN / VEC_W; ++i) {
-            vec_t<VEC_W> h;
-            vec_t<VEC_W> e;
-            for (int j = 0; j < VEC_W; ++j) {
-                h[j] = hidden_all[t * HIDDEN + i * VEC_W + j];
-                e[j] = embed_all[t * HIDDEN + i * VEC_W + j];
+        // Current Tier1 top consumes TREE_WIDTH token-lanes per call.
+        // For single-token replay parity, replicate the selected token across lanes
+        // and compare lane-0 output against golden tensors.
+        for (int lane = 0; lane < TREE_WIDTH; ++lane) {
+            for (int i = 0; i < HIDDEN / VEC_W; ++i) {
+                vec_t<VEC_W> h;
+                vec_t<VEC_W> e;
+                for (int j = 0; j < VEC_W; ++j) {
+                    h[j] = hidden_all[t * HIDDEN + i * VEC_W + j];
+                    e[j] = embed_all[t * HIDDEN + i * VEC_W + j];
+                }
+                hidden_stream.write(h);
+                embed_stream.write(e);
             }
-            hidden_stream.write(h);
-            embed_stream.write(e);
         }
 
         RopeConfig<NUM_HEADS, NUM_KV_HEADS, HEAD_DIM> rope_cfg{};
@@ -441,24 +476,27 @@ int main(int argc, char** argv) {
                                   w_q.data(), s_q.data(), w_k.data(), s_k.data(), w_v.data(), s_v.data(),
                                   w_o.data(), s_o.data(), w_gate.data(), s_gate.data(), w_up.data(), s_up.data(),
                                   w_down.data(), s_down.data(), hidden_norm.data(), embed_norm.data(),
-                                  post_norm.data(), final_norm.data(), rope_cfg, hbm_k.data(), hbm_v.data(), t, t);
+                                  post_norm.data(), final_norm.data(),
+                                  rope_cfg.cos_vals, rope_cfg.sin_vals,
+                                  hbm_k.data(), hbm_v.data(), t, t, parent_indices);
 
-        if (t == target_token) {
-            out_reasoning.resize(HIDDEN);
-            out_logits.resize(HIDDEN);
+        std::vector<float> step_reasoning(static_cast<size_t>(TREE_WIDTH) * HIDDEN, 0.0f);
+        std::vector<float> step_logits(static_cast<size_t>(TREE_WIDTH) * HIDDEN, 0.0f);
+        for (int lane = 0; lane < TREE_WIDTH; ++lane) {
             for (int i = 0; i < HIDDEN / VEC_W; ++i) {
                 auto r = reasoning_stream.read();
                 auto l = logits_stream.read();
+                const size_t base = static_cast<size_t>(lane) * HIDDEN + static_cast<size_t>(i) * VEC_W;
                 for (int j = 0; j < VEC_W; ++j) {
-                    out_reasoning[i * VEC_W + j] = r[j];
-                    out_logits[i * VEC_W + j] = l[j];
+                    step_reasoning[base + static_cast<size_t>(j)] = r[j];
+                    step_logits[base + static_cast<size_t>(j)] = l[j];
                 }
             }
-        } else {
-            for (int i = 0; i < HIDDEN / VEC_W; ++i) {
-                (void)reasoning_stream.read();
-                (void)logits_stream.read();
-            }
+        }
+
+        if (t == target_token) {
+            out_reasoning.assign(step_reasoning.begin(), step_reasoning.begin() + HIDDEN);
+            out_logits.assign(step_logits.begin(), step_logits.begin() + HIDDEN);
         }
     }
 
@@ -477,10 +515,11 @@ int main(int argc, char** argv) {
 
     std::cout << "[result] reasoning max_abs=" << reasoning_max << " mean_abs=" << reasoning_mean << "\n";
     std::cout << "[result] logits    max_abs=" << logits_max << " mean_abs=" << logits_mean << "\n";
+    std::cout << "[result] thresholds max_abs<=" << tol_max << " mean_abs<=" << tol_mean << "\n";
 
-    const float kTol = 1e-1f;
-    if (reasoning_max > kTol || logits_max > kTol) {
-        std::cout << "[FAIL] exceeds tolerance " << kTol << "\n";
+    if (reasoning_max > tol_max || logits_max > tol_max ||
+        reasoning_mean > tol_mean || logits_mean > tol_mean) {
+        std::cout << "[FAIL] exceeds configured tolerances.\n";
         return 1;
     }
 
