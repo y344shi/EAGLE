@@ -1,0 +1,62 @@
+#ifndef TMAC_COST_DRAFT_TREE_HBM_PACKED_HPP
+#define TMAC_COST_DRAFT_TREE_HBM_PACKED_HPP
+
+#include "hbm_pc_burst.hpp"
+
+// 32-PC packed top-level for eagle4_draft.
+// Each pcNN pointer is a base address in HBM pseudo-channel NN (256-bit words).
+extern "C" void eagle4_draft_packed_32pc(
+    tmac::hls::hbm_word256_t* pc00,
+    tmac::hls::hbm_word256_t* pc01,
+    tmac::hls::hbm_word256_t* pc02,
+    tmac::hls::hbm_word256_t* pc03,
+    tmac::hls::hbm_word256_t* pc04,
+    tmac::hls::hbm_word256_t* pc05,
+    tmac::hls::hbm_word256_t* pc06,
+    tmac::hls::hbm_word256_t* pc07,
+    tmac::hls::hbm_word256_t* pc08,
+    tmac::hls::hbm_word256_t* pc09,
+    tmac::hls::hbm_word256_t* pc10,
+    tmac::hls::hbm_word256_t* pc11,
+    tmac::hls::hbm_word256_t* pc12,
+    tmac::hls::hbm_word256_t* pc13,
+    tmac::hls::hbm_word256_t* pc14,
+    tmac::hls::hbm_word256_t* pc15,
+    tmac::hls::hbm_word256_t* pc16,
+    tmac::hls::hbm_word256_t* pc17,
+    tmac::hls::hbm_word256_t* pc18,
+    tmac::hls::hbm_word256_t* pc19,
+    tmac::hls::hbm_word256_t* pc20,
+    tmac::hls::hbm_word256_t* pc21,
+    tmac::hls::hbm_word256_t* pc22,
+    tmac::hls::hbm_word256_t* pc23,
+    tmac::hls::hbm_word256_t* pc24,
+    tmac::hls::hbm_word256_t* pc25,
+    tmac::hls::hbm_word256_t* pc26,
+    tmac::hls::hbm_word256_t* pc27,
+    tmac::hls::hbm_word256_t* pc28,
+    tmac::hls::hbm_word256_t* pc29,
+    tmac::hls::hbm_word256_t* pc30,
+    tmac::hls::hbm_word256_t* pc31,
+    int tree_depth,
+    int curr_depth_start,
+    int policy_depth,
+    bool use_policy_schedule,
+    int efficient_lm_rank,
+    int efficient_lm_vocab_size,
+    int prefix_len,
+    bool enable_accepted_kv_compact,
+    int accepted_draft_node_count,
+    int64_t hot_token_vocab_size,
+    bool use_hot_token_id,
+    int batch_size,
+    int node_top_k,
+    int hidden_size,
+    int max_node_count,
+    int max_verify_num,
+    int max_tree_width,
+    bool enable_initial_loop,
+    bool enable_prefill_stage,
+    int initial_logits_width);
+
+#endif  // TMAC_COST_DRAFT_TREE_HBM_PACKED_HPP
