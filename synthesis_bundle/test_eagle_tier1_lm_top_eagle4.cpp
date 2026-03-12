@@ -1,10 +1,12 @@
 #include "eagle_tier1_lm_top.hpp"
+#include "golden_path_utils.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -118,10 +120,11 @@ int main(int argc, char** argv) {
     bool smoke = false;
     int run_tokens = 1;
     int node_top_k = 4;
-    std::string base_tensors = "../eagle_verified_pipeline_4bit/cpmcu_tensors/";
-    std::string base_weights = "../packed_all/";
-    std::string base_norms = "../eagle_verified_pipeline_4bit/hls_4bit/weights_all_4bit/";
-    std::string base_lm = "../eagle_verified_pipeline_4bit/hls_4bit/lm_head/";
+    const auto default_paths = eagle4::test_paths::default_eagle4_golden_paths();
+    std::string base_tensors = default_paths.tensor_dir;
+    std::string base_weights = default_paths.packed_dir;
+    std::string base_norms = default_paths.norm_dir;
+    std::string base_lm = default_paths.lm_dir;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];

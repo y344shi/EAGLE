@@ -1,10 +1,12 @@
 #include "eagle_tier1_top.hpp"
+#include "golden_path_utils.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -300,9 +302,10 @@ int main(int argc, char** argv) {
     int run_tokens = -1;
     float tol_max = 2e-1f;
     float tol_mean = 5e-3f;
-    std::string base_tensors = "../eagle_verified_pipeline_4bit/cpmcu_tensors/";
-    std::string base_weights = "../packed_all/";
-    std::string base_norms = "../eagle_verified_pipeline_4bit/hls_4bit/weights_all_4bit/";
+    const auto default_paths = eagle4::test_paths::default_eagle4_golden_paths();
+    std::string base_tensors = default_paths.tensor_dir;
+    std::string base_weights = default_paths.packed_dir;
+    std::string base_norms = default_paths.norm_dir;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];

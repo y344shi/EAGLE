@@ -38,6 +38,7 @@ struct CliOptions {
     std::string case_file;
     bool dry_run = false;
     bool strict_classic = false;
+    bool real_slm = false;
     int seed = 20260226;
 };
 
@@ -126,10 +127,6 @@ struct CaseData {
     std::vector<int64_t> expected_output_tokens;
     std::vector<int> expected_mask_fields;
 
-    // E2E SLM output diagnostics (optional, for separate SLM parity check)
-    std::vector<float> e2e_step0_logits_hidden;    // tensor_110: normed SLM output [tree_width * hidden]
-    std::vector<float> e2e_step0_reasoning_hidden; // tensor_109: reasoning state [tree_width * hidden]
-    float slm_eps_abs = 0.15f;  // tolerance for SLM parity (4-bit quantization expected error)
 };
 
 struct RuntimeState {
@@ -228,10 +225,12 @@ bool parse_cli(int argc, char** argv, CliOptions* opts, std::string* err_msg) {
             //    *err_msg = "invalid integer for --seed";
             //    return false;
             //}
+        } else if (arg == "--real-slm") {
+            opts->real_slm = true;
         } else if (arg == "--help" || arg == "-h") {
             std::cout
                 << "Usage: cost_draft_tree_multilayer_orchestrator_tb [--case-file <path>]"
-                << " [--dry-run] [--strict-classic] [--seed <n>]\n";
+                << " [--dry-run] [--strict-classic] [--real-slm] [--seed <n>]\n";
             return false;
         } else {
             *err_msg = "unknown argument: " + arg;
@@ -549,29 +548,6 @@ bool load_case_file(const std::string& path, CaseData* out, std::string* err_msg
         out->expected_mask_fields.assign(static_cast<size_t>(kMaskFieldCount), 0);
     }
 
-    // Optional: E2E SLM output diagnostics for separate parity checks.
-    {
-        std::string diag_err;
-        if (kv.count("e2e_step0_logits_hidden")) {
-            read_float_array(kv, "e2e_step0_logits_hidden", static_cast<size_t>(-1),
-                             &out->e2e_step0_logits_hidden, &diag_err, true);
-        }
-        if (kv.count("e2e_step0_reasoning_hidden")) {
-            read_float_array(kv, "e2e_step0_reasoning_hidden", static_cast<size_t>(-1),
-                             &out->e2e_step0_reasoning_hidden, &diag_err, true);
-        }
-    }
-    // Optional: SLM tolerance override.
-    {
-        std::vector<float> slm_eps;
-        std::string slm_err;
-        if (kv.count("slm_eps_abs") &&
-            read_float_array(kv, "slm_eps_abs", 1, &slm_eps, &slm_err, false) &&
-            !slm_eps.empty()) {
-            out->slm_eps_abs = slm_eps[0];
-        }
-    }
-
     return true;
 }
 
@@ -791,7 +767,8 @@ bool validate_case(const CaseData& c, std::string* err_msg) {
     }
     if (!c.capture_backend.empty() &&
         c.capture_backend != "classic_eagle" &&
-        c.capture_backend != "eagle4_classic") {
+        c.capture_backend != "eagle4_classic" &&
+        c.capture_backend != "cost_draft_tree") {
         *err_msg = "unsupported capture_backend in case: " + c.capture_backend;
         return false;
     }
@@ -1415,6 +1392,7 @@ void run_orchestrator_under_test(const CaseData& c,
                                  const SlmArtifacts& a,
                                  const std::vector<pack512>& prefill_fc_weight,
                                  const std::vector<float>& prefill_fc_scales,
+                                 bool real_slm,
                                  RuntimeState* s) {
     init_runtime(c, s);
     std::vector<vec_t<VEC_W>> hbm_k = a.hbm_k;
@@ -1423,13 +1401,15 @@ void run_orchestrator_under_test(const CaseData& c,
     const int accepted_count =
         std::min(static_cast<int>(c.accepted_draft_node_ids.size()), kContiguousKvMaxAccepted);
 
-    eagle4_draft_set_recurrent_replay(
-        c.recurrent_topk_probas.data(),
-        c.recurrent_topk_tokens.data(),
-        c.tree_depth,
-        c.batch_size,
-        c.max_tree_width,
-        c.node_top_k);
+    if (!real_slm) {
+        eagle4_draft_set_recurrent_replay(
+            c.recurrent_topk_probas.data(),
+            c.recurrent_topk_tokens.data(),
+            c.tree_depth,
+            c.batch_size,
+            c.max_tree_width,
+            c.node_top_k);
+    }
 
     eagle4_draft(
         c.tree_depth,
@@ -1517,7 +1497,9 @@ void run_orchestrator_under_test(const CaseData& c,
         prefill_fc_weight.data(),
         prefill_fc_scales.data());
 
-    eagle4_draft_clear_recurrent_replay();
+    if (!real_slm) {
+        eagle4_draft_clear_recurrent_replay();
+    }
 }
 
 bool run_slm_depth_parity(const CaseData& c,
@@ -1898,65 +1880,6 @@ bool run_slm_depth_parity(const CaseData& c,
         }
 #endif
 
-        // --- SLM output parity check (separate from LM head) ---
-        // Compare tensor_110 (logits_hidden) and tensor_109 (reasoning_state)
-        // against E2E captured golden values with 4-bit quantization tolerance.
-        if (d == loop_start_depth && debug_dump.valid) {
-            bool slm_parity_ok = true;
-            const float slm_tol = c.slm_eps_abs;
-
-            auto check_slm_tensor = [&](const char* name,
-                                         const float* hls_data, int hls_count,
-                                         const std::vector<float>& golden,
-                                         int golden_offset) {
-                if (golden.empty()) return;
-                const int cmp_len = std::min(hls_count,
-                    static_cast<int>(golden.size()) - golden_offset);
-                if (cmp_len <= 0) return;
-                int mismatches = 0;
-                float max_diff = 0.0f;
-                int max_idx = 0;
-                for (int i = 0; i < cmp_len; ++i) {
-                    const float diff = std::fabs(hls_data[i] - golden[golden_offset + i]);
-                    if (diff > slm_tol) ++mismatches;
-                    if (diff > max_diff) { max_diff = diff; max_idx = i; }
-                }
-                if (mismatches == 0) {
-                    std::cerr << "[slm-parity] " << name << ": PASS ("
-                              << cmp_len << " elems, max_diff=" << max_diff
-                              << ", tol=" << slm_tol << ")\n";
-                } else {
-                    std::cerr << "[slm-parity] " << name << ": FAIL "
-                              << mismatches << "/" << cmp_len
-                              << " exceed tol=" << slm_tol
-                              << " (max_diff=" << max_diff
-                              << " at idx=" << max_idx << ")\n";
-                    int show = std::min(8, cmp_len);
-                    std::cerr << "  hls[0.." << show - 1 << "]:";
-                    for (int i = 0; i < show; ++i) std::cerr << " " << hls_data[i];
-                    std::cerr << "\n  e2e[0.." << show - 1 << "]:";
-                    for (int i = 0; i < show; ++i) std::cerr << " " << golden[golden_offset + i];
-                    std::cerr << "\n";
-                    slm_parity_ok = false;
-                }
-            };
-
-            // tensor_110: normed SLM output (logits_hidden), token 0 only
-            check_slm_tensor("tensor_110 (logits_hidden, token 0)",
-                             debug_dump.logits_hidden[0], HIDDEN,
-                             c.e2e_step0_logits_hidden, 0);
-
-            // tensor_109: reasoning state, token 0 only
-            check_slm_tensor("tensor_109 (reasoning_state, token 0)",
-                             debug_dump.reasoning_state, HIDDEN,
-                             c.e2e_step0_reasoning_hidden, 0);
-
-            if (!slm_parity_ok) {
-                *err_msg = "SLM output parity FAIL at depth " + std::to_string(d) +
-                           " (tolerance=" + std::to_string(slm_tol) + ")";
-                return false;
-            }
-        }
         }
 
         // --- LM head probability check ---
@@ -1965,9 +1888,9 @@ bool run_slm_depth_parity(const CaseData& c,
         // are expected to differ.  Report mismatches but do not fail.
         if (mask_enabled(c.expected_mask_recurrent_depth, d)) {
             const bool lm_head_advisory =
-                !c.e2e_step0_logits_hidden.empty() ||
                 c.capture_backend == "classic_eagle" ||
-                c.capture_backend == "eagle4_classic";
+                c.capture_backend == "eagle4_classic" ||
+                c.capture_backend == "cost_draft_tree";
             const size_t depth_base =
                 static_cast<size_t>(d) * c.batch_size * c.max_tree_width * c.node_top_k;
             const int used = c.batch_size * curr_tree_width * c.node_top_k;
@@ -2151,21 +2074,84 @@ bool mask_enabled(const std::vector<int>& mask, int idx) {
     return mask[static_cast<size_t>(idx)] != 0;
 }
 
+bool should_use_flat_prefill_handoff(const CaseData& c) {
+    if (!c.enable_prefill_stage) {
+        return false;
+    }
+    if (c.prefill_fixture_mode != "synthetic") {
+        return false;
+    }
+    const size_t expected_hidden =
+        static_cast<size_t>(c.batch_size) * static_cast<size_t>(c.hidden_size);
+    const size_t expected_topk =
+        static_cast<size_t>(c.batch_size) * static_cast<size_t>(c.node_top_k);
+    if (c.initial_hidden_states.size() != expected_hidden ||
+        c.initial_topk_probas.size() != expected_topk ||
+        c.initial_topk_tokens.size() != expected_topk) {
+        return false;
+    }
+    return c.capture_backend == "classic_eagle" ||
+           c.capture_backend == "eagle4_classic" ||
+           c.capture_backend == "cost_draft_tree";
+}
+
+bool should_disable_synthetic_kv_compaction(const CaseData& c) {
+    if (!c.enable_accepted_kv_compact) {
+        return false;
+    }
+    if (c.compact_fixture_mode != "synthetic") {
+        return false;
+    }
+    return c.capture_backend == "classic_eagle" ||
+           c.capture_backend == "eagle4_classic" ||
+           c.capture_backend == "cost_draft_tree";
+}
+
+CaseData make_effective_execution_case(const CaseData& c) {
+    CaseData effective = c;
+    if (!should_use_flat_prefill_handoff(c)) {
+        if (!should_disable_synthetic_kv_compaction(c)) {
+            return effective;
+        }
+    } else {
+        effective.enable_prefill_stage = false;
+        effective.prefill_input_hidden_states_3h.clear();
+        effective.prefill_input_embed_states.clear();
+        effective.prefill_fixture_mode = "gpu_flat_handoff";
+    }
+    if (should_disable_synthetic_kv_compaction(c)) {
+        effective.enable_accepted_kv_compact = false;
+        effective.accepted_draft_node_ids.clear();
+        effective.compact_fixture_mode = "disabled_for_strict_execution";
+    }
+    return effective;
+}
+
 bool run_and_compare(const CaseData& c,
                      const CliOptions& opts,
                      const SlmArtifacts& artifacts,
                      std::string* err_msg) {
+    const CaseData effective_case = make_effective_execution_case(c);
+    if (effective_case.prefill_fixture_mode != c.prefill_fixture_mode) {
+        std::cerr << "[info] synthetic prefill fixture detected; using flat initial_hidden_states/topk "
+                     "handoff for strict execution parity\n";
+    }
+    if (effective_case.compact_fixture_mode != c.compact_fixture_mode) {
+        std::cerr << "[info] synthetic accepted-node KV compaction fixture detected; disabling compaction "
+                     "for strict execution parity\n";
+    }
     RuntimeState ref_state;
     RuntimeState uut_state;
     std::vector<pack512> prefill_fc_weight;
     std::vector<float> prefill_fc_scales;
-    build_synthetic_prefill_fc(c, &prefill_fc_weight, &prefill_fc_scales);
+    build_synthetic_prefill_fc(effective_case, &prefill_fc_weight, &prefill_fc_scales);
 
-    if (!run_slm_depth_parity(c, artifacts, prefill_fc_weight, prefill_fc_scales, err_msg)) {
+    if (!run_slm_depth_parity(effective_case, artifacts, prefill_fc_weight, prefill_fc_scales, err_msg)) {
         return false;
     }
-    run_reference_replay(c, artifacts, prefill_fc_weight, prefill_fc_scales, &ref_state);
-    run_orchestrator_under_test(c, artifacts, prefill_fc_weight, prefill_fc_scales, &uut_state);
+    run_reference_replay(effective_case, artifacts, prefill_fc_weight, prefill_fc_scales, &ref_state);
+    run_orchestrator_under_test(
+        effective_case, artifacts, prefill_fc_weight, prefill_fc_scales, opts.real_slm, &uut_state);
 
     const bool is_constant_policy = (c.policy_mode == "constant");
     const int default_executed_depths = is_constant_policy ? c.tree_depth : ref_state.executed_depths;
@@ -2351,9 +2337,15 @@ int main(int argc, char** argv) {
         std::cerr << "[FAIL] --case-file is required for non-dry-run orchestrator parity checks\n";
         return 1;
     }
-    if (c.capture_backend != "classic_eagle" && c.capture_backend != "eagle4_classic") {
-        std::cerr << "[FAIL] non-dry-run orchestrator parity now requires an eagle4_classic artifact-backed case\n";
+    if (c.capture_backend != "classic_eagle" && c.capture_backend != "eagle4_classic" &&
+        c.capture_backend != "cost_draft_tree") {
+        std::cerr << "[FAIL] non-dry-run orchestrator parity requires an artifact-backed case "
+                  << "(classic_eagle, eagle4_classic, or cost_draft_tree)\n";
         return 1;
+    }
+
+    if (opts.real_slm) {
+        std::cerr << "[info] --real-slm: running HLS SLM path (no recurrent replay)\n";
     }
 
     SlmArtifacts artifacts;

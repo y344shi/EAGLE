@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "folded_matmul_dummy_a.hpp"
+#include "folded_matmul_dummy_b.hpp"
 #include "tmac_utils.hpp"
 
 namespace tmac {
@@ -512,6 +514,92 @@ emit_batch_loop:
     }
 }
 
+//#include <stdint.h>
+
+template <int M = 4, int K = 4096, int N = 4096>
+void folded_matmul(const uint8_t A[M][K], const uint8_t B[N][K], int32_t C[M][N]) {
+    
+    // 1. Physically partition the memory so we can read 384 elements per cycle
+    #pragma HLS ARRAY_PARTITION variable=A cyclic factor=384 dim=2
+    #pragma HLS ARRAY_PARTITION variable=B cyclic factor=384 dim=2
+    #pragma HLS ARRAY_PARTITION variable=A complete dim=1
+    #pragma HLS ARRAY_PARTITION variable=B complete dim=1
+    #pragma HLS ARRAY_PARTITION variable=C complete dim=1
+
+    const int B_TILES = N / M;
+    const int K_TILES = K / 3;
+
+    // 2. LOOP REORDERING: Chunk the K loop on the outside
+    for (int kt_out = 0; kt_out < K_TILES; kt_out += 128) {
+        
+        // 3. Put the spatial (N dimension) loop inside the K loop 
+        // to avoid Accumulator Latency stalls.
+        for (int bt = 0; bt < B_TILES; bt++) {
+            
+            // Tell HLS to run this block every 1 clock cycle
+            #pragma HLS PIPELINE II=1
+            int b_start = bt * M;
+
+            // 4. Fully unroll the M x M tile outputs (16 elements)
+            for (int a_off = 0; a_off < M; a_off++) {
+                #pragma HLS UNROLL
+                for (int b_off = 0; b_off < M; b_off++) {
+                    #pragma HLS UNROLL
+                    
+                    int a_idx = a_off;
+                    int b_idx = b_start + b_off;
+                    
+                    int32_t unrolled_sum = 0;
+
+                    // 5. Explicitly unroll the K-dimension by 128
+                    for (int kt_in = 0; kt_in < 128; kt_in++) {
+                        #pragma HLS UNROLL
+                        
+                        int kt = kt_out + kt_in;
+                        if (kt < K_TILES) { 
+                            int k_col = kt * 3;
+                            
+                            // The Versal DSP58 INT8 magic hint (3 MACs per cycle)
+                            unrolled_sum += A[a_idx][k_col] * B[b_idx][k_col] + 
+                                            A[a_idx][k_col + 1] * B[b_idx][k_col + 1] + 
+                                            A[a_idx][k_col + 2] * B[b_idx][k_col + 2];
+                        }
+                    }
+
+                    // 6. Write to C. Overwrite on the first outer pass, accumulate thereafter.
+                    if (kt_out == 0) {
+                        C[a_idx][b_idx] = unrolled_sum;
+                    } else {
+                        C[a_idx][b_idx] += unrolled_sum;
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+// Standalone constant-folded matmul top (dummy constant tensors).
+static_assert(kFoldTopN % kFoldTopM == 0, "folded_matmul uses N/M tiling");
+
+inline void matmul_interface(int32_t* c_out) {
+#pragma HLS INTERFACE m_axi port = c_out offset = slave bundle = gmem depth = kFoldTopOutputElems
+#pragma HLS INTERFACE s_axilite port = c_out bundle = control
+#pragma HLS INTERFACE s_axilite port = return bundle = control
+
+    int32_t c_local[kFoldTopM][kFoldTopN];
+#pragma HLS ARRAY_PARTITION variable = c_local complete dim = 1
+
+    folded_matmul<kFoldTopM, kFoldTopK, kFoldTopN>(kFoldedDummyA, kFoldedDummyB, c_local);
+
+write_out_loop:
+    for (int i = 0; i < kFoldTopM; ++i) {
+        for (int j = 0; j < kFoldTopN; ++j) {
+#pragma HLS PIPELINE II = 1
+            c_out[i * kFoldTopN + j] = c_local[i][j];
+        }
+    }
+}
 
 // Variant that reads scales in the original CPU layout: scales[group * OUT_DIM_TOTAL + out_idx].
 template <int SCALE_EXP, int INPUT_DIM, int OUT_W = 128, int GROUP_SIZE = 128, int OUT_DIM_TOTAL = 4096>

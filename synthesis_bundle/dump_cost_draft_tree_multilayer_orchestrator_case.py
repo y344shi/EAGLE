@@ -17,10 +17,21 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 DEFAULT_SEARCH_DIRS = [
-    Path("/home/y344shi/workspace/eagle4_adaptation/sglang-eagle4/capture/cases"),
-    Path("/home/y344shi/workspace/eagle4_adaptation/capture/cases"),
+    Path("sglang-eagle4/eagle-project/eagle4/capture/cases"),
+    Path("capture/cases"),
+    Path("capture/e2e_draft"),
+    Path("hardware/EAGLE/synthesis_bundle"),
     Path("hardware/EAGLE/eagle/hls_hw/synthesis_bundle"),
 ]
+
+
+def _find_workspace_root(anchor: Path) -> Path:
+    for p in [anchor, *anchor.parents]:
+        if (p / "hardware").exists() and (p / "sglang-eagle4").exists():
+            return p
+    raise FileNotFoundError(
+        f"could not resolve workspace root from anchor {anchor}"
+    )
 
 
 def _clamp(x: int, lo: int, hi: int) -> int:
@@ -115,11 +126,15 @@ def _write_float_line(path_f, key: str, values: Iterable[float]) -> None:
 
 
 def _find_case(search_dirs: List[Path], name: str) -> Optional[Path]:
+    matches: List[Path] = []
     for base in search_dirs:
         p = base / name
         if p.exists() and p.is_file():
-            return p
-    return None
+            matches.append(p.resolve())
+    if not matches:
+        return None
+    matches.sort(key=lambda p: (p.stat().st_mtime_ns, str(p)), reverse=True)
+    return matches[0]
 
 
 def _load_fp16_bin(path: Path) -> np.ndarray:
@@ -393,9 +408,10 @@ def main() -> None:
         raise ValueError("--tree-depth must be > 1")
 
     script_dir = Path(__file__).resolve().parent
+    workspace_root = _find_workspace_root(script_dir)
     search_dirs = []
     for p in DEFAULT_SEARCH_DIRS:
-        search_dirs.append((p if p.is_absolute() else (script_dir.parents[4] / p)).resolve())
+        search_dirs.append((p if p.is_absolute() else (workspace_root / p)).resolve())
 
     e2e_case_path: Optional[Path]
     if args.e2e_case is not None:
@@ -529,15 +545,15 @@ def main() -> None:
                             / "cost_draft_tree_draft_e2e_prefix_v_layer0.fp16.bin",
                         ),
                         (
-                            script_dir.parents[4]
+                            workspace_root
                             / "capture/e2e_draft/cost_draft_tree_draft_e2e_prefix_k_layer0.fp16.bin",
-                            script_dir.parents[4]
+                            workspace_root
                             / "capture/e2e_draft/cost_draft_tree_draft_e2e_prefix_v_layer0.fp16.bin",
                         ),
                         (
-                            script_dir.parents[4]
+                            workspace_root
                             / "capture/cases/cost_draft_tree_multilayer_orchestrator_prefix_k_layer0.fp16.bin",
-                            script_dir.parents[4]
+                            workspace_root
                             / "capture/cases/cost_draft_tree_multilayer_orchestrator_prefix_v_layer0.fp16.bin",
                         ),
                         (
@@ -1059,12 +1075,6 @@ def main() -> None:
                     _write_line(
                         f, "expected_mask_recurrent_depth", strict_recurrent_depth
                     )
-                    # Pass through E2E SLM output diagnostics (tensor_110 etc.)
-                    for diag_key in ("e2e_step0_logits_hidden", "e2e_step0_reasoning_hidden"):
-                        diag_vals = _get_floats(e2e, diag_key, required=False)
-                        if diag_vals:
-                            _write_float_line(f, diag_key, diag_vals)
-                            print(f"[info] wrote {diag_key} ({len(diag_vals)} floats)")
                     _write_line(f, "init_legacy_cumu_tokens", init_legacy_cumu_tokens)
                     _write_float_line(f, "init_legacy_cumu_scores", init_legacy_cumu_scores)
                     _write_line(f, "init_legacy_cumu_deltas", init_legacy_cumu_deltas)
@@ -1360,15 +1370,6 @@ def main() -> None:
                 _write_float_line(f, "recurrent_topk_probas", recurrent_topk_probas)
                 _write_line(f, "recurrent_topk_tokens", recurrent_topk_tokens)
                 _write_line(f, "expected_mask_recurrent_depth", strict_recurrent_depth)
-
-                # Pass through E2E SLM output diagnostics (tensor_110 etc.)
-                for diag_key in ("e2e_step0_logits_hidden", "e2e_step0_reasoning_hidden"):
-                    diag_vals = _get_floats(e2e, diag_key, required=False)
-                    if diag_vals:
-                        _write_float_line(f, diag_key, diag_vals)
-                        print(f"[info] wrote {diag_key} ({len(diag_vals)} floats)")
-                    else:
-                        print(f"[info] {diag_key} not found in E2E case")
 
                 _write_line(f, "init_legacy_cumu_tokens", init_legacy_cumu_tokens)
                 _write_float_line(f, "init_legacy_cumu_scores", init_legacy_cumu_scores)
@@ -1716,12 +1717,6 @@ def main() -> None:
         _write_float_line(f, "recurrent_topk_probas", recurrent_topk_probas)
         _write_line(f, "recurrent_topk_tokens", recurrent_topk_tokens)
         _write_line(f, "expected_mask_recurrent_depth", strict_recurrent_depth)
-
-        # Pass through E2E SLM output diagnostics (tensor_110 etc.)
-        for diag_key in ("e2e_step0_logits_hidden", "e2e_step0_reasoning_hidden"):
-            diag_vals = _get_floats(e2e, diag_key, required=False)
-            if diag_vals:
-                _write_float_line(f, diag_key, diag_vals)
 
         _write_line(f, "init_legacy_cumu_tokens", init_legacy_cumu_tokens)
         _write_float_line(f, "init_legacy_cumu_scores", init_legacy_cumu_scores)

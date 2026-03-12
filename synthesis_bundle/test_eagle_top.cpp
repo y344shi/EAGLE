@@ -1,10 +1,12 @@
 #include "eagle_tier1_top.hpp"
+#include "golden_path_utils.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -329,12 +331,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Adjust paths relative to the working directory when running the harness.
-    // We keep weights in ../packed_all/ (produced by pack_all_4bit.py).
-    // Paths relative to this repo root (deep_pipeline_lutmac).
-    const std::string base_tensors = "../eagle_verified_pipeline_4bit/cpmcu_tensors/";
-    const std::string base_weights = "../packed_all/";
-    const std::string base_norms = "../eagle_verified_pipeline_4bit/hls_4bit/weights_all_4bit/";
+    const auto default_paths = eagle4::test_paths::default_eagle4_golden_paths();
+    const std::string base_tensors = default_paths.tensor_dir;
+    const std::string base_weights = default_paths.packed_dir;
+    const std::string base_norms = default_paths.norm_dir;
 
     if (list_required_goldens) {
         print_required_golden_files(base_tensors, base_weights, base_norms);

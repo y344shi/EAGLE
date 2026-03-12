@@ -35,6 +35,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ ! -d "${CASE_DIR}" ]]; then
+  echo "[error] case directory not found: ${CASE_DIR}" >&2
+  exit 2
+fi
+CASE_DIR="$(cd "${CASE_DIR}" && pwd)"
+
 CXX="${CXX:-g++}"
 CXXFLAGS=(-std=c++17 -I.)
 

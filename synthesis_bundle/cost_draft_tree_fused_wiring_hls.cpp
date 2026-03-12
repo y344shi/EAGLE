@@ -2,10 +2,6 @@
 #if E4D_USE_LOCAL_NORM_GAMMA
 #include "eagle4_norm_gamma_2bit.h"
 #endif
-#ifndef __SYNTHESIS__
-#include <cstdio>
-#endif
-
 namespace tmac {
 namespace hls {
 
@@ -542,6 +538,11 @@ slm_batch_loop:
             lm_head_weight,
             efficient_lm_rank,
             efficient_lm_vocab_size,
+            // Known parity gap:
+            // native Eagle4 uses a larger LM shortlist (model config currently says 512),
+            // but this HLS path reuses node_top_k as the shortlist size and is limited by
+            // kEagle4LmTopKMax. The recurrent-step checker shows this changes the selected
+            // candidates versus captured SGLang goldens.
             node_top_k,
             reasoning_state,
             candidate_indices,

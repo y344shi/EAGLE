@@ -535,8 +535,10 @@ extern "C" void eagle4_draft_packed_32pc(
     const float* initial_logits = pc_word_offset_ptr<const float>(pc24, layout.pc24_initial_logits);
     const int64_t* initial_candidate_indices = pc_word_offset_ptr<const int64_t>(
         pc25, layout.pc25_initial_candidate_indices);
-    const float* initial_topk_probas = nullptr;
-    const int64_t* initial_topk_tokens = nullptr;
+    const float* initial_topk_probas = pc_word_offset_ptr<const float>(
+        pc25, layout.pc25_initial_topk_probas);
+    const int64_t* initial_topk_tokens = pc_word_offset_ptr<const int64_t>(
+        pc25, layout.pc25_initial_topk_tokens);
     const float* initial_hidden_states = pc_word_offset_ptr<const float>(
         pc25, layout.pc25_initial_hidden_states);
 

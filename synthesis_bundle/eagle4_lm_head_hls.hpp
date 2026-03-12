@@ -75,8 +75,8 @@ void eagle4_lm_down_project(
 void eagle4_lm_candidate_logits_row4(
     const float low_rank[TREE_WIDTH][kEagle4LmRankMax],
     const int32_t qweight_row_major[kLmTcVocab * kLmMaxInPacks],
-    const uint16_t scales_row_major[kLmTcVocab * kLmMaxGroups],    // expected [rank/group_size, vocab] (group-major)
-    const int32_t qzeros_packed[kLmMaxVocabPacked * kLmMaxGroups], // expected [rank/group_size, ceil(vocab/8)] (group-major)
+    const uint16_t scales_row_major[kLmTcVocab * kLmMaxGroups],    // expected [vocab, rank/group_size] (transposed/output-major)
+    const int32_t qzeros_packed[kLmMaxVocabPacked * kLmMaxGroups], // expected [ceil(vocab/8), rank/group_size] (transposed/output-major)
     const int32_t g_idx[kEagle4LmRankMax],
     int rank,
     int vocab,

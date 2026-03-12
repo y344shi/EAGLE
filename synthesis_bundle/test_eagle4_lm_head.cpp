@@ -1,9 +1,11 @@
 #include "eagle4_lm_head_hls.hpp"
+#include "golden_path_utils.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -214,8 +216,9 @@ int run_smoke(int seed) {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::string tensor_dir = "../eagle_verified_pipeline_4bit/cpmcu_tensors";
-    std::string lm_dir = "../eagle_verified_pipeline_4bit/hls_4bit/lm_head";
+    const auto default_paths = eagle4::test_paths::default_eagle4_golden_paths();
+    std::string tensor_dir = default_paths.tensor_dir;
+    std::string lm_dir = default_paths.lm_dir;
     int hidden_dim = 4096;
     int group_size = 128;
     int token_idx = -1;
@@ -246,6 +249,9 @@ int main(int argc, char** argv) {
         else if (arg.rfind("--tensor-dir=", 0) == 0) tensor_dir = arg.substr(13);
         else if (arg.rfind("--lm-dir=", 0) == 0) lm_dir = arg.substr(9);
     }
+
+    if (!tensor_dir.empty() && tensor_dir.back() == '/') tensor_dir.pop_back();
+    if (!lm_dir.empty() && lm_dir.back() == '/') lm_dir.pop_back();
 
     if (list_required) {
         print_required(tensor_dir, lm_dir);
