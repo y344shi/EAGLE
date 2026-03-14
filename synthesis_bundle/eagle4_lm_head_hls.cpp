@@ -10,8 +10,8 @@ void eagle4_lm_down_project(
     int hidden_dim,
     int rank) {
 #pragma HLS INLINE off
-#pragma HLS ARRAY_PARTITION variable=logits_hidden type=cyclic factor=16 dim=2
-#pragma HLS ARRAY_PARTITION variable=low_rank type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=logits_hidden type=cyclic factor=16 dim=2
+// #pragma HLS ARRAY_PARTITION variable=low_rank type=complete dim=0
 
     for (int r = 0; r < rank; ++r) {
 #pragma HLS loop_tripcount min=kEagle4LmRankMax max=kEagle4LmRankMax avg=kEagle4LmRankMax
@@ -43,16 +43,16 @@ void eagle4_lm_candidate_logits_row4(
     int topk_indices[TREE_WIDTH][kEagle4LmTopKMax],   // [TREE_WIDTH, topk]
     float topk_scores[TREE_WIDTH][kEagle4LmTopKMax]) { // [TREE_WIDTH, topk]
 #pragma HLS INLINE off
-#pragma HLS ARRAY_PARTITION variable=low_rank type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=topk_indices type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=topk_scores type=complete dim=0
-#pragma HLS BIND_STORAGE variable=qweight_row_major type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=scales_row_major type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=qzeros_packed type=ram_2p impl=bram
-#pragma HLS ARRAY_PARTITION variable=qweight_row_major type=cyclic factor=128 dim=1
-#pragma HLS ARRAY_PARTITION variable=scales_row_major type=cyclic factor=128 dim=1
-#pragma HLS ARRAY_PARTITION variable=qzeros_packed type=cyclic factor=128 dim=1
-#pragma HLS ARRAY_PARTITION variable=g_idx type=complete dim=1
+// #pragma HLS ARRAY_PARTITION variable=low_rank type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=topk_indices type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=topk_scores type=complete dim=0
+// #pragma HLS BIND_STORAGE variable=qweight_row_major type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=scales_row_major type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=qzeros_packed type=ram_2p impl=bram
+// #pragma HLS ARRAY_PARTITION variable=qweight_row_major type=cyclic factor=128 dim=1
+// #pragma HLS ARRAY_PARTITION variable=scales_row_major type=cyclic factor=128 dim=1
+// #pragma HLS ARRAY_PARTITION variable=qzeros_packed type=cyclic factor=128 dim=1
+// #pragma HLS ARRAY_PARTITION variable=g_idx type=complete dim=1
     const int in_packs = rank / 8;
     const int groups = (rank + group_size - 1) / group_size;
     const bool keep_topk = (topk > 0 && topk_indices != nullptr && topk_scores != nullptr);
@@ -76,7 +76,7 @@ void eagle4_lm_candidate_logits_row4(
         // Dequantize weights for this vocab entry (shared across all tree candidates).
         // Weight/scale/zero tensors are expected to be preloaded in BRAM at entrypoint.
         float dequant_w[kEagle4LmRankMax];
-#pragma HLS ARRAY_PARTITION variable=dequant_w complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=dequant_w complete dim=0
         for (int p = 0; p < kEagle4LmRankMax / 8; ++p) {
 #pragma HLS UNROLL
             const int k_base = p * 8;
@@ -139,9 +139,9 @@ void eagle4_lm_gather_dot_fp16(
     int hidden_dim,
     int num_candidates) {
 #pragma HLS INLINE off
-#pragma HLS ARRAY_PARTITION variable=hidden type=cyclic factor=16 dim=2
-#pragma HLS ARRAY_PARTITION variable=candidate_indices type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=hidden type=cyclic factor=16 dim=2
+// #pragma HLS ARRAY_PARTITION variable=candidate_indices type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
     for (int t = 0; t < TREE_WIDTH; ++t) {
 #pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
         for (int c = 0; c < num_candidates; ++c) {
@@ -171,10 +171,10 @@ void eagle4_lm_softmax_topk(
     int* best_id,                                                 // overall best (backward compat)
     float* best_score) {                                          // overall best score
 #pragma HLS INLINE off
-#pragma HLS ARRAY_PARTITION variable=candidate_indices type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=topk_tokens_out type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=topk_probas_out type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=candidate_indices type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=topk_tokens_out type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=topk_probas_out type=complete dim=0
     int global_best_tok = -1;
     float global_best_val = -std::numeric_limits<float>::infinity();
 

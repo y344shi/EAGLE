@@ -32,14 +32,14 @@ void rope_apply_stream(hls_stream<vec_t<VEC_W>>& q_in,
 #pragma HLS INTERFACE axis port = q_out
 #pragma HLS INTERFACE axis port = k_in
 #pragma HLS INTERFACE axis port = k_out
-#pragma HLS ARRAY_PARTITION variable=cos_vals complete dim = 1
-#pragma HLS ARRAY_PARTITION variable=sin_vals complete dim = 1
+// #pragma HLS ARRAY_PARTITION variable=cos_vals complete dim = 1
+// #pragma HLS ARRAY_PARTITION variable=sin_vals complete dim = 1
 
     constexpr int HALF_DIM = HEAD_DIM / 2;
     float q_buf[NUM_HEADS][HEAD_DIM];
     float k_buf[NUM_KV_HEADS][HEAD_DIM];
-#pragma HLS ARRAY_PARTITION variable = q_buf complete dim = 2
-#pragma HLS ARRAY_PARTITION variable = k_buf complete dim = 2
+// #pragma HLS ARRAY_PARTITION variable = q_buf complete dim = 2
+// #pragma HLS ARRAY_PARTITION variable = k_buf complete dim = 2
 
 for (int t = 0; t < TREE_WIDTH; t++) {
 #pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH

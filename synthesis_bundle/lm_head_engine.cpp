@@ -17,8 +17,8 @@ void lm_head_engine_stream(
 
     // Local URAM Buffer (per-instance)
     dtype_in hidden_buf[H_DIM][T_BATCH];
-    #pragma HLS BIND_STORAGE variable=hidden_buf type=ram_2p impl=uram
-    #pragma HLS ARRAY_RESHAPE variable=hidden_buf complete dim=2 
+    // #pragma HLS BIND_STORAGE variable=hidden_buf type=ram_2p impl=uram
+    // #pragma HLS ARRAY_RESHAPE variable=hidden_buf complete dim=2 
 
     // 1. LOAD HIDDEN STATES (From Stream)
     // This consumes the broadcasted data immediately
@@ -36,8 +36,8 @@ void lm_head_engine_stream(
     // 2. INIT ACCUMULATORS
     dtype_acc best_scores[T_BATCH];
     int       best_ids[T_BATCH];
-    #pragma HLS ARRAY_PARTITION variable=best_scores complete
-    #pragma HLS ARRAY_PARTITION variable=best_ids complete
+    // #pragma HLS ARRAY_PARTITION variable=best_scores complete
+    // #pragma HLS ARRAY_PARTITION variable=best_ids complete
     
     init_out: for(int t=0; t<T_BATCH; t++) {
         #pragma HLS UNROLL
@@ -54,8 +54,8 @@ void lm_head_engine_stream(
         #pragma HLS LOOP_TRIPCOUNT min=100 max=2300
 
         dtype_acc acc[R_ROWS][T_BATCH];
-        #pragma HLS ARRAY_PARTITION variable=acc complete dim=1
-        #pragma HLS ARRAY_PARTITION variable=acc complete dim=2
+        // #pragma HLS ARRAY_PARTITION variable=acc complete dim=1
+        // #pragma HLS ARRAY_PARTITION variable=acc complete dim=2
 
         reset_acc: for(int r=0; r<R_ROWS; r++) {
             #pragma HLS UNROLL
@@ -66,8 +66,8 @@ void lm_head_engine_stream(
         }
 
         dtype_in weight_tile[2][K_TILE][R_ROWS];
-        #pragma HLS BIND_STORAGE variable=weight_tile type=ram_2p impl=bram
-        #pragma HLS ARRAY_PARTITION variable=weight_tile complete dim=3
+        // #pragma HLS BIND_STORAGE variable=weight_tile type=ram_2p impl=bram
+        // #pragma HLS ARRAY_PARTITION variable=weight_tile complete dim=3
 
         if (num_k_tiles > 0) {
             for (int k = 0; k < K_TILE; k++) {

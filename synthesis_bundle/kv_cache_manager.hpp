@@ -44,10 +44,10 @@ void kv_cache_manager(hls_stream<vec_t<VEC_W>>& k_in_stream,   // new token K (p
     // Hot cache in URAM
     static vec_t<VEC_W> k_uram[MAX_URAM_TOKENS][VECS_PER_TOKEN];
     static vec_t<VEC_W> v_uram[MAX_URAM_TOKENS][VECS_PER_TOKEN];
-#pragma HLS BIND_STORAGE variable = k_uram type = ram_2p impl = uram
-#pragma HLS BIND_STORAGE variable = v_uram type = ram_2p impl = uram
-#pragma HLS ARRAY_PARTITION variable = k_uram cyclic factor = 2 dim = 2
-#pragma HLS ARRAY_PARTITION variable = v_uram cyclic factor = 2 dim = 2
+// #pragma HLS BIND_STORAGE variable = k_uram type = ram_2p impl = uram
+// #pragma HLS BIND_STORAGE variable = v_uram type = ram_2p impl = uram
+// #pragma HLS ARRAY_PARTITION variable = k_uram cyclic factor = 2 dim = 2
+// #pragma HLS ARRAY_PARTITION variable = v_uram cyclic factor = 2 dim = 2
 
     // Write new token
     if (write_enable) {

@@ -10,6 +10,10 @@ static_assert(weights::kNormHiddenDim == HIDDEN,
               "Local norm gamma table size must match HIDDEN.");
 #endif
 
+#ifndef E4D_HLS_SYNTH_STUB_TIER1
+#define E4D_HLS_SYNTH_STUB_TIER1 0
+#endif
+
 #ifndef __SYNTHESIS__
 namespace {
 struct E4dRecurrentReplayState {
@@ -98,12 +102,12 @@ void e4d_fused_step(
     int64_t s_sort_layer_indices[kCdtFusedMaxBatch * kCdtSortWidth];
     int64_t s_parent_indices_in_layer[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
     int64_t s_remapped_topk_tokens[kCdtFusedMaxBatch * kCdtSortWidth];
-#pragma HLS BIND_STORAGE variable = s_curr_layer_scores type = ram_2p impl = bram
-#pragma HLS BIND_STORAGE variable = s_update_layer_scores type = ram_2p impl = bram
-#pragma HLS BIND_STORAGE variable = s_sort_layer_scores type = ram_2p impl = bram
-#pragma HLS BIND_STORAGE variable = s_sort_layer_indices type = ram_2p impl = bram
-#pragma HLS BIND_STORAGE variable = s_parent_indices_in_layer type = ram_2p impl = bram
-#pragma HLS BIND_STORAGE variable = s_remapped_topk_tokens type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = s_curr_layer_scores type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = s_update_layer_scores type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = s_sort_layer_scores type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = s_sort_layer_indices type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = s_parent_indices_in_layer type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = s_remapped_topk_tokens type = ram_2p impl = bram
 
 #pragma HLS DATAFLOW
 
@@ -234,8 +238,8 @@ topk_batch_loop:
 #pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
         float best_logits[kCdtFusedMaxNodeTopK];
         int best_indices[kCdtFusedMaxNodeTopK];
-#pragma HLS ARRAY_PARTITION variable = best_logits complete
-#pragma HLS ARRAY_PARTITION variable = best_indices complete
+// #pragma HLS ARRAY_PARTITION variable = best_logits complete
+// #pragma HLS ARRAY_PARTITION variable = best_indices complete
 
     topk_init_loop:
         for (int k = 0; k < node_top_k; ++k) {
@@ -457,7 +461,7 @@ void e4d_slm_topk(
     int64_t* topk_tokens_sampling_out          // packed [batch, tree_width * node_top_k]
 ) {
 #pragma HLS INLINE off
-#pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
     if (input_hidden_states == nullptr || reasoning_hidden_states_out == nullptr ||
         topk_probas_sampling_out == nullptr || topk_tokens_sampling_out == nullptr) {
         return;
@@ -473,6 +477,7 @@ void e4d_slm_topk(
 slm_batch_loop:
     for (int b = 0; b < batch_size; ++b) {
 #pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
+#if !E4D_HLS_SYNTH_STUB_TIER1
         hls_stream<vec_t<VEC_W>> hidden_in_stream("cdt_hidden_in_stream");
         hls_stream<vec_t<VEC_W>> embed_in_stream("cdt_embed_in_stream");
 
@@ -485,8 +490,8 @@ slm_batch_loop:
 #pragma HLS PIPELINE II = 1
                 vec_t<VEC_W> hidden_vec;
                 vec_t<VEC_W> embed_vec;
-#pragma HLS ARRAY_PARTITION variable = hidden_vec complete
-#pragma HLS ARRAY_PARTITION variable = embed_vec complete
+// #pragma HLS ARRAY_PARTITION variable = hidden_vec complete
+// #pragma HLS ARRAY_PARTITION variable = embed_vec complete
 
             slm_stream_lane_loop:
                 for (int lane = 0; lane < VEC_W; ++lane) {
@@ -516,9 +521,9 @@ slm_batch_loop:
         float reasoning_state[TREE_WIDTH * HIDDEN];
         int candidate_indices[TREE_WIDTH * kCdtFusedMaxNodeTopK];
         float gathered_logits[TREE_WIDTH * kCdtFusedMaxNodeTopK];
-#pragma HLS BIND_STORAGE variable = reasoning_state type = ram_2p impl = bram
-#pragma HLS BIND_STORAGE variable = candidate_indices type = ram_2p impl = bram
-#pragma HLS BIND_STORAGE variable = gathered_logits type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = reasoning_state type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = candidate_indices type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = gathered_logits type = ram_2p impl = bram
 
         eagle_tier1_lm_top_eagle4(
             hidden_in_stream,
@@ -581,7 +586,7 @@ slm_batch_loop:
             }
 
             float exp_vals[kCdtFusedMaxNodeTopK];
-#pragma HLS ARRAY_PARTITION variable = exp_vals complete
+// #pragma HLS ARRAY_PARTITION variable = exp_vals complete
             float sum_exp = 0.0f;
         slm_topk_exp_loop_k:
             for (int k = 0; k < node_top_k; ++k) {
@@ -604,6 +609,35 @@ slm_batch_loop:
                 topk_probas_sampling_out[dst] = exp_vals[k] * inv_sum;
             }
         }
+#else
+    slm_stub_copy_hidden_loop_t:
+        for (int t = 0; t < tree_width; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
+        slm_stub_copy_hidden_loop_h:
+            for (int h = 0; h < hidden_size; ++h) {
+#pragma HLS loop_tripcount min=HIDDEN max=HIDDEN avg=HIDDEN
+#pragma HLS PIPELINE II = 1
+                const int64_t idx =
+                    (static_cast<int64_t>(b) * tree_width + t) * hidden_size + h;
+                reasoning_hidden_states_out[idx] = input_hidden_states[idx];
+            }
+        }
+
+        const float uniform_prob = (node_top_k > 0) ? (1.0f / static_cast<float>(node_top_k)) : 0.0f;
+    slm_stub_copy_topk_loop_t:
+        for (int t = 0; t < tree_width; ++t) {
+#pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
+        slm_stub_copy_topk_loop_k:
+            for (int k = 0; k < node_top_k; ++k) {
+#pragma HLS loop_tripcount min=kTcTopK max=kTcTopK avg=kTcTopK
+#pragma HLS PIPELINE II = 1
+                const int src = t * node_top_k + k;
+                const int dst = b * (tree_width * node_top_k) + src;
+                topk_tokens_sampling_out[dst] = static_cast<int64_t>(k);
+                topk_probas_sampling_out[dst] = uniform_prob;
+            }
+        }
+#endif
     }
 }
 
@@ -695,7 +729,7 @@ prefill_fc_stream_in_loop:
 #pragma HLS loop_tripcount min=(HIDDEN*3)/VEC_W max=(HIDDEN*3)/VEC_W avg=(HIDDEN*3)/VEC_W
 #pragma HLS PIPELINE II=1
         vec_t<VEC_W> v;
-#pragma HLS ARRAY_PARTITION variable=v complete
+// #pragma HLS ARRAY_PARTITION variable=v complete
     prefill_fc_stream_in_lane:
         for (int lane = 0; lane < VEC_W; ++lane) {
 #pragma HLS UNROLL
@@ -1006,7 +1040,7 @@ void eagle4_draft_impl(
     }
 
     int64_t accepted_draft_kv_slots[kContiguousKvMaxAccepted];
-#pragma HLS BIND_STORAGE variable=accepted_draft_kv_slots type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=accepted_draft_kv_slots type=ram_2p impl=bram
 map_accept_nodes_loop:
     for (int i = 0; i < kContiguousKvMaxAccepted; ++i) {
 #pragma HLS loop_tripcount min=1 max=kContiguousKvMaxAccepted avg=kContiguousKvMaxAccepted/2
@@ -1071,18 +1105,14 @@ map_accept_nodes_loop:
         return;
     }
 
-    const float* initial_hidden_states_ptr = initial_hidden_states;
-    const float* initial_topk_probas_ptr = initial_topk_probas;
-    const int64_t* initial_topk_tokens_ptr = initial_topk_tokens;
-
     const bool has_initial_topk =
         run_prefill_stage ||
-        (initial_topk_probas_ptr != nullptr && initial_topk_tokens_ptr != nullptr);
+        (initial_topk_probas != nullptr && initial_topk_tokens != nullptr);
     const bool has_initial_logits = (initial_logits != nullptr && initial_logits_width > 0);
     const bool run_initial_loop = enable_initial_loop && (has_initial_topk || has_initial_logits);
 
     if (enable_initial_loop &&
-        (!run_initial_loop || (!run_prefill_stage && initial_hidden_states_ptr == nullptr))) {
+        (!run_initial_loop || (!run_prefill_stage && initial_hidden_states == nullptr))) {
         return;
     }
 
@@ -1098,7 +1128,7 @@ map_accept_nodes_loop:
     //   slot in layer l that is the parent of slot t at layer l+1.
     // Indexed by absolute depth (curr_depth_start + d), stride TREE_WIDTH.
     int parent_indices_accum[kCdtControllerMaxDepth * TREE_WIDTH];
-#pragma HLS BIND_STORAGE variable = parent_indices_accum type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = parent_indices_accum type = ram_2p impl = bram
     for (int i = 0; i < kCdtControllerMaxDepth * TREE_WIDTH; ++i) {
 #pragma HLS loop_tripcount min=kTcParentAccumSize max=kTcParentAccumSize avg=kTcParentAccumSize
 #pragma HLS PIPELINE II = 1
@@ -1109,71 +1139,72 @@ map_accept_nodes_loop:
     // Using a dedicated buffer (always non-null) guarantees the step writes parent indices
     // even when the caller does not supply a debug output pointer.
     int64_t s_parent_scratch[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
-#pragma HLS BIND_STORAGE variable = s_parent_scratch type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = s_parent_scratch type = ram_2p impl = bram
     float s_initial_topk_probas[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
     int64_t s_initial_topk_tokens[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
-#pragma HLS BIND_STORAGE variable = s_initial_topk_probas type = ram_2p impl = bram
-#pragma HLS BIND_STORAGE variable = s_initial_topk_tokens type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = s_initial_topk_probas type = ram_2p impl = bram
+// #pragma HLS BIND_STORAGE variable = s_initial_topk_tokens type = ram_2p impl = bram
 
     // ── BRAM staging: small working arrays ───────────────────────────────
     int64_t bram_step_input_tokens[kCdtFusedMaxBatch * TREE_WIDTH];
-#pragma HLS BIND_STORAGE variable=bram_step_input_tokens type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_step_input_tokens type=ram_2p impl=bram
     float   bram_step_last_layer_scores[kCdtFusedMaxBatch * TREE_WIDTH];
-#pragma HLS BIND_STORAGE variable=bram_step_last_layer_scores type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_step_last_layer_scores type=ram_2p impl=bram
     int64_t bram_step_topk_indexs_prev[kCdtFusedMaxBatch * TREE_WIDTH];
-#pragma HLS BIND_STORAGE variable=bram_step_topk_indexs_prev type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_step_topk_indexs_prev type=ram_2p impl=bram
     float   bram_step_topk_probas_sampling[kCdtFusedMaxBatch * TREE_WIDTH * kCdtFusedMaxNodeTopK];
-#pragma HLS BIND_STORAGE variable=bram_step_topk_probas_sampling type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_step_topk_probas_sampling type=ram_2p impl=bram
     int64_t bram_step_topk_tokens_sampling[kCdtFusedMaxBatch * TREE_WIDTH * kCdtFusedMaxNodeTopK];
-#pragma HLS BIND_STORAGE variable=bram_step_topk_tokens_sampling type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_step_topk_tokens_sampling type=ram_2p impl=bram
     float   bram_output_scores[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
-#pragma HLS BIND_STORAGE variable=bram_output_scores type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_output_scores type=ram_2p impl=bram
     int64_t bram_output_tokens[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
-#pragma HLS BIND_STORAGE variable=bram_output_tokens type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_output_tokens type=ram_2p impl=bram
     float   bram_work_scores[kCdtFusedMaxBatch * (kCdtFusedMaxBatch + kCdtFusedMaxNodeTopK)];
-#pragma HLS BIND_STORAGE variable=bram_work_scores type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_work_scores type=ram_2p impl=bram
     float   bram_sort_scores[kCdtFusedMaxBatch * kCdtFusedMaxBatch];
-#pragma HLS BIND_STORAGE variable=bram_sort_scores type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_sort_scores type=ram_2p impl=bram
     int64_t bram_cache_topk_indices[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
-#pragma HLS BIND_STORAGE variable=bram_cache_topk_indices type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_cache_topk_indices type=ram_2p impl=bram
     float bram_rope_cos_vals[HEAD_DIM / 2];
-#pragma HLS BIND_STORAGE variable=bram_rope_cos_vals type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_rope_cos_vals type=ram_2p impl=bram
     float bram_rope_sin_vals[HEAD_DIM / 2];
-#pragma HLS BIND_STORAGE variable=bram_rope_sin_vals type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_rope_sin_vals type=ram_2p impl=bram
     float s_prefill_hidden_projected[kHlsHiddenBatch * HIDDEN];
     float s_prefill_embed_states[kHlsHiddenBatch * HIDDEN];
     float s_prefill_reasoning_hidden[kHlsHiddenBatch * HIDDEN];
+    float s_initial_hidden_states[kHlsHiddenBatch * HIDDEN];
     float s_prefill_topk_probas[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
     int64_t s_prefill_topk_tokens[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
-#pragma HLS BIND_STORAGE variable=s_prefill_hidden_projected type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=s_prefill_embed_states type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=s_prefill_reasoning_hidden type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=s_prefill_topk_probas type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=s_prefill_topk_tokens type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=s_prefill_hidden_projected type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=s_prefill_embed_states type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=s_prefill_reasoning_hidden type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=s_prefill_topk_probas type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=s_prefill_topk_tokens type=ram_2p impl=bram
 
     // ── BRAM staging: hidden state arrays (kHlsHiddenBatch=1 active) ─────
     float bram_step_input_hidden_states[kHlsHiddenBatch * TREE_WIDTH * HIDDEN];
-#pragma HLS BIND_STORAGE variable=bram_step_input_hidden_states type=ram_2p impl=bram
-#pragma HLS ARRAY_PARTITION variable=bram_step_input_hidden_states type=cyclic factor=16 dim=1
+// #pragma HLS BIND_STORAGE variable=bram_step_input_hidden_states type=ram_2p impl=bram
+// #pragma HLS ARRAY_PARTITION variable=bram_step_input_hidden_states type=cyclic factor=16 dim=1
     float bram_step_input_embed_states[kHlsHiddenBatch * TREE_WIDTH * HIDDEN];
-#pragma HLS BIND_STORAGE variable=bram_step_input_embed_states type=ram_2p impl=bram
-#pragma HLS ARRAY_PARTITION variable=bram_step_input_embed_states type=cyclic factor=16 dim=1
+// #pragma HLS BIND_STORAGE variable=bram_step_input_embed_states type=ram_2p impl=bram
+// #pragma HLS ARRAY_PARTITION variable=bram_step_input_embed_states type=cyclic factor=16 dim=1
     float bram_output_hidden_states[kHlsHiddenBatch * kCdtFusedMaxNodeTopK * HIDDEN];
-#pragma HLS BIND_STORAGE variable=bram_output_hidden_states type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=bram_output_hidden_states type=ram_2p impl=bram
 
     // ── URAM staging: cumu/index arrays (grow each depth) ────────────────
     int64_t uram_cumu_tokens[kCdtFusedMaxBatch * kHlsMaxNodeCount];
-#pragma HLS BIND_STORAGE variable=uram_cumu_tokens type=ram_2p impl=uram
+// #pragma HLS BIND_STORAGE variable=uram_cumu_tokens type=ram_2p impl=uram
     float   uram_cumu_scores[kCdtFusedMaxBatch * kHlsMaxNodeCount];
-#pragma HLS BIND_STORAGE variable=uram_cumu_scores type=ram_2p impl=uram
+// #pragma HLS BIND_STORAGE variable=uram_cumu_scores type=ram_2p impl=uram
     int64_t uram_cumu_deltas[kCdtFusedMaxBatch * kHlsMaxNodeCount];
-#pragma HLS BIND_STORAGE variable=uram_cumu_deltas type=ram_2p impl=uram
+// #pragma HLS BIND_STORAGE variable=uram_cumu_deltas type=ram_2p impl=uram
     int64_t uram_prev_indexs[kCdtFusedMaxBatch * kHlsMaxNodeCount];
-#pragma HLS BIND_STORAGE variable=uram_prev_indexs type=ram_2p impl=uram
+// #pragma HLS BIND_STORAGE variable=uram_prev_indexs type=ram_2p impl=uram
     int64_t uram_next_indexs[kCdtFusedMaxBatch * kHlsMaxNodeCount];
-#pragma HLS BIND_STORAGE variable=uram_next_indexs type=ram_2p impl=uram
+// #pragma HLS BIND_STORAGE variable=uram_next_indexs type=ram_2p impl=uram
     int64_t uram_side_indexs[kCdtFusedMaxBatch * kHlsMaxNodeCount];
-#pragma HLS BIND_STORAGE variable=uram_side_indexs type=ram_2p impl=uram
+// #pragma HLS BIND_STORAGE variable=uram_side_indexs type=ram_2p impl=uram
 
     int loop_start_depth = 0;
     const int step_flat  = batch_size * max_tree_width;
@@ -1268,21 +1299,45 @@ map_accept_nodes_loop:
                 node_to_hbm_slot[0] = root_slot;
             }
         }
-        initial_hidden_states_ptr = s_prefill_reasoning_hidden;
-        initial_topk_probas_ptr = s_prefill_topk_probas;
-        initial_topk_tokens_ptr = s_prefill_topk_tokens;
     }
 
     if (run_initial_loop) {
+        const float* initial_hidden_src = run_prefill_stage ? s_prefill_reasoning_hidden
+                                                            : initial_hidden_states;
+        const int initial_hidden_copy_count = e4d_clamp_int(
+            batch_size * hidden_size,
+            0,
+            kHlsHiddenBatch * HIDDEN);
+    init_hidden_copy_loop:
+        for (int i = 0; i < kHlsHiddenBatch * HIDDEN; ++i) {
+#pragma HLS loop_tripcount min=HIDDEN max=HIDDEN avg=HIDDEN
+#pragma HLS PIPELINE II = 1
+            s_initial_hidden_states[i] = (i < initial_hidden_copy_count) ? initial_hidden_src[i] : 0.0f;
+        }
+
         if (has_initial_topk) {
             // Copy external data into local scratch so the pointer below is always
             // a known local object (HLS cannot synthesize conditional pointer aliasing).
+            const int init_topk_copy_count = e4d_clamp_int(
+                batch_size * node_top_k,
+                0,
+                kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK);
         init_topk_copy_loop:
             for (int i = 0; i < kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK; ++i) {
 #pragma HLS loop_tripcount min=kTcInitScratchSize max=kTcInitScratchSize avg=kTcInitScratchSize
 #pragma HLS PIPELINE II = 1
-                s_initial_topk_probas[i] = initial_topk_probas_ptr[i];
-                s_initial_topk_tokens[i] = initial_topk_tokens_ptr[i];
+                if (i < init_topk_copy_count) {
+                    if (run_prefill_stage) {
+                        s_initial_topk_probas[i] = s_prefill_topk_probas[i];
+                        s_initial_topk_tokens[i] = s_prefill_topk_tokens[i];
+                    } else {
+                        s_initial_topk_probas[i] = initial_topk_probas[i];
+                        s_initial_topk_tokens[i] = initial_topk_tokens[i];
+                    }
+                } else {
+                    s_initial_topk_probas[i] = 0.0f;
+                    s_initial_topk_tokens[i] = 0;
+                }
             }
         } else {
             e4d_softmax_topk(
@@ -1297,8 +1352,8 @@ map_accept_nodes_loop:
 
         float initial_last_layer_scores[kCdtFusedMaxBatch];
         int64_t initial_topk_indexs_prev[kCdtFusedMaxBatch];
-#pragma HLS ARRAY_PARTITION variable = initial_last_layer_scores complete
-#pragma HLS ARRAY_PARTITION variable = initial_topk_indexs_prev complete
+// #pragma HLS ARRAY_PARTITION variable = initial_last_layer_scores complete
+// #pragma HLS ARRAY_PARTITION variable = initial_topk_indexs_prev complete
     init_seed_loop:
         for (int b = 0; b < batch_size; ++b) {
 #pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
@@ -1313,7 +1368,7 @@ map_accept_nodes_loop:
             s_initial_topk_probas,
             s_initial_topk_tokens,
             initial_last_layer_scores,
-            initial_hidden_states_ptr,
+            s_initial_hidden_states,
             hot_token_id,
             hot_token_vocab_size,
             use_hot_token_id,

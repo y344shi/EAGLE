@@ -90,8 +90,8 @@ bool contiguous_kv_compact_accepted(
 
     vec_t<VEC_W> src_k[MAX_ACCEPTED * VECS_PER_TOKEN];
     vec_t<VEC_W> src_v[MAX_ACCEPTED * VECS_PER_TOKEN];
-#pragma HLS BIND_STORAGE variable=src_k type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=src_v type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=src_k type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=src_v type=ram_2p impl=bram
 
 read_src_tokens:
     for (int i = 0; i < MAX_ACCEPTED; ++i) {
@@ -157,7 +157,7 @@ void contiguous_kv_gather(
     hls_stream<vec_t<VEC_W>> v_out[kContiguousKvTreeWidth]
 ) {
 #pragma HLS INLINE off
-#pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
     constexpr int VECS_PER_TOKEN = (NUM_KV_HEADS * HEAD_DIM) / VEC_W;
     static_assert((NUM_KV_HEADS * HEAD_DIM) % VEC_W == 0, "KV width must align to VEC_W");
 
@@ -188,7 +188,7 @@ ancestor_query_loop:
 #pragma HLS loop_tripcount min=kContiguousKvTreeWidth max=kContiguousKvTreeWidth avg=kContiguousKvTreeWidth
         int slot = t;
         int ancestor_slots[MAX_DEPTH];
-#pragma HLS BIND_STORAGE variable=ancestor_slots type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=ancestor_slots type=ram_2p impl=bram
     ancestor_slots_init_loop:
         for (int l = 0; l < MAX_DEPTH; ++l) {
 #pragma HLS LOOP_TRIPCOUNT min=1 avg=4 max=MAX_DEPTH
@@ -252,7 +252,7 @@ void contiguous_kv_write_and_gather(
     hls_stream<vec_t<VEC_W>> v_out[kContiguousKvTreeWidth]
 ) {
 #pragma HLS INLINE off
-#pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
     // Write first (so self-token is in HBM for gather phase 3).
     contiguous_kv_write<HEAD_DIM, NUM_KV_HEADS>(
         k_in, v_in, hbm_k, hbm_v,

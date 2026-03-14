@@ -9,6 +9,12 @@
 #include "folded_matmul_dummy_b.hpp"
 #include "tmac_utils.hpp"
 
+// Workaround for Vitis HLS 2025.1 LayoutTransform crashes on very large designs.
+// When enabled, relax selected layout pragmas in dense batched projection kernels.
+#ifndef E4D_HLS_SAFE_LAYOUT
+#define E4D_HLS_SAFE_LAYOUT 0
+#endif
+
 namespace tmac {
 namespace hls {
 
@@ -44,7 +50,7 @@ inline float scale_pow2(float x) {
 
 inline void build_lut_pos(float a_scaled, float lut_pos[9]) {
 #pragma HLS INLINE
-#pragma HLS ARRAY_PARTITION variable = lut_pos complete
+// #pragma HLS ARRAY_PARTITION variable = lut_pos complete
     lut_pos[0] = 0.0f;
     lut_pos[1] = a_scaled;
     lut_pos[2] = a_scaled * 2.0f;
@@ -60,7 +66,7 @@ inline void build_lut_pos(float a_scaled, float lut_pos[9]) {
 // This maps directly from packed weight nibble to product and avoids per-lane sign/mag decode.
 inline void build_lut_raw16(float a_scaled, float lut_raw16[16]) {
 #pragma HLS INLINE
-#pragma HLS ARRAY_PARTITION variable = lut_raw16 complete
+// #pragma HLS ARRAY_PARTITION variable = lut_raw16 complete
     float lut_pos[9];
     build_lut_pos(a_scaled, lut_pos);
 
@@ -123,7 +129,7 @@ void lut_mac_broadcast(float a_scalar,
     float lut_raw16[16];
     build_lut_raw16(a_scaled, lut_raw16);
 
-    if constexpr (ENABLE_TMAC) {
+    if (ENABLE_TMAC) {
         for (int lane = 0; lane < OUT_W; ++lane) {
 #pragma HLS UNROLL factor = 16
             const uint8_t w_raw = get_w4_raw(w_pkt, lane);
@@ -157,8 +163,8 @@ void dense_projection_production(hls_stream<vec_t<VEC_W>>& a_stream,
     static_assert(OUT_W % VEC_W == 0, "OUT_W must align to VEC_W");
 
     vec_t<OUT_W> acc_banks[4];
-#pragma HLS ARRAY_PARTITION variable = acc_banks complete dim = 1
-#pragma HLS ARRAY_PARTITION variable = acc_banks cyclic factor = 16 dim = 2
+// #pragma HLS ARRAY_PARTITION variable = acc_banks complete dim = 1
+// #pragma HLS ARRAY_PARTITION variable = acc_banks cyclic factor = 16 dim = 2
 
     // init accumulators
     for (int b = 0; b < 4; ++b) {
@@ -221,19 +227,19 @@ void dense_projection_production_scaled(hls_stream<vec_t<VEC_W>>& a_stream,
     constexpr int TILES = OUT_DIM / TILE;
     constexpr int NUM_GROUPS = INPUT_DIM / GROUP_SIZE;
     static float a_buffer[INPUT_DIM];
-#pragma HLS BIND_STORAGE variable=a_buffer type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=a_buffer type=ram_2p impl=bram
 
     // buffers to hold weights for one tile
     static pack512 weights_tile_bram[INPUT_DIM];
-#pragma HLS BIND_STORAGE variable=weights_tile_bram type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=weights_tile_bram type=ram_2p impl=bram
     static float scales_tile_bram[NUM_GROUPS][TILE];
-#pragma HLS BIND_STORAGE variable=scales_tile_bram type=ram_2p impl=bram
-#pragma HLS ARRAY_PARTITION variable=scales_tile_bram cyclic factor=VEC_W dim=2
+// #pragma HLS BIND_STORAGE variable=scales_tile_bram type=ram_2p impl=bram
+// #pragma HLS ARRAY_PARTITION variable=scales_tile_bram cyclic factor=VEC_W dim=2
 
     // Accumulators for ONE tile. Reset for each tile.
     float acc_banks[4][TILE];
-#pragma HLS ARRAY_PARTITION variable=acc_banks complete dim=1
-#pragma HLS ARRAY_PARTITION variable=acc_banks cyclic factor=VEC_W dim=2
+// #pragma HLS ARRAY_PARTITION variable=acc_banks complete dim=1
+// #pragma HLS ARRAY_PARTITION variable=acc_banks cyclic factor=VEC_W dim=2
 
     vec_t<VEC_W> current_input_chunk;
 ingest_a_loop:
@@ -248,7 +254,7 @@ ingest_a_loop:
     }
 
     float lut_raw16[16];
-#pragma HLS ARRAY_PARTITION variable=lut_raw16 complete
+// #pragma HLS ARRAY_PARTITION variable=lut_raw16 complete
 
 tile_loop:
     for (int t = 0; t < TILES; ++t) {
@@ -298,7 +304,7 @@ tile_loop:
             const pack512 w_pkt = weights_tile_bram[k];
 
             // Pre-calculate LUT for TMAC if enabled
-            if constexpr (ENABLE_TMAC) {
+            if (ENABLE_TMAC) {
                 build_lut_raw16(scale_pow2<SCALE_EXP>(a_scalar), lut_raw16);
             }
 
@@ -310,7 +316,7 @@ tile_loop:
                 const float scale_val = scales_tile_bram[g][lane];
 
                 float prod;
-                if constexpr (ENABLE_TMAC) {
+                if (ENABLE_TMAC) {
                     prod = lut_raw16[w_raw] * scale_val;
                 } else {
                     const int8_t w = decode_w4(w_raw);
@@ -364,23 +370,33 @@ void dense_projection_production_scaled_batched(hls_stream<vec_t<VEC_W>>& a_stre
     constexpr int NUM_BANKS = 8;
 
     static float a_buffer[BATCH_SIZE][INPUT_DIM];
-#pragma HLS BIND_STORAGE variable=a_buffer type=ram_2p impl=bram
+#if !E4D_HLS_SAFE_LAYOUT
+// #pragma HLS BIND_STORAGE variable=a_buffer type=ram_2p impl=bram
+#endif
 
     // Output buffer: store tile results here, emit batch-contiguous at the end.
     static float out_buffer[BATCH_SIZE][OUT_DIM];
-#pragma HLS BIND_STORAGE variable=out_buffer type=ram_2p impl=bram
+#if !E4D_HLS_SAFE_LAYOUT
+// #pragma HLS BIND_STORAGE variable=out_buffer type=ram_2p impl=bram
+#endif
 
     // buffers to hold weights for one tile
     static pack512 weights_tile_bram[INPUT_DIM];
-#pragma HLS BIND_STORAGE variable=weights_tile_bram type=ram_2p impl=bram
+#if !E4D_HLS_SAFE_LAYOUT
+// #pragma HLS BIND_STORAGE variable=weights_tile_bram type=ram_2p impl=bram
+#endif
     static float scales_tile_bram[SCALES_PER_TILE];
-#pragma HLS BIND_STORAGE variable=scales_tile_bram type=ram_2p impl=bram
-#pragma HLS ARRAY_PARTITION variable=scales_tile_bram type=cyclic factor=TILE dim=1
+#if !E4D_HLS_SAFE_LAYOUT
+// #pragma HLS BIND_STORAGE variable=scales_tile_bram type=ram_2p impl=bram
+// #pragma HLS ARRAY_PARTITION variable=scales_tile_bram type=cyclic factor=TILE dim=1
+#endif
 
     // Accumulators for ONE tile. Reset for each tile.
     vec_t<8> acc_banks[TILE];
     //vec_t<TILE> acc_banks[4];
-#pragma HLS ARRAY_PARTITION variable=acc_banks type=complete dim=0
+#if !E4D_HLS_SAFE_LAYOUT
+// #pragma HLS ARRAY_PARTITION variable=acc_banks type=complete dim=0
+#endif
 
     vec_t<VEC_W> current_input_chunk;
 ingest_a_loop:
@@ -398,7 +414,9 @@ ingest_a_loop:
     }
 
     float lut_pos[9];
-    #pragma HLS ARRAY_PARTITION variable=lut_pos type=complete dim=0
+#if !E4D_HLS_SAFE_LAYOUT
+// #pragma HLS ARRAY_PARTITION variable=lut_pos type=complete dim=0
+#endif
 
 tile_loop:
 for (int t = 0; t < TILES; ++t) {
@@ -520,11 +538,11 @@ template <int M = 4, int K = 4096, int N = 4096>
 void folded_matmul(const uint8_t A[M][K], const uint8_t B[N][K], int32_t C[M][N]) {
     
     // 1. Physically partition the memory so we can read 384 elements per cycle
-    #pragma HLS ARRAY_PARTITION variable=A cyclic factor=384 dim=2
-    #pragma HLS ARRAY_PARTITION variable=B cyclic factor=384 dim=2
-    #pragma HLS ARRAY_PARTITION variable=A complete dim=1
-    #pragma HLS ARRAY_PARTITION variable=B complete dim=1
-    #pragma HLS ARRAY_PARTITION variable=C complete dim=1
+    // #pragma HLS ARRAY_PARTITION variable=A cyclic factor=384 dim=2
+    // #pragma HLS ARRAY_PARTITION variable=B cyclic factor=384 dim=2
+    // #pragma HLS ARRAY_PARTITION variable=A complete dim=1
+    // #pragma HLS ARRAY_PARTITION variable=B complete dim=1
+    // #pragma HLS ARRAY_PARTITION variable=C complete dim=1
 
     const int B_TILES = N / M;
     const int K_TILES = K / 3;
@@ -588,7 +606,7 @@ inline void matmul_interface(int32_t* c_out) {
 #pragma HLS INTERFACE s_axilite port = return bundle = control
 
     int32_t c_local[kFoldTopM][kFoldTopN];
-#pragma HLS ARRAY_PARTITION variable = c_local complete dim = 1
+// #pragma HLS ARRAY_PARTITION variable = c_local complete dim = 1
 
     folded_matmul<kFoldTopM, kFoldTopK, kFoldTopN>(kFoldedDummyA, kFoldedDummyB, c_local);
 
@@ -623,8 +641,8 @@ void dense_projection_production_scaled_raw(hls_stream<vec_t<VEC_W>>& a_stream,
     static_assert(OUT_W % VEC_W == 0, "OUT_W must align to VEC_W");
 
     vec_t<OUT_W> acc_banks[4];
-#pragma HLS ARRAY_PARTITION variable = acc_banks complete dim = 1
-#pragma HLS ARRAY_PARTITION variable = acc_banks cyclic factor = 16 dim = 2
+// #pragma HLS ARRAY_PARTITION variable = acc_banks complete dim = 1
+// #pragma HLS ARRAY_PARTITION variable = acc_banks cyclic factor = 16 dim = 2
 
     for (int b = 0; b < 4; ++b) {
 #pragma HLS loop_tripcount min=kDpNumAccBanks max=kDpNumAccBanks avg=kDpNumAccBanks

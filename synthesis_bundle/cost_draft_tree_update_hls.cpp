@@ -134,7 +134,7 @@ batch_loop:
         }
 
         float merged_top[kCdtUpdateMergeMax];
-#pragma HLS ARRAY_PARTITION variable = merged_top cyclic factor = 8
+// #pragma HLS ARRAY_PARTITION variable = merged_top cyclic factor = 8
 
         int ia = 0;
         int ib = 0;

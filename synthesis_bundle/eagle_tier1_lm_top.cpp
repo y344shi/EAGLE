@@ -192,18 +192,18 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
                                int current_depth,
                                const int* parent_indices_per_layer) {
 #pragma HLS INLINE off
-#pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=efficient_lm_head_qweight_row_major type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=efficient_lm_head_scales_row_major type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=efficient_lm_head_qzeros type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=efficient_lm_head_g_idx type=ram_2p impl=bram
-#pragma HLS ARRAY_PARTITION variable=efficient_lm_head_qweight_row_major type=cyclic factor=128 dim=1
-#pragma HLS ARRAY_PARTITION variable=efficient_lm_head_scales_row_major type=cyclic factor=128 dim=1
-#pragma HLS ARRAY_PARTITION variable=efficient_lm_head_qzeros type=cyclic factor=128 dim=1
-#pragma HLS ARRAY_PARTITION variable=efficient_lm_head_g_idx type=complete dim=1
-#pragma HLS BIND_STORAGE variable=reasoning_state_out type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=candidate_indices_out type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=gathered_logits_out type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=efficient_lm_head_qweight_row_major type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=efficient_lm_head_scales_row_major type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=efficient_lm_head_qzeros type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=efficient_lm_head_g_idx type=ram_2p impl=bram
+// #pragma HLS ARRAY_PARTITION variable=efficient_lm_head_qweight_row_major type=cyclic factor=128 dim=1
+// #pragma HLS ARRAY_PARTITION variable=efficient_lm_head_scales_row_major type=cyclic factor=128 dim=1
+// #pragma HLS ARRAY_PARTITION variable=efficient_lm_head_qzeros type=cyclic factor=128 dim=1
+// #pragma HLS ARRAY_PARTITION variable=efficient_lm_head_g_idx type=complete dim=1
+// #pragma HLS BIND_STORAGE variable=reasoning_state_out type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=candidate_indices_out type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=gathered_logits_out type=ram_2p impl=bram
     int rank = efficient_lm_rank;
     int vocab = efficient_lm_vocab_size;
     int topk = efficient_lm_num_candidates;
@@ -226,13 +226,13 @@ void eagle_tier1_lm_top_eagle4(hls::stream<tmac::hls::vec_t<tmac::hls::VEC_W>>& 
     float gathered_logits[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];
     int topk_tokens[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];
     float topk_probas[tmac::hls::TREE_WIDTH][tmac::hls::kEagle4LmTopKMax];
-#pragma HLS ARRAY_PARTITION variable=logits_hidden cyclic factor=16 dim=2
-#pragma HLS ARRAY_PARTITION variable=low_rank type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=candidate_indices type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=candidate_scores type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=topk_tokens type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=topk_probas type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=logits_hidden cyclic factor=16 dim=2
+// #pragma HLS ARRAY_PARTITION variable=low_rank type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=candidate_indices type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=candidate_scores type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=topk_tokens type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=topk_probas type=complete dim=0
 #pragma HLS DATAFLOW
 
     tmac::hls::eagle_tier1_top_eagle4_l0(hidden_in_stream, embed_in_stream, reasoning_out, logits_out,
