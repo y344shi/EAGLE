@@ -1,0 +1,21 @@
+<xilinx:hls_fe_msgs>
+    <msg msg_groups="" msg_id="207-1016" msg_severity="WARNING" msg_loc="/home/y344shi/workspace/xilinx_install/2025.1/Vitis/common/technology/autopilot/etc/hls_sqrt_apfixed.h:16:34" msg_body="unknown warning group '-Wmisleading-indentation', ignored">
+        <args ClangWarningOption="unknown-warning-option"/>
+    </msg>
+    <msg msg_groups="" msg_id="207-2916" msg_severity="ERROR" msg_loc="/home/y344shi/workspace/xilinx_install/2025.1/Vitis/tps/lnx64/gcc-8.3.0/lib/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/bits/stl_pair.h:442:40" msg_body="C++ requires a type specifier for all declarations">
+        <args/>
+    </msg>
+    <msg msg_groups="" msg_id="207-2916" msg_severity="ERROR" msg_loc="/home/y344shi/workspace/xilinx_install/2025.1/Vitis/tps/lnx64/gcc-8.3.0/lib/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/bits/basic_string.h:5896:5" msg_body="C++ requires a type specifier for all declarations">
+        <args/>
+    </msg>
+    <msg msg_groups="" msg_id="207-2916" msg_severity="ERROR" msg_loc="/home/y344shi/workspace/xilinx_install/2025.1/Vitis/tps/lnx64/gcc-8.3.0/lib/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/bits/basic_string.h:5904:5" msg_body="C++ requires a type specifier for all declarations">
+        <args/>
+    </msg>
+    <msg msg_groups="" msg_id="207-2916" msg_severity="ERROR" msg_loc="/home/y344shi/workspace/xilinx_install/2025.1/Vitis/tps/lnx64/gcc-8.3.0/lib/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/bits/basic_string.h:5910:5" msg_body="C++ requires a type specifier for all declarations">
+        <args/>
+    </msg>
+    <msg msg_groups="" msg_id="207-2916" msg_severity="ERROR" msg_loc="/home/y344shi/workspace/xilinx_install/2025.1/Vitis/tps/lnx64/gcc-8.3.0/lib/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/array:244:5" msg_body="C++ requires a type specifier for all declarations">
+        <args/>
+    </msg>
+</xilinx:hls_fe_msgs>
+

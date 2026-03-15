@@ -77,8 +77,8 @@ void fused_online_attention_pwl(hls_stream<vec_t<VEC_W>>& q_stream,
 
     float q_buffer[HEAD_DIM];
     float ctx_acc[HEAD_DIM];
-#pragma HLS ARRAY_PARTITION variable = q_buffer cyclic factor = VEC_W
-#pragma HLS ARRAY_PARTITION variable = ctx_acc cyclic factor = VEC_W
+// #pragma HLS ARRAY_PARTITION variable = q_buffer cyclic factor = VEC_W
+// #pragma HLS ARRAY_PARTITION variable = ctx_acc cyclic factor = VEC_W
 
     const int vec_chunks = HEAD_DIM / VEC_W;
 
@@ -104,7 +104,7 @@ token_loop:
         const int num_banks = 8;
         float partial_score[num_banks] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
         float v_local[HEAD_DIM];
-#pragma HLS ARRAY_PARTITION variable = v_local cyclic factor = VEC_W
+// #pragma HLS ARRAY_PARTITION variable = v_local cyclic factor = VEC_W
 
         if (t < seq_len) {
 dot_and_load:

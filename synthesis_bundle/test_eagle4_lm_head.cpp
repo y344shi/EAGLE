@@ -42,7 +42,8 @@ void print_required(const std::string& tensor_dir, const std::string& lm_dir) {
     std::cout << "  " << lm_dir << "/efficient_lm_head_down_proj_weight.fp16.bin\n";
     std::cout << "  " << lm_dir << "/efficient_lm_head_qweight_row_major.bin\n";
     std::cout << "  " << lm_dir << "/efficient_lm_head_scales_row_major.bin\n";
-    std::cout << "  " << lm_dir << "/efficient_lm_head_qzeros.bin (optional; uses zero-point=8 if missing)\n";
+    std::cout << "  " << lm_dir << "/efficient_lm_head_qzeros.bin (optional; uses zero-point="
+              << tmac::hls::kLmDefaultZeroPoint << " if missing)\n";
     std::cout << "  " << lm_dir << "/efficient_lm_head_g_idx.bin (optional; uses contiguous groups if missing)\n";
     std::cout << "  " << lm_dir << "/lm_head_weight.fp16.bin\n";
 }
@@ -111,9 +112,13 @@ int run_smoke(int seed) {
     constexpr int vocab = 256;
     constexpr int topk = 16;
     constexpr int group = 16;
+    constexpr int qpack = tmac::hls::kLmTcQpackFactor;
+    constexpr int qbits = tmac::hls::kQuantBits;
+    constexpr int qmask = tmac::hls::kQuantMask;
+    constexpr int z_default = tmac::hls::kLmDefaultZeroPoint;
 
     std::uniform_real_distribution<float> dist(-0.2f, 0.2f);
-    std::uniform_int_distribution<int> qdist(0, 15);
+    std::uniform_int_distribution<int> qdist(0, qmask);
 
     std::vector<float> hidden_v(hidden);
     for (float& x : hidden_v) x = dist(rng);
@@ -135,9 +140,9 @@ int run_smoke(int seed) {
         }
     }
 
-    const int packs = rank / 8;
+    const int packs = rank / qpack;
     const int groups = rank / group;
-    const int vocab_pack = vocab / 8;
+    const int vocab_pack = vocab / qpack;
     std::vector<int32_t> qweight(static_cast<size_t>(vocab) * packs, 0);
     std::vector<uint16_t> scales(static_cast<size_t>(groups) * vocab, 0);
     std::vector<int32_t> qzeros(static_cast<size_t>(groups) * vocab_pack, 0);
@@ -155,15 +160,15 @@ int run_smoke(int seed) {
     }
     for (size_t i = 0; i < qweight.size(); ++i) {
         int32_t pack = 0;
-        for (int j = 0; j < 8; ++j) {
-            pack |= (qdist(rng) & 0xF) << (j * 4);
+        for (int j = 0; j < qpack; ++j) {
+            pack |= (qdist(rng) & qmask) << (j * qbits);
         }
         qweight[i] = pack;
     }
     for (size_t i = 0; i < qzeros.size(); ++i) {
         int32_t pack = 0;
-        for (int j = 0; j < 8; ++j) {
-            pack |= (8 & 0xF) << (j * 4);
+        for (int j = 0; j < qpack; ++j) {
+            pack |= ((z_default - 1) & qmask) << (j * qbits);
         }
         qzeros[i] = pack;
     }
@@ -315,11 +320,12 @@ int main(int argc, char** argv) {
         std::cout << "[FAIL] down_proj weight shape mismatch.\n";
         return 1;
     }
-    if ((rank % 8) != 0 || (rank % group_size) != 0) {
-        std::cout << "[FAIL] rank must be divisible by 8 and group_size.\n";
+    if ((rank % tmac::hls::kLmTcQpackFactor) != 0 || (rank % group_size) != 0) {
+        std::cout << "[FAIL] rank must be divisible by qpack(" << tmac::hls::kLmTcQpackFactor
+                  << ") and group_size.\n";
         return 1;
     }
-    const int rank_packs = rank / 8;
+    const int rank_packs = rank / tmac::hls::kLmTcQpackFactor;
     const int rank_groups = rank / group_size;
     if (qweight_row.size() != static_cast<size_t>(vocab) * static_cast<size_t>(rank_packs)) {
         std::cout << "[FAIL] qweight row-major size mismatch.\n";
@@ -378,7 +384,7 @@ int main(int argc, char** argv) {
             tmac::hls::eagle4_fp16_to_float(gathered_ref_fp16[static_cast<size_t>(use_tok) * num_candidates + i]);
     }
 
-    const int vocab_packed = (vocab + 7) / 8;
+    const int vocab_packed = (vocab + tmac::hls::kLmTcQpackFactor - 1) / tmac::hls::kLmTcQpackFactor;
     const bool has_qzeros = (qzeros.size() == static_cast<size_t>(rank_groups) * static_cast<size_t>(vocab_packed));
     const int32_t* qzeros_ptr = has_qzeros ? qzeros.data() : nullptr;
     const bool has_gidx = (g_idx.size() == static_cast<size_t>(rank));
@@ -447,7 +453,8 @@ int main(int argc, char** argv) {
                   << " exceeds HLS evaluator topk max=" << tmac::hls::kEagle4LmTopKMax << ".\n";
     }
     if (!has_qzeros) {
-        std::cout << "[warn] efficient_lm_head_qzeros.bin missing or shape-mismatched; used zero-point=8.\n";
+        std::cout << "[warn] efficient_lm_head_qzeros.bin missing or shape-mismatched; used zero-point="
+                  << tmac::hls::kLmDefaultZeroPoint << ".\n";
     }
     if (!has_gidx) {
         std::cout << "[warn] efficient_lm_head_g_idx.bin missing or shape-mismatched; used contiguous groups.\n";

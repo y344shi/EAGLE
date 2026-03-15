@@ -220,6 +220,173 @@ int run_fc1_tile(const std::string& weight_path, int tile_idx) {
     return 1;
 }
 
+// ============================================================
+// INT2 test helpers
+// ============================================================
+
+// Pack int8 values [-2,-1,0,1] into a pack512 using 2-bit LSB-first encoding.
+// raw = val + 2 (maps -2→0, -1→1, 0→2, 1→3)
+static pack512 build_weights_w2(const std::vector<int8_t>& w2) {
+    pack512 p{};
+    for (int i = 0; i < static_cast<int>(w2.size()); ++i) {
+        const int8_t w_real = w2[i];
+        const uint8_t raw = static_cast<uint8_t>(w_real + 2) & 0x3;
+        const int byte_idx = i >> 2;
+        const int shift = (i & 3) * 2;
+        p.bytes[byte_idx] |= static_cast<uint8_t>(raw << shift);
+    }
+    return p;
+}
+
+// Round-trip: pack 256 INT2 weights and verify get_w2_raw / decode_w2.
+int run_w2_primitive_check() {
+    // 4 representative values, padded to 256 lanes (zero-padded as raw=2=w=0)
+    std::vector<int8_t> src(256, 0);  // 0 encodes as raw=2
+    src[0] = -2; src[1] = -1; src[2] = 0; src[3] = 1;
+
+    pack512 pkt = build_weights_w2(src);
+
+    int errors = 0;
+    // Check first 4 lanes explicitly
+    const int8_t expected_decoded[4] = {-2, -1, 0, 1};
+    const uint8_t expected_raw[4] = {0, 1, 2, 3};
+    for (int i = 0; i < 4; ++i) {
+        const uint8_t got_raw = tmac::hls::get_w2_raw(pkt, i);
+        const int8_t got_dec = tmac::hls::decode_w2(got_raw);
+        if (got_raw != expected_raw[i] || got_dec != expected_decoded[i]) {
+            std::printf("[w2_prim] lane %d: raw=%u dec=%d expected raw=%u dec=%d\n",
+                        i, got_raw, (int)got_dec, expected_raw[i], (int)expected_decoded[i]);
+            ++errors;
+        }
+    }
+    // Lanes 4..255 should be raw=2 (zero-packed)
+    for (int i = 4; i < 256; ++i) {
+        const uint8_t got_raw = tmac::hls::get_w2_raw(pkt, i);
+        const int8_t got_dec = tmac::hls::decode_w2(got_raw);
+        if (got_raw != 2 || got_dec != 0) {
+            if (errors < 4) {
+                std::printf("[w2_prim] lane %d (zero-padded): raw=%u dec=%d\n",
+                            i, got_raw, (int)got_dec);
+            }
+            ++errors;
+        }
+    }
+    if (errors == 0) std::printf("[w2_primitive] PASS\n");
+    else             std::printf("[w2_primitive] FAIL with %d errors\n", errors);
+    return errors ? 1 : 0;
+}
+
+// Smoke test for non-batched dense_projection_production_scaled_w2.
+// Uses OUT_DIM=256, INPUT_DIM=128, GROUP_SIZE=128, all weights=+1 (raw=3).
+int run_smoke_w2_scaled() {
+    constexpr int INPUT_DIM = 128;
+    constexpr int OUT_DIM = 256;
+    constexpr int GROUP_SIZE = 128;
+
+    // All activations = 1.0
+    std::vector<vec_t<VEC_W>> a_chunks(INPUT_DIM / VEC_W);
+    for (auto& c : a_chunks) { for (int j = 0; j < VEC_W; ++j) c[j] = 1.0f; }
+
+    // All weights = +1 (raw=3)
+    std::vector<pack512> w_pkts(INPUT_DIM);
+    {
+        std::vector<int8_t> row(OUT_DIM, 1);
+        for (auto& p : w_pkts) p = build_weights_w2(row);
+    }
+
+    // Scales = 1.0
+    std::vector<float> scales(1 * OUT_DIM, 1.0f);  // 1 group × 256 lanes
+
+    // Golden: each output = sum_k (a_k * w_lane * scale) = 128 * 1 * 1 * 1 = 128
+    const float golden_val = 128.0f;
+
+    int errors = 0;
+    for (int use_tmac = 0; use_tmac <= 1; ++use_tmac) {
+        hls_stream<vec_t<VEC_W>> ain, cout;
+        for (auto& c : a_chunks) ain.write(c);
+
+        if (use_tmac) {
+            tmac::hls::dense_projection_production_scaled_w2<SCALE_EXP, INPUT_DIM, OUT_DIM,
+                                                              GROUP_SIZE, true>(
+                ain, cout, w_pkts.data(), scales.data());
+        } else {
+            tmac::hls::dense_projection_production_scaled_w2<SCALE_EXP, INPUT_DIM, OUT_DIM,
+                                                              GROUP_SIZE, false>(
+                ain, cout, w_pkts.data(), scales.data());
+        }
+
+        for (int oc = 0; oc < OUT_DIM / VEC_W; ++oc) {
+            vec_t<VEC_W> chunk = cout.read();
+            for (int j = 0; j < VEC_W; ++j) {
+                const float diff = std::fabs(chunk[j] - golden_val);
+                if (diff > 1e-3f) {
+                    if (errors < 4) {
+                        std::printf("[w2_smoke] tmac=%d lane %d: got %f expected %f\n",
+                                    use_tmac, oc * VEC_W + j, chunk[j], golden_val);
+                    }
+                    ++errors;
+                }
+            }
+        }
+    }
+    if (errors == 0) std::printf("[w2_smoke] PASS\n");
+    else             std::printf("[w2_smoke] FAIL with %d mismatches\n", errors);
+    return errors ? 1 : 0;
+}
+
+// Smoke test for batched dense_projection_production_scaled_batched_w2 (BATCH=2).
+int run_smoke_w2_batched() {
+    constexpr int BATCH = 2;
+    constexpr int INPUT_DIM = 128;
+    constexpr int OUT_DIM = 256;
+    constexpr int GROUP_SIZE = 128;
+
+    // Batch 0: all 1.0, Batch 1: all 2.0
+    hls_stream<vec_t<VEC_W>> ain;
+    for (int b = 0; b < BATCH; ++b) {
+        for (int k = 0; k < INPUT_DIM / VEC_W; ++k) {
+            vec_t<VEC_W> c{};
+            for (int j = 0; j < VEC_W; ++j) c[j] = (b == 0) ? 1.0f : 2.0f;
+            ain.write(c);
+        }
+    }
+
+    // Weights: all +1 (raw=3)
+    std::vector<pack512> w_pkts(INPUT_DIM);
+    {
+        std::vector<int8_t> row(OUT_DIM, 1);
+        for (auto& p : w_pkts) p = build_weights_w2(row);
+    }
+    std::vector<float> scales(1 * OUT_DIM, 1.0f);
+
+    hls_stream<vec_t<VEC_W>> cout;
+    tmac::hls::dense_projection_production_scaled_batched_w2<SCALE_EXP, BATCH, INPUT_DIM,
+                                                              OUT_DIM, GROUP_SIZE, false>(
+        ain, cout, w_pkts.data(), scales.data());
+
+    // Expected: batch0=128, batch1=256
+    const float expected[BATCH] = {128.0f, 256.0f};
+    int errors = 0;
+    for (int b = 0; b < BATCH; ++b) {
+        for (int oc = 0; oc < OUT_DIM / VEC_W; ++oc) {
+            vec_t<VEC_W> chunk = cout.read();
+            for (int j = 0; j < VEC_W; ++j) {
+                const float diff = std::fabs(chunk[j] - expected[b]);
+                if (diff > 1e-3f) {
+                    if (errors < 4) {
+                        std::printf("[w2_batched] b=%d lane=%d got %f expected %f\n",
+                                    b, oc * VEC_W + j, chunk[j], expected[b]);
+                    }
+                    ++errors;
+                }
+            }
+        }
+    }
+    if (errors == 0) std::printf("[w2_batched] PASS\n");
+    else             std::printf("[w2_batched] FAIL with %d mismatches\n", errors);
+    return errors ? 1 : 0;
+}
+
 int main2(int argc, char** argv) {
     std::string weight_path = "fc1_weights_swizzled.bin";
     int tile_idx = 0;
@@ -236,14 +403,22 @@ int main2(int argc, char** argv) {
         }
     }
 
+    int status = 0;
+    status |= run_smoke_scaled();
+    status |= run_w2_primitive_check();
+    status |= run_smoke_w2_scaled();
+    status |= run_smoke_w2_batched();
+
     if (smoke_only) {
-        return run_smoke_scaled();
+        return status;
     }
 
-    int status = run_fc1_tile(weight_path, tile_idx);
-    if (status != 0) {
+    int fc1_status = run_fc1_tile(weight_path, tile_idx);
+    if (fc1_status != 0) {
         std::printf("Use --smoke for a quick self-contained check.\n");
     }
-    return status;
+    return status | fc1_status;
 }
+
+int main(int argc, char** argv) { return main2(argc, argv); }
 #endif

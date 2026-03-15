@@ -20,12 +20,12 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
 #pragma HLS INTERFACE axis port = out_stream
 #pragma HLS INTERFACE s_axilite port = gamma bundle = control
 #pragma HLS INTERFACE s_axilite port = return bundle = control
-#pragma HLS ARRAY_PARTITION variable=gamma type=cyclic factor=VEC_W dim=1
+// #pragma HLS ARRAY_PARTITION variable=gamma type=cyclic factor=VEC_W dim=1
     static_assert(HIDDEN_DIM % VEC_W == 0, "HIDDEN_DIM must be divisible by VEC_W");
 
     float gamma_local[HIDDEN_DIM];
-    #pragma HLS BIND_STORAGE variable = gamma_local type = ram_2p impl = bram
-    #pragma HLS ARRAY_PARTITION variable=gamma_local cyclic factor=VEC_W
+// #pragma HLS BIND_STORAGE variable = gamma_local type = ram_2p impl = bram
+// #pragma HLS ARRAY_PARTITION variable=gamma_local cyclic factor=VEC_W
 
     for(int k=0; k < HIDDEN_DIM; k++) {
         #pragma HLS PIPELINE II=1
@@ -36,7 +36,7 @@ void rms_norm_stream(hls_stream<vec_t<VEC_W>>& in_stream,
     for (int t = 0; t < TREE_WIDTH; t++) {
 #pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
         float buf[HIDDEN_DIM];
-    #pragma HLS ARRAY_PARTITION variable = buf cyclic factor = VEC_W
+// #pragma HLS ARRAY_PARTITION variable = buf cyclic factor = VEC_W
 
         // Load and accumulate sum of squares
         float sum_sq = 0.0f;

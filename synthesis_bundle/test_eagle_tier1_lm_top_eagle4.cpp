@@ -64,7 +64,8 @@ std::vector<float> load_fp16(const std::string& path) {
 }
 
 size_t expected_pack_count(int in_dim, int out_dim) {
-    return (static_cast<size_t>(in_dim) * static_cast<size_t>(out_dim)) / 128;
+    return (static_cast<size_t>(in_dim) * static_cast<size_t>(out_dim)) /
+           tmac::hls::kPack512WeightElems;
 }
 
 size_t expected_scale_count(int in_dim, int out_dim) {
@@ -210,7 +211,7 @@ int main(int argc, char** argv) {
 
     const int tokens = static_cast<int>(std::min(embed_all.size(), hidden_all.size()) / HIDDEN);
     const int rank = static_cast<int>(lm_down.size() / HIDDEN);
-    const int rank_packs = rank / 8;
+    const int rank_packs = rank / tmac::hls::kLmTcQpackFactor;
     const int vocab = (rank_packs > 0) ? static_cast<int>(lm_q.size() / rank_packs) : 0;
     const int groups = (GROUP_SIZE > 0) ? rank / GROUP_SIZE : 0;
     const int topk = std::max(1, std::min(node_top_k, tmac::hls::kEagle4LmTopKMax));

@@ -45,11 +45,11 @@
 namespace tmac {
 namespace hls {
 
-constexpr int HIDDEN = 4096;
-constexpr int INTERMEDIATE = 14336;
+constexpr int HIDDEN = 3072;
+constexpr int INTERMEDIATE = 8192;
 constexpr int HEAD_DIM = 128;
-constexpr int NUM_HEADS = 32;
-constexpr int NUM_KV_HEADS = 32;
+constexpr int NUM_HEADS = 24;
+constexpr int NUM_KV_HEADS = 24;
 constexpr int QKV_INPUT = HIDDEN * 2;
 constexpr int DOWN_OUTPUT = HIDDEN * 2;
 constexpr float RMS_EPS = 1e-5f;

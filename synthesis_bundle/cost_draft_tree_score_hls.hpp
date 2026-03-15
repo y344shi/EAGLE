@@ -14,7 +14,7 @@ constexpr int kCdtScoreTcBatch = 1;
 constexpr int kCdtScoreTcTopK = 8;
 constexpr int kCdtScoreTcTreeWidth = 4;
 constexpr int kCdtScoreTcTotalTopK = kCdtScoreTcTreeWidth * kCdtScoreTcTopK; // 32
-constexpr int kCdtScoreTcHidden = 4096;
+constexpr int kCdtScoreTcHidden = 3072;
 
 inline void e4d_bitonic_sort(float scores[kCdtSortWidth],
                              int64_t indices[kCdtSortWidth],
@@ -86,19 +86,8 @@ inline void e4d_score_core(
     int64_t* output_tokens               // [batch_size, node_top_k] (optional)
 ) {
 #pragma HLS INLINE off
-#pragma HLS BIND_STORAGE variable=topk_probas_sampling type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=topk_tokens_sampling type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=last_layer_scores type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=input_hidden_states type=ram_2p impl=bram
-#pragma HLS ARRAY_PARTITION variable=input_hidden_states type=cyclic factor=16 dim=1
-#pragma HLS BIND_STORAGE variable=curr_layer_scores type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=sort_layer_scores type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=sort_layer_indices type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=cache_topk_indices type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=parent_indices_in_layer type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=output_hidden_states type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=remapped_topk_tokens_sampling type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=output_tokens type=ram_2p impl=bram
+    // Avoid binding external pointer arguments to on-chip memories in HLS.
+// #pragma HLS ARRAY_PARTITION variable=input_hidden_states type=cyclic factor=16 dim=1
     const int total_topk = tree_width * node_top_k;
     if (total_topk > kCdtSortWidth || total_topk <= 0) {
         return;
@@ -110,9 +99,9 @@ batch_loop:
         float s_scores[kCdtSortWidth];
         int64_t s_indices[kCdtSortWidth];
         int64_t s_tokens[kCdtSortWidth];
-#pragma HLS ARRAY_PARTITION variable = s_scores complete
-#pragma HLS ARRAY_PARTITION variable = s_indices complete
-#pragma HLS ARRAY_PARTITION variable = s_tokens complete
+// #pragma HLS ARRAY_PARTITION variable = s_scores complete
+// #pragma HLS ARRAY_PARTITION variable = s_indices complete
+// #pragma HLS ARRAY_PARTITION variable = s_tokens complete
 
     init_shared:
         for (int i = 0; i < kCdtSortWidth; ++i) {

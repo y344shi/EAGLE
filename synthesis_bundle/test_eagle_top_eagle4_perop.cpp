@@ -97,7 +97,8 @@ std::vector<float> load_fp16(const std::string& path) {
 }
 
 size_t expected_pack_count(int in_dim, int out_dim) {
-    return (static_cast<size_t>(in_dim) * static_cast<size_t>(out_dim)) / 128;
+    return (static_cast<size_t>(in_dim) * static_cast<size_t>(out_dim)) /
+           tmac::hls::kPack512WeightElems;
 }
 
 size_t expected_scale_count(int in_dim, int out_dim) {

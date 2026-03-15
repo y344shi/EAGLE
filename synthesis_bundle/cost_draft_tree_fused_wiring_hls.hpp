@@ -17,6 +17,13 @@
 #define E4D_USE_LOCAL_NORM_GAMMA 0
 #endif
 
+// Compile-time switch for optional draft prefill stage hardware.
+// 0: prefill stage is compiled out to avoid duplicating SLM/LM engines.
+// 1: keep prefill stage logic and interfaces active.
+#ifndef E4D_ENABLE_PREFILL_STAGE
+#define E4D_ENABLE_PREFILL_STAGE 0
+#endif
+
 namespace tmac {
 namespace hls {
 

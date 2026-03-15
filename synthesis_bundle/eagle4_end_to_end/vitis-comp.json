@@ -1,0 +1,9 @@
+{
+  "name": "eagle4_end_to_end",
+  "type": "HLS",
+  "configuration": {
+    "componentType": "HLS",
+    "configFiles": ["..\/..\/..\/vitis_hls_workspace\/eagle4_end_to_end\/hls_config.cfg"],
+    "work_dir": "."
+  }
+}

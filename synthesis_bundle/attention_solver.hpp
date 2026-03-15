@@ -38,7 +38,7 @@ void attention_solver(hls_stream<vec_t<VEC_W>>& q_stream,     // one head query
 
     // Stationary Q buffer
     float q_buffer[HEAD_DIM];
-#pragma HLS ARRAY_PARTITION variable = q_buffer cyclic factor = VEC_W
+// #pragma HLS ARRAY_PARTITION variable = q_buffer cyclic factor = VEC_W
 
     // Load Q
     for (int i = 0; i < HEAD_DIM / VEC_W; ++i) {
@@ -55,7 +55,7 @@ void attention_solver(hls_stream<vec_t<VEC_W>>& q_stream,     // one head query
     float d_prev = 0.0f;
 
     float o_buffer[HEAD_DIM];
-#pragma HLS ARRAY_PARTITION variable = o_buffer cyclic factor = VEC_W
+// #pragma HLS ARRAY_PARTITION variable = o_buffer cyclic factor = VEC_W
     for (int i = 0; i < HEAD_DIM; ++i) {
 #pragma HLS UNROLL
         o_buffer[i] = 0.0f;
@@ -69,7 +69,7 @@ void attention_solver(hls_stream<vec_t<VEC_W>>& q_stream,     // one head query
 #pragma HLS LOOP_TRIPCOUNT min=1 avg=1024 max=2048
         float partial_scores[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         float v_local[HEAD_DIM];
-#pragma HLS ARRAY_PARTITION variable = v_local cyclic factor = VEC_W
+// #pragma HLS ARRAY_PARTITION variable = v_local cyclic factor = VEC_W
 
         if (t < seq_len) {
             // Dot(Q, K_t) while latching V_t

@@ -21,13 +21,20 @@ using tmac::hls::pc_word_offset_ptr;
 
 constexpr int64_t kProjGroupSize = 128;
 
-constexpr int64_t kQPackCount = (static_cast<int64_t>(QKV_INPUT) * HIDDEN) / 128;
-constexpr int64_t kKPackCount = (static_cast<int64_t>(QKV_INPUT) * (NUM_KV_HEADS * HEAD_DIM)) / 128;
-constexpr int64_t kVPackCount = (static_cast<int64_t>(QKV_INPUT) * (NUM_KV_HEADS * HEAD_DIM)) / 128;
-constexpr int64_t kOPackCount = (static_cast<int64_t>(HIDDEN) * HIDDEN) / 128;
-constexpr int64_t kGatePackCount = (static_cast<int64_t>(HIDDEN) * INTERMEDIATE) / 128;
-constexpr int64_t kUpPackCount = (static_cast<int64_t>(HIDDEN) * INTERMEDIATE) / 128;
-constexpr int64_t kDownPackCount = (static_cast<int64_t>(INTERMEDIATE) * DOWN_OUTPUT) / 128;
+constexpr int64_t kQPackCount =
+    (static_cast<int64_t>(QKV_INPUT) * HIDDEN) / tmac::hls::kPack512WeightElems;
+constexpr int64_t kKPackCount = (static_cast<int64_t>(QKV_INPUT) * (NUM_KV_HEADS * HEAD_DIM)) /
+                                tmac::hls::kPack512WeightElems;
+constexpr int64_t kVPackCount = (static_cast<int64_t>(QKV_INPUT) * (NUM_KV_HEADS * HEAD_DIM)) /
+                                tmac::hls::kPack512WeightElems;
+constexpr int64_t kOPackCount =
+    (static_cast<int64_t>(HIDDEN) * HIDDEN) / tmac::hls::kPack512WeightElems;
+constexpr int64_t kGatePackCount =
+    (static_cast<int64_t>(HIDDEN) * INTERMEDIATE) / tmac::hls::kPack512WeightElems;
+constexpr int64_t kUpPackCount =
+    (static_cast<int64_t>(HIDDEN) * INTERMEDIATE) / tmac::hls::kPack512WeightElems;
+constexpr int64_t kDownPackCount =
+    (static_cast<int64_t>(INTERMEDIATE) * DOWN_OUTPUT) / tmac::hls::kPack512WeightElems;
 
 constexpr int64_t kQScaleCount = (static_cast<int64_t>(QKV_INPUT) / kProjGroupSize) * HIDDEN;
 constexpr int64_t kKScaleCount =
@@ -169,7 +176,8 @@ E4dPackedLayout32Pc build_layout(
     const int64_t init_hidden_flat = static_cast<int64_t>(batch_size) * hidden_size;
     const int64_t prefill_hidden_3h_flat = static_cast<int64_t>(batch_size) * 3 * hidden_size;
     const int64_t prefill_embed_flat = static_cast<int64_t>(batch_size) * hidden_size;
-    const int64_t prefill_fc_pack_count = (static_cast<int64_t>(3) * hidden_size * hidden_size) / 128;
+    const int64_t prefill_fc_pack_count =
+        (static_cast<int64_t>(3) * hidden_size * hidden_size) / tmac::hls::kPack512WeightElems;
     const int64_t prefill_fc_scale_count =
         (static_cast<int64_t>(3) * hidden_size / kProjGroupSize) * hidden_size;
 

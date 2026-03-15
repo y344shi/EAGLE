@@ -88,11 +88,11 @@ void lm_head_8way_top(
     // Streams for Broadcasting
     hidden_stream_t s_h[8];
     #pragma HLS STREAM variable=s_h depth=128
-    #pragma HLS ARRAY_PARTITION variable=s_h complete dim=1
+// #pragma HLS ARRAY_PARTITION variable=s_h complete dim=1
 
     // PIPO buffer for results (No 'static' to allow dataflow)
     TokenOutput partial_results[8];
-    #pragma HLS ARRAY_PARTITION variable=partial_results complete dim=1
+// #pragma HLS ARRAY_PARTITION variable=partial_results complete dim=1
 
     // 1. Broadcast Hidden State
     broadcast_hidden(hidden_in, s_h[0], s_h[1], s_h[2], s_h[3], s_h[4], s_h[5], s_h[6], s_h[7]);

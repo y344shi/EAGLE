@@ -14,6 +14,41 @@ static_assert(weights::kNormHiddenDim == HIDDEN,
               "Local norm gamma table size must match HIDDEN.");
 #endif
 
+template <typename T>
+inline bool e4d_ptr_is_null(T* ptr) {
+#ifdef __SYNTHESIS__
+    (void)ptr;
+    return false;
+#else
+    return ptr == nullptr;
+#endif
+}
+
+template <typename T>
+inline bool e4d_ptr_non_null(T* ptr) {
+#ifdef __SYNTHESIS__
+    (void)ptr;
+    return true;
+#else
+    return ptr != nullptr;
+#endif
+}
+
+template <typename T, typename U>
+inline bool e4d_ptr_eq(T* lhs, U* rhs) {
+#ifdef __SYNTHESIS__
+    (void)lhs;
+    (void)rhs;
+    return false;
+#else
+    return lhs == rhs;
+#endif
+}
+
+#define E4D_PTR_IS_NULL(p) e4d_ptr_is_null((p))
+#define E4D_PTR_NON_NULL(p) e4d_ptr_non_null((p))
+#define E4D_PTR_EQ(a, b) e4d_ptr_eq((a), (b))
+
 #ifndef __SYNTHESIS__
 namespace {
 struct E4dRecurrentReplayState {
@@ -172,8 +207,8 @@ scale_for_update_loop:
         sort_scores);
 
     // Optional debug copies.
-    if (dbg_curr_layer_scores != nullptr || dbg_sort_layer_scores != nullptr ||
-        dbg_sort_layer_indices != nullptr || dbg_remapped_topk_tokens != nullptr) {
+    if (E4D_PTR_NON_NULL(dbg_curr_layer_scores) || E4D_PTR_NON_NULL(dbg_sort_layer_scores) ||
+        E4D_PTR_NON_NULL(dbg_sort_layer_indices) || E4D_PTR_NON_NULL(dbg_remapped_topk_tokens)) {
     dbg_flat_loop:
         for (int b = 0; b < batch_size; ++b) {
 #pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
@@ -182,23 +217,23 @@ scale_for_update_loop:
 #pragma HLS loop_tripcount min=kTcTotalTopK max=kTcTotalTopK avg=kTcTotalTopK
 #pragma HLS PIPELINE II = 1
                 const int idx = b * total_topk + t;
-                if (dbg_curr_layer_scores != nullptr) {
+                if (E4D_PTR_NON_NULL(dbg_curr_layer_scores)) {
                     dbg_curr_layer_scores[idx] = s_curr_layer_scores[idx];
                 }
-                if (dbg_sort_layer_scores != nullptr) {
+                if (E4D_PTR_NON_NULL(dbg_sort_layer_scores)) {
                     dbg_sort_layer_scores[idx] = s_sort_layer_scores[idx];
                 }
-                if (dbg_sort_layer_indices != nullptr) {
+                if (E4D_PTR_NON_NULL(dbg_sort_layer_indices)) {
                     dbg_sort_layer_indices[idx] = s_sort_layer_indices[idx];
                 }
-                if (dbg_remapped_topk_tokens != nullptr) {
+                if (E4D_PTR_NON_NULL(dbg_remapped_topk_tokens)) {
                     dbg_remapped_topk_tokens[idx] = s_remapped_topk_tokens[idx];
                 }
             }
         }
     }
 
-    if (dbg_parent_indices_in_layer != nullptr) {
+    if (E4D_PTR_NON_NULL(dbg_parent_indices_in_layer)) {
     dbg_parent_loop:
         for (int b = 0; b < batch_size; ++b) {
 #pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
@@ -225,7 +260,7 @@ void e4d_softmax_topk(
     int64_t* topk_tokens_out             // [batch, node_top_k]
 ) {
 #pragma HLS INLINE off
-    if (logits == nullptr || topk_probas_out == nullptr || topk_tokens_out == nullptr) {
+    if (E4D_PTR_IS_NULL(logits) || E4D_PTR_IS_NULL(topk_probas_out) || E4D_PTR_IS_NULL(topk_tokens_out)) {
         return;
     }
     if (batch_size <= 0 || batch_size > kCdtFusedMaxBatch || logits_width <= 0 ||
@@ -238,8 +273,8 @@ topk_batch_loop:
 #pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
         float best_logits[kCdtFusedMaxNodeTopK];
         int best_indices[kCdtFusedMaxNodeTopK];
-#pragma HLS ARRAY_PARTITION variable = best_logits complete
-#pragma HLS ARRAY_PARTITION variable = best_indices complete
+// #pragma HLS ARRAY_PARTITION variable = best_logits complete
+// #pragma HLS ARRAY_PARTITION variable = best_indices complete
 
     topk_init_loop:
         for (int k = 0; k < node_top_k; ++k) {
@@ -318,7 +353,7 @@ topk_batch_loop:
                 std::exp(best_logits[k] - max_logit) * inv_sum;
 
             int64_t tok = idx;
-            if (candidate_indices != nullptr) {
+            if (E4D_PTR_NON_NULL(candidate_indices)) {
                 tok = candidate_indices[b * logits_width + idx];
             }
             topk_tokens_out[b * node_top_k + k] = tok;
@@ -333,7 +368,7 @@ void e4d_copy_frontier(
     int64_t* frontier_dst         // [batch, max_tree_width]
 ) {
 #pragma HLS INLINE off
-    if (frontier_src == nullptr || frontier_dst == nullptr || frontier_src == frontier_dst) {
+    if (E4D_PTR_IS_NULL(frontier_src) || E4D_PTR_IS_NULL(frontier_dst) || E4D_PTR_EQ(frontier_src, frontier_dst)) {
         return;
     }
 
@@ -371,8 +406,8 @@ void e4d_prep_next_inputs(
     if (batch_size <= 0 || node_top_k <= 0 || hidden_size <= 0 || max_tree_width <= 0) {
         return;
     }
-    if (next_input_tokens == nullptr || next_last_layer_scores == nullptr ||
-        next_input_hidden_states == nullptr || next_topk_indexs_prev == nullptr) {
+    if (E4D_PTR_IS_NULL(next_input_tokens) || E4D_PTR_IS_NULL(next_last_layer_scores) ||
+        E4D_PTR_IS_NULL(next_input_hidden_states) || E4D_PTR_IS_NULL(next_topk_indexs_prev)) {
         return;
     }
 
@@ -388,7 +423,7 @@ next_layer_batch_loop:
             const int token_dst = b * use_width + t;
 
             int64_t prev_idx_v = -1;
-            if (cache_topk_indices != nullptr) {
+            if (E4D_PTR_NON_NULL(cache_topk_indices)) {
                 prev_idx_v = cache_topk_indices[b * node_top_k + t];
             }
 
@@ -399,7 +434,7 @@ next_layer_batch_loop:
             const int64_t hidden_dst_base =
                 (static_cast<int64_t>(b) * use_width + t) * hidden_size;
 
-            if (output_hidden_states != nullptr) {
+            if (E4D_PTR_NON_NULL(output_hidden_states)) {
                 const int64_t hidden_src_base =
                     (static_cast<int64_t>(b) * node_top_k + t) * hidden_size;
             next_layer_hidden_copy_loop:
@@ -462,8 +497,8 @@ void e4d_slm_topk(
 ) {
 #pragma HLS INLINE off
 #pragma HLS BIND_STORAGE variable=parent_indices_per_layer type=ram_2p impl=bram
-    if (input_hidden_states == nullptr || reasoning_hidden_states_out == nullptr ||
-        topk_probas_sampling_out == nullptr || topk_tokens_sampling_out == nullptr) {
+    if (E4D_PTR_IS_NULL(input_hidden_states) || E4D_PTR_IS_NULL(reasoning_hidden_states_out) ||
+        E4D_PTR_IS_NULL(topk_probas_sampling_out) || E4D_PTR_IS_NULL(topk_tokens_sampling_out)) {
         return;
     }
     if (batch_size <= 0 || tree_width <= 0 || hidden_size <= 0 || node_top_k <= 0) {
@@ -489,8 +524,8 @@ slm_batch_loop:
 #pragma HLS PIPELINE II = 1
                 vec_t<VEC_W> hidden_vec;
                 vec_t<VEC_W> embed_vec;
-#pragma HLS ARRAY_PARTITION variable = hidden_vec complete
-#pragma HLS ARRAY_PARTITION variable = embed_vec complete
+// #pragma HLS ARRAY_PARTITION variable = hidden_vec complete
+// #pragma HLS ARRAY_PARTITION variable = embed_vec complete
 
             slm_stream_lane_loop:
                 for (int lane = 0; lane < VEC_W; ++lane) {
@@ -502,7 +537,7 @@ slm_batch_loop:
                         const int64_t src =
                             (static_cast<int64_t>(b) * tree_width + t) * hidden_size + h;
                         hv_val = input_hidden_states[src];
-                        ev_val = (input_embed_states != nullptr)
+                        ev_val = (E4D_PTR_NON_NULL(input_embed_states))
                                      ? input_embed_states[src]
                                      : hv_val;
                     }
@@ -580,7 +615,7 @@ slm_batch_loop:
             }
 
             float exp_vals[kCdtFusedMaxNodeTopK];
-#pragma HLS ARRAY_PARTITION variable = exp_vals complete
+// #pragma HLS ARRAY_PARTITION variable = exp_vals complete
             float sum_exp = 0.0f;
         slm_topk_exp_loop_k:
             for (int k = 0; k < node_top_k; ++k) {
@@ -650,20 +685,20 @@ void e4d_apply_policy(
     int scheduled_tree_width = curr_tree_width;
     int scheduled_verify_num = curr_verify_num;
     bool scheduled_stop = false;
-    if (use_policy_schedule && policy_next_tree_width != nullptr &&
-        policy_next_verify_num != nullptr && policy_stop_signal != nullptr &&
+    if (use_policy_schedule && E4D_PTR_NON_NULL(policy_next_tree_width) &&
+        E4D_PTR_NON_NULL(policy_next_verify_num) && E4D_PTR_NON_NULL(policy_stop_signal) &&
         depth >= 0 && depth < policy_depth) {
         scheduled_tree_width = policy_next_tree_width[depth];
         scheduled_verify_num = policy_next_verify_num[depth];
         scheduled_stop = (policy_stop_signal[depth] != 0);
     }
-    if (next_tree_width != nullptr) {
+    if (E4D_PTR_NON_NULL(next_tree_width)) {
         *next_tree_width = scheduled_tree_width;
     }
-    if (next_verify_num != nullptr) {
+    if (E4D_PTR_NON_NULL(next_verify_num)) {
         *next_verify_num = scheduled_verify_num;
     }
-    if (stop_signal != nullptr) {
+    if (E4D_PTR_NON_NULL(stop_signal)) {
         *stop_signal = scheduled_stop;
     }
 }
@@ -677,8 +712,8 @@ void e4d_prefill_fc(
     int hidden_size,
     float* projected_hidden_states) {      // [batch, hidden]
 #pragma HLS INLINE off
-    if (input_hidden_states_3h == nullptr || fc_weight == nullptr ||
-        fc_scales == nullptr || projected_hidden_states == nullptr) {
+    if (E4D_PTR_IS_NULL(input_hidden_states_3h) || E4D_PTR_IS_NULL(fc_weight) ||
+        E4D_PTR_IS_NULL(fc_scales) || E4D_PTR_IS_NULL(projected_hidden_states)) {
         return;
     }
     // Current pipeline milestone assumes batch_size=1 and hidden_size==HIDDEN.
@@ -694,7 +729,7 @@ prefill_fc_stream_in_loop:
 #pragma HLS loop_tripcount min=(HIDDEN*3)/VEC_W max=(HIDDEN*3)/VEC_W avg=(HIDDEN*3)/VEC_W
 #pragma HLS PIPELINE II=1
         vec_t<VEC_W> v;
-#pragma HLS ARRAY_PARTITION variable=v complete
+// #pragma HLS ARRAY_PARTITION variable=v complete
     prefill_fc_stream_in_lane:
         for (int lane = 0; lane < VEC_W; ++lane) {
 #pragma HLS UNROLL
@@ -704,11 +739,19 @@ prefill_fc_stream_in_loop:
         s_fc_in.write(v);
     }
 
+#if TMAC_WEIGHT_BITS == 2
+    dense_projection_production_scaled_batched_w2<0, 1, HIDDEN * 3, HIDDEN, 128, TMAC_USE_TMAC_QKV>(
+        s_fc_in,
+        s_fc_out,
+        fc_weight,
+        fc_scales);
+#else
     dense_projection_production_scaled_batched<0, 1, HIDDEN * 3, HIDDEN, 128, TMAC_USE_TMAC_QKV>(
         s_fc_in,
         s_fc_out,
         fc_weight,
         fc_scales);
+#endif
 
 prefill_fc_stream_out_loop:
     for (int hv = 0; hv < HIDDEN / VEC_W; ++hv) {
@@ -735,8 +778,8 @@ bool e4d_lookup_recurrent_embed_states(
     float* embed_states_out                     // packed [batch, tree_width, hidden]
 ) {
 #pragma HLS INLINE off
-    if (step_input_tokens == nullptr || draft_embed_tokens_weight == nullptr ||
-        embed_states_out == nullptr) {
+    if (E4D_PTR_IS_NULL(step_input_tokens) || E4D_PTR_IS_NULL(draft_embed_tokens_weight) ||
+        E4D_PTR_IS_NULL(embed_states_out)) {
         return false;
     }
     if (batch_size <= 0 || tree_width <= 0 || hidden_size <= 0) {
@@ -773,7 +816,7 @@ void e4d_burst_load_array(
     const T* __restrict src,
     int n) {
 #pragma HLS INLINE off
-    if (dst == nullptr || src == nullptr || n <= 0) {
+    if (E4D_PTR_IS_NULL(dst) || E4D_PTR_IS_NULL(src) || n <= 0) {
         return;
     }
 load_burst_loop:
@@ -789,7 +832,7 @@ void e4d_burst_store_array(
     const T* __restrict src,
     int n) {
 #pragma HLS INLINE off
-    if (dst == nullptr || src == nullptr || n <= 0) {
+    if (E4D_PTR_IS_NULL(dst) || E4D_PTR_IS_NULL(src) || n <= 0) {
         return;
     }
 store_burst_loop:
@@ -804,7 +847,7 @@ void e4d_load_rope_table(
     float* rope_cos_vals,
     float* rope_sin_vals) {
 #pragma HLS INLINE off
-    if (rope_cfg_table == nullptr || rope_cos_vals == nullptr || rope_sin_vals == nullptr) {
+    if (E4D_PTR_IS_NULL(rope_cfg_table) || E4D_PTR_IS_NULL(rope_cos_vals) || E4D_PTR_IS_NULL(rope_sin_vals)) {
         return;
     }
 load_rope_cos_loop:
@@ -936,21 +979,29 @@ void eagle4_draft_impl(
     const float* prefill_fc_scales// = nullptr                // grouped scales
 ) {
 #pragma HLS INLINE off
+// Share heavyweight engines across prefill/recurrent callsites.
+#pragma HLS ALLOCATION function instances=e4d_slm_topk limit=1
+#pragma HLS ALLOCATION function instances=e4d_fused_step limit=1
     if (tree_depth <= 0 || batch_size <= 0 || batch_size > kHlsHiddenBatch ||
         node_top_k <= 0 || hidden_size <= 0) {
         return;
     }
+    const int node_top_k_cap =
+        (kCdtFusedMaxNodeTopK < kEagle4LmTopKMax) ? kCdtFusedMaxNodeTopK : kEagle4LmTopKMax;
+    if (node_top_k > node_top_k_cap) {
+        node_top_k = node_top_k_cap;
+    }
     if (curr_depth_start < 0 || curr_depth_start + tree_depth > kCdtControllerMaxDepth) {
         return;
     }
-    if (io_tree_width == nullptr || io_verify_num == nullptr || io_cumu_count == nullptr) {
+    if (E4D_PTR_IS_NULL(io_tree_width) || E4D_PTR_IS_NULL(io_verify_num) || E4D_PTR_IS_NULL(io_cumu_count)) {
         return;
     }
-    if (step_input_tokens == nullptr || step_input_hidden_states == nullptr ||
-        step_last_layer_scores == nullptr || step_topk_indexs_prev == nullptr ||
-        step_topk_probas_sampling == nullptr || step_topk_tokens_sampling == nullptr ||
-        output_hidden_states == nullptr || cache_topk_indices == nullptr ||
-        output_scores == nullptr || output_tokens == nullptr) {
+    if (E4D_PTR_IS_NULL(step_input_tokens) || E4D_PTR_IS_NULL(step_input_hidden_states) ||
+        E4D_PTR_IS_NULL(step_last_layer_scores) || E4D_PTR_IS_NULL(step_topk_indexs_prev) ||
+        E4D_PTR_IS_NULL(step_topk_probas_sampling) || E4D_PTR_IS_NULL(step_topk_tokens_sampling) ||
+        E4D_PTR_IS_NULL(output_hidden_states) || E4D_PTR_IS_NULL(cache_topk_indices) ||
+        E4D_PTR_IS_NULL(output_scores) || E4D_PTR_IS_NULL(output_tokens)) {
         return;
     }
     const float* effective_hidden_norm_gamma = hidden_norm_gamma;
@@ -963,17 +1014,17 @@ void eagle4_draft_impl(
     effective_post_attn_norm_gamma = weights::kPostAttnNormGamma;
     effective_final_norm_gamma = weights::kFinalNormGamma;
 #endif
-    if (w_q == nullptr || s_q == nullptr || w_k == nullptr || s_k == nullptr ||
-        w_v == nullptr || s_v == nullptr || w_o == nullptr || s_o == nullptr ||
-        w_gate == nullptr || gate_scales == nullptr || w_up == nullptr || up_scales == nullptr ||
-        w_down == nullptr || down_scales == nullptr || effective_hidden_norm_gamma == nullptr ||
-        effective_embed_norm_gamma == nullptr || effective_post_attn_norm_gamma == nullptr ||
-        rope_cfg_table == nullptr || effective_final_norm_gamma == nullptr ||
-        hbm_k == nullptr || hbm_v == nullptr ||
-        efficient_lm_head_down_proj_weight == nullptr ||
-        efficient_lm_head_qweight_row_major == nullptr ||
-        efficient_lm_head_scales_row_major == nullptr || lm_head_weight == nullptr ||
-        draft_embed_tokens_weight == nullptr) {
+    if (E4D_PTR_IS_NULL(w_q) || E4D_PTR_IS_NULL(s_q) || E4D_PTR_IS_NULL(w_k) || E4D_PTR_IS_NULL(s_k) ||
+        E4D_PTR_IS_NULL(w_v) || E4D_PTR_IS_NULL(s_v) || E4D_PTR_IS_NULL(w_o) || E4D_PTR_IS_NULL(s_o) ||
+        E4D_PTR_IS_NULL(w_gate) || E4D_PTR_IS_NULL(gate_scales) || E4D_PTR_IS_NULL(w_up) || E4D_PTR_IS_NULL(up_scales) ||
+        E4D_PTR_IS_NULL(w_down) || E4D_PTR_IS_NULL(down_scales) || E4D_PTR_IS_NULL(effective_hidden_norm_gamma) ||
+        E4D_PTR_IS_NULL(effective_embed_norm_gamma) || E4D_PTR_IS_NULL(effective_post_attn_norm_gamma) ||
+        E4D_PTR_IS_NULL(rope_cfg_table) || E4D_PTR_IS_NULL(effective_final_norm_gamma) ||
+        E4D_PTR_IS_NULL(hbm_k) || E4D_PTR_IS_NULL(hbm_v) ||
+        E4D_PTR_IS_NULL(efficient_lm_head_down_proj_weight) ||
+        E4D_PTR_IS_NULL(efficient_lm_head_qweight_row_major) ||
+        E4D_PTR_IS_NULL(efficient_lm_head_scales_row_major) || E4D_PTR_IS_NULL(lm_head_weight) ||
+        E4D_PTR_IS_NULL(draft_embed_tokens_weight)) {
         return;
     }
     if (hidden_size > HIDDEN || max_tree_width > TREE_WIDTH ||
@@ -987,7 +1038,7 @@ void eagle4_draft_impl(
             return;
         }
         if (accepted_draft_node_count > 0 &&
-            (accepted_draft_node_ids == nullptr || node_to_hbm_slot == nullptr)) {
+            (E4D_PTR_IS_NULL(accepted_draft_node_ids) || E4D_PTR_IS_NULL(node_to_hbm_slot))) {
             return;
         }
     }
@@ -1048,7 +1099,7 @@ map_accept_nodes_loop:
     if (effective_prefix_len < 0 || effective_prefix_len >= max_hbm_token_count) {
         return;
     }
-    if (node_to_hbm_slot != nullptr) {
+    if (E4D_PTR_NON_NULL(node_to_hbm_slot)) {
     node_map_init_loop:
         for (int i = 0; i < kHlsMaxNodeCount; ++i) {
 #pragma HLS loop_tripcount min=kTcMaxNodeCount max=kTcMaxNodeCount avg=kTcMaxNodeCount
@@ -1059,29 +1110,35 @@ map_accept_nodes_loop:
         }
     }
 
+#if E4D_ENABLE_PREFILL_STAGE
     const bool run_prefill_stage =
         enable_prefill_stage &&
         enable_initial_loop &&
-        prefill_input_hidden_states_3h != nullptr &&
-        prefill_input_embed_states != nullptr &&
-        prefill_fc_weight != nullptr &&
-        prefill_fc_scales != nullptr;
+        E4D_PTR_NON_NULL(prefill_input_hidden_states_3h) &&
+        E4D_PTR_NON_NULL(prefill_input_embed_states) &&
+        E4D_PTR_NON_NULL(prefill_fc_weight) &&
+        E4D_PTR_NON_NULL(prefill_fc_scales);
     if (enable_prefill_stage && !run_prefill_stage) {
         return;
     }
+#else
+    const bool run_prefill_stage = false;
+    (void)enable_prefill_stage;
+    (void)prefill_input_hidden_states_3h;
+    (void)prefill_input_embed_states;
+    (void)prefill_fc_weight;
+    (void)prefill_fc_scales;
+#endif
 
-    const float* initial_hidden_states_ptr = initial_hidden_states;
-    const float* initial_topk_probas_ptr = initial_topk_probas;
-    const int64_t* initial_topk_tokens_ptr = initial_topk_tokens;
-
+    const bool has_initial_topk_from_inputs =
+        E4D_PTR_NON_NULL(initial_topk_probas) && E4D_PTR_NON_NULL(initial_topk_tokens);
     const bool has_initial_topk =
-        run_prefill_stage ||
-        (initial_topk_probas_ptr != nullptr && initial_topk_tokens_ptr != nullptr);
-    const bool has_initial_logits = (initial_logits != nullptr && initial_logits_width > 0);
+        run_prefill_stage || has_initial_topk_from_inputs;
+    const bool has_initial_logits = (E4D_PTR_NON_NULL(initial_logits) && initial_logits_width > 0);
     const bool run_initial_loop = enable_initial_loop && (has_initial_topk || has_initial_logits);
 
     if (enable_initial_loop &&
-        (!run_initial_loop || (!run_prefill_stage && initial_hidden_states_ptr == nullptr))) {
+        (!run_initial_loop || (!run_prefill_stage && E4D_PTR_IS_NULL(initial_hidden_states)))) {
         return;
     }
 
@@ -1111,8 +1168,10 @@ map_accept_nodes_loop:
 #pragma HLS BIND_STORAGE variable = s_parent_scratch type = ram_2p impl = bram
     float s_initial_topk_probas[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
     int64_t s_initial_topk_tokens[kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK];
+    float s_initial_hidden_states[kHlsHiddenBatch * HIDDEN];
 #pragma HLS BIND_STORAGE variable = s_initial_topk_probas type = ram_2p impl = bram
 #pragma HLS BIND_STORAGE variable = s_initial_topk_tokens type = ram_2p impl = bram
+#pragma HLS BIND_STORAGE variable = s_initial_hidden_states type = ram_2p impl = bram
 
     // ── BRAM staging: small working arrays ───────────────────────────────
     int64_t bram_step_input_tokens[kCdtFusedMaxBatch * TREE_WIDTH];
@@ -1139,6 +1198,7 @@ map_accept_nodes_loop:
 #pragma HLS BIND_STORAGE variable=bram_rope_cos_vals type=ram_2p impl=bram
     float bram_rope_sin_vals[HEAD_DIM / 2];
 #pragma HLS BIND_STORAGE variable=bram_rope_sin_vals type=ram_2p impl=bram
+#if E4D_ENABLE_PREFILL_STAGE
     float s_prefill_hidden_projected[kHlsHiddenBatch * HIDDEN];
     float s_prefill_embed_states[kHlsHiddenBatch * HIDDEN];
     float s_prefill_reasoning_hidden[kHlsHiddenBatch * HIDDEN];
@@ -1149,14 +1209,15 @@ map_accept_nodes_loop:
 #pragma HLS BIND_STORAGE variable=s_prefill_reasoning_hidden type=ram_2p impl=bram
 #pragma HLS BIND_STORAGE variable=s_prefill_topk_probas type=ram_2p impl=bram
 #pragma HLS BIND_STORAGE variable=s_prefill_topk_tokens type=ram_2p impl=bram
+#endif
 
     // ── BRAM staging: hidden state arrays (kHlsHiddenBatch=1 active) ─────
     float bram_step_input_hidden_states[kHlsHiddenBatch * TREE_WIDTH * HIDDEN];
 #pragma HLS BIND_STORAGE variable=bram_step_input_hidden_states type=ram_2p impl=bram
-#pragma HLS ARRAY_PARTITION variable=bram_step_input_hidden_states type=cyclic factor=16 dim=1
+// #pragma HLS ARRAY_PARTITION variable=bram_step_input_hidden_states type=cyclic factor=16 dim=1
     float bram_step_input_embed_states[kHlsHiddenBatch * TREE_WIDTH * HIDDEN];
 #pragma HLS BIND_STORAGE variable=bram_step_input_embed_states type=ram_2p impl=bram
-#pragma HLS ARRAY_PARTITION variable=bram_step_input_embed_states type=cyclic factor=16 dim=1
+// #pragma HLS ARRAY_PARTITION variable=bram_step_input_embed_states type=cyclic factor=16 dim=1
     float bram_output_hidden_states[kHlsHiddenBatch * kCdtFusedMaxNodeTopK * HIDDEN];
 #pragma HLS BIND_STORAGE variable=bram_output_hidden_states type=ram_2p impl=bram
 
@@ -1177,7 +1238,7 @@ map_accept_nodes_loop:
     int loop_start_depth = 0;
     const int step_flat  = batch_size * max_tree_width;
     const int topk_flat  = batch_size * max_tree_width * node_top_k;
-    const int node_flat  = batch_size * max_node_count;
+    const int node_load_flat = batch_size * curr_cumu_count;
     const int hid_step   = batch_size * max_tree_width * hidden_size;
     const int hid_out    = batch_size * node_top_k * hidden_size;
     const int work_flat  = batch_size * (curr_verify_num + node_top_k);
@@ -1199,14 +1260,15 @@ map_accept_nodes_loop:
             bram_step_input_hidden_states, step_input_hidden_states, hid_step);
         e4d_burst_load_array<float>(bram_work_scores, work_scores, work_flat);
         e4d_load_rope_table(rope_cfg_table, bram_rope_cos_vals, bram_rope_sin_vals);
-        e4d_burst_load_array<int64_t>(uram_cumu_tokens, cumu_tokens, node_flat);
-        e4d_burst_load_array<float>(uram_cumu_scores, cumu_scores, node_flat);
-        e4d_burst_load_array<int64_t>(uram_cumu_deltas, cumu_deltas, node_flat);
-        e4d_burst_load_array<int64_t>(uram_prev_indexs, prev_indexs, node_flat);
-        e4d_burst_load_array<int64_t>(uram_next_indexs, next_indexs, node_flat);
-        e4d_burst_load_array<int64_t>(uram_side_indexs, side_indexs, node_flat);
+        e4d_burst_load_array<int64_t>(uram_cumu_tokens, cumu_tokens, node_load_flat);
+        e4d_burst_load_array<float>(uram_cumu_scores, cumu_scores, node_load_flat);
+        e4d_burst_load_array<int64_t>(uram_cumu_deltas, cumu_deltas, node_load_flat);
+        e4d_burst_load_array<int64_t>(uram_prev_indexs, prev_indexs, node_load_flat);
+        e4d_burst_load_array<int64_t>(uram_next_indexs, next_indexs, node_load_flat);
+        e4d_burst_load_array<int64_t>(uram_side_indexs, side_indexs, node_load_flat);
     }
 
+#if E4D_ENABLE_PREFILL_STAGE
     if (run_prefill_stage) {
     prefill_topk_zero_loop:
         for (int i = 0; i < kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK; ++i) {
@@ -1261,27 +1323,41 @@ map_accept_nodes_loop:
             s_prefill_reasoning_hidden,
             s_prefill_topk_probas,
             s_prefill_topk_tokens);
-        if (node_to_hbm_slot != nullptr && max_node_count > 0) {
+        if (E4D_PTR_NON_NULL(node_to_hbm_slot) && max_node_count > 0) {
             const int root_slot = effective_prefix_len + curr_depth_start * max_tree_width;
             if (root_slot >= 0 && root_slot < max_hbm_token_count) {
                 node_to_hbm_slot[0] = root_slot;
             }
         }
-        initial_hidden_states_ptr = s_prefill_reasoning_hidden;
-        initial_topk_probas_ptr = s_prefill_topk_probas;
-        initial_topk_tokens_ptr = s_prefill_topk_tokens;
     }
+#endif
 
     if (run_initial_loop) {
         if (has_initial_topk) {
             // Copy external data into local scratch so the pointer below is always
             // a known local object (HLS cannot synthesize conditional pointer aliasing).
+            const int initial_topk_flat = batch_size * node_top_k;
         init_topk_copy_loop:
             for (int i = 0; i < kCdtFusedMaxBatch * kCdtFusedMaxNodeTopK; ++i) {
 #pragma HLS loop_tripcount min=kTcInitScratchSize max=kTcInitScratchSize avg=kTcInitScratchSize
 #pragma HLS PIPELINE II = 1
-                s_initial_topk_probas[i] = initial_topk_probas_ptr[i];
-                s_initial_topk_tokens[i] = initial_topk_tokens_ptr[i];
+                if (i < initial_topk_flat) {
+#if E4D_ENABLE_PREFILL_STAGE
+                    if (run_prefill_stage) {
+                        s_initial_topk_probas[i] = s_prefill_topk_probas[i];
+                        s_initial_topk_tokens[i] = s_prefill_topk_tokens[i];
+                    } else {
+                        s_initial_topk_probas[i] = initial_topk_probas[i];
+                        s_initial_topk_tokens[i] = initial_topk_tokens[i];
+                    }
+#else
+                    s_initial_topk_probas[i] = initial_topk_probas[i];
+                    s_initial_topk_tokens[i] = initial_topk_tokens[i];
+#endif
+                } else {
+                    s_initial_topk_probas[i] = 0.0f;
+                    s_initial_topk_tokens[i] = 0;
+                }
             }
         } else {
             e4d_softmax_topk(
@@ -1293,11 +1369,27 @@ map_accept_nodes_loop:
                 s_initial_topk_probas,
                 s_initial_topk_tokens);
         }
+        const int initial_hidden_flat = batch_size * hidden_size;
+    init_hidden_copy_loop:
+        for (int i = 0; i < kHlsHiddenBatch * HIDDEN; ++i) {
+#pragma HLS loop_tripcount min=HIDDEN max=HIDDEN avg=HIDDEN
+#pragma HLS PIPELINE II = 1
+            if (i < initial_hidden_flat) {
+#if E4D_ENABLE_PREFILL_STAGE
+                s_initial_hidden_states[i] =
+                    run_prefill_stage ? s_prefill_reasoning_hidden[i] : initial_hidden_states[i];
+#else
+                s_initial_hidden_states[i] = initial_hidden_states[i];
+#endif
+            } else {
+                s_initial_hidden_states[i] = 0.0f;
+            }
+        }
 
         float initial_last_layer_scores[kCdtFusedMaxBatch];
         int64_t initial_topk_indexs_prev[kCdtFusedMaxBatch];
-#pragma HLS ARRAY_PARTITION variable = initial_last_layer_scores complete
-#pragma HLS ARRAY_PARTITION variable = initial_topk_indexs_prev complete
+// #pragma HLS ARRAY_PARTITION variable = initial_last_layer_scores complete
+// #pragma HLS ARRAY_PARTITION variable = initial_topk_indexs_prev complete
     init_seed_loop:
         for (int b = 0; b < batch_size; ++b) {
 #pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
@@ -1312,7 +1404,7 @@ map_accept_nodes_loop:
             s_initial_topk_probas,
             s_initial_topk_tokens,
             initial_last_layer_scores,
-            initial_hidden_states_ptr,
+            s_initial_hidden_states,
             hot_token_id,
             hot_token_vocab_size,
             use_hot_token_id,
@@ -1358,7 +1450,7 @@ map_accept_nodes_loop:
                 parent_indices_accum[curr_depth_start * TREE_WIDTH + t] = parent_slot;
             }
         }
-        if (dbg_parent_indices_in_layer != nullptr) {
+        if (E4D_PTR_NON_NULL(dbg_parent_indices_in_layer)) {
         init_dbg_parent_fwd_loop_b:
             for (int b = 0; b < batch_size; ++b) {
 #pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
@@ -1472,8 +1564,8 @@ orchestrator_depth_loop:
         bool replay_loaded = false;
 #ifndef __SYNTHESIS__
         if (g_e4d_recurrent_replay.enabled &&
-            g_e4d_recurrent_replay.recurrent_topk_probas != nullptr &&
-            g_e4d_recurrent_replay.recurrent_topk_tokens != nullptr &&
+            g_e4d_recurrent_replay.E4D_PTR_NON_NULL(recurrent_topk_probas) &&
+            g_e4d_recurrent_replay.E4D_PTR_NON_NULL(recurrent_topk_tokens) &&
             g_e4d_recurrent_replay.tree_depth > d &&
             g_e4d_recurrent_replay.batch_size >= batch_size &&
             g_e4d_recurrent_replay.max_tree_width >= max_tree_width &&
@@ -1555,7 +1647,7 @@ orchestrator_depth_loop:
                 bram_step_topk_probas_sampling,
                 bram_step_topk_tokens_sampling);
         }
-        if (node_to_hbm_slot != nullptr) {
+        if (E4D_PTR_NON_NULL(node_to_hbm_slot)) {
             const int slot_base = effective_prefix_len + current_depth * max_tree_width;
         update_node_to_hbm_loop:
             for (int t = 0; t < TREE_WIDTH; ++t) {
@@ -1627,7 +1719,7 @@ orchestrator_depth_loop:
             }
         }
         // Forward to caller's debug output if requested.
-        if (dbg_parent_indices_in_layer != nullptr) {
+        if (E4D_PTR_NON_NULL(dbg_parent_indices_in_layer)) {
         dbg_parent_fwd_loop_b:
             for (int b = 0; b < batch_size; ++b) {
 #pragma HLS loop_tripcount min=kTcBatch max=kTcBatch avg=kTcBatch
@@ -1701,12 +1793,14 @@ orchestrator_finalize:
     *io_tree_width = curr_tree_width;
     *io_verify_num = curr_verify_num;
     *io_cumu_count = curr_cumu_count;
-    if (executed_depths != nullptr) {
+    if (E4D_PTR_NON_NULL(executed_depths)) {
         *executed_depths = depth_done;
     }
-    if (stopped_early != nullptr) {
+    if (E4D_PTR_NON_NULL(stopped_early)) {
         *stopped_early = stopped;
     }
+
+    const int node_store_flat = batch_size * curr_cumu_count;
 
     // ── Post-loop: BRAM/URAM → AXI (one-time writeback) ─────────────────
     // Parallelized into DATAFLOW burst stages.
@@ -1730,12 +1824,12 @@ orchestrator_finalize:
         e4d_burst_store_array<int64_t>(
             cache_topk_indices, bram_cache_topk_indices, batch_size * node_top_k);
         e4d_burst_store_array<float>(output_hidden_states, bram_output_hidden_states, hid_out);
-        e4d_burst_store_array<int64_t>(cumu_tokens, uram_cumu_tokens, node_flat);
-        e4d_burst_store_array<float>(cumu_scores, uram_cumu_scores, node_flat);
-        e4d_burst_store_array<int64_t>(cumu_deltas, uram_cumu_deltas, node_flat);
-        e4d_burst_store_array<int64_t>(prev_indexs, uram_prev_indexs, node_flat);
-        e4d_burst_store_array<int64_t>(next_indexs, uram_next_indexs, node_flat);
-        e4d_burst_store_array<int64_t>(side_indexs, uram_side_indexs, node_flat);
+        e4d_burst_store_array<int64_t>(cumu_tokens, uram_cumu_tokens, node_store_flat);
+        e4d_burst_store_array<float>(cumu_scores, uram_cumu_scores, node_store_flat);
+        e4d_burst_store_array<int64_t>(cumu_deltas, uram_cumu_deltas, node_store_flat);
+        e4d_burst_store_array<int64_t>(prev_indexs, uram_prev_indexs, node_store_flat);
+        e4d_burst_store_array<int64_t>(next_indexs, uram_next_indexs, node_store_flat);
+        e4d_burst_store_array<int64_t>(side_indexs, uram_side_indexs, node_store_flat);
     }
 }
 
@@ -1754,8 +1848,8 @@ void eagle4_draft_set_recurrent_replay(
     g_e4d_recurrent_replay.max_tree_width = max_tree_width;
     g_e4d_recurrent_replay.node_top_k = node_top_k;
     g_e4d_recurrent_replay.enabled =
-        recurrent_topk_probas != nullptr &&
-        recurrent_topk_tokens != nullptr &&
+        E4D_PTR_NON_NULL(recurrent_topk_probas) &&
+        E4D_PTR_NON_NULL(recurrent_topk_tokens) &&
         tree_depth > 0 &&
         batch_size > 0 &&
         max_tree_width > 0 &&

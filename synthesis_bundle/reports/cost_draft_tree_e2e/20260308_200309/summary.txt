@@ -1,0 +1,17 @@
+[present] cost_draft_tree_score_case.txt
+[missing] cost_draft_tree_score_case_hot.txt
+[missing] cost_draft_tree_update_case.txt
+[present] cost_draft_tree_controller_case.txt
+[missing] cost_draft_tree_fused_wiring_case.txt
+[present] cost_draft_tree_multilayer_orchestrator_case.txt
+[run] compile_fused_tb_host: g++ -std=c++17 -I. -include eagle4_lm_head_hls.cpp -include eagle_tier1_lm_top.cpp -include eagle_tier1_top.cpp -include cost_draft_tree_fused_wiring_hls.cpp /home/y344shi/workspace/amdv80/hls_eagle4_synthesis/EAGLE/synthesis_bundle/cost_draft_tree_fused_wiring_tb.cpp -O2 -o /tmp/cdt_fused_wiring_tb_host
+[pass] compile_fused_tb_host
+[run] fused_synthetic: /tmp/cdt_fused_wiring_tb_host
+[pass] fused_synthetic
+[run] fused_synthetic_multidepth: /tmp/cdt_fused_wiring_tb_host --multi-depth-steps 3
+[pass] fused_synthetic_multidepth
+[run] golden_check_full: bash /home/y344shi/workspace/amdv80/hls_eagle4_synthesis/EAGLE/synthesis_bundle/check_cost_draft_tree_goldens.sh /home/y344shi/workspace/amdv80/hls_eagle4_synthesis/EAGLE/synthesis_bundle
+[fail] golden_check_full (rc=0) log=/home/y344shi/workspace/amdv80/hls_eagle4_synthesis/EAGLE/synthesis_bundle/reports/cost_draft_tree_e2e/20260308_200309/golden_check_full.log
+[run] golden_check_dryrun: bash /home/y344shi/workspace/amdv80/hls_eagle4_synthesis/EAGLE/synthesis_bundle/check_cost_draft_tree_goldens.sh --dry-run /home/y344shi/workspace/amdv80/hls_eagle4_synthesis/EAGLE/synthesis_bundle
+[fail] golden_check_dryrun (rc=0) log=/home/y344shi/workspace/amdv80/hls_eagle4_synthesis/EAGLE/synthesis_bundle/reports/cost_draft_tree_e2e/20260308_200309/golden_check_dryrun.log
+[result] PASS run_dir=/home/y344shi/workspace/amdv80/hls_eagle4_synthesis/EAGLE/synthesis_bundle/reports/cost_draft_tree_e2e/20260308_200309

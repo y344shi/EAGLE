@@ -10,8 +10,8 @@ void eagle4_lm_down_project(
     int hidden_dim,
     int rank) {
 #pragma HLS INLINE off
-#pragma HLS ARRAY_PARTITION variable=logits_hidden type=cyclic factor=16 dim=2
-#pragma HLS ARRAY_PARTITION variable=low_rank type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=logits_hidden type=cyclic factor=16 dim=2
+// #pragma HLS ARRAY_PARTITION variable=low_rank type=complete dim=0
 
     for (int r = 0; r < rank; ++r) {
 #pragma HLS loop_tripcount min=kEagle4LmRankMax max=kEagle4LmRankMax avg=kEagle4LmRankMax
@@ -31,9 +31,9 @@ void eagle4_lm_down_project(
 
 void eagle4_lm_candidate_logits_row4(
     const float low_rank[TREE_WIDTH][kEagle4LmRankMax],  // [TREE_WIDTH, rank]
-    const int32_t qweight_row_major[kLmTcVocab * kLmMaxInPacks],    // [vocab, rank/8]
+    const int32_t qweight_row_major[kLmTcVocab * kLmMaxInPacks],    // [vocab, rank/kLmTcQpackFactor]
     const uint16_t scales_row_major[kLmTcVocab * kLmMaxGroups],     // fp16, [rank/group_size, vocab] (group-major)
-    const int32_t qzeros_packed[kLmMaxVocabPacked * kLmMaxGroups],  // int32 packed zeros, [rank/group_size, ceil(vocab/8)] (group-major)
+    const int32_t qzeros_packed[kLmMaxVocabPacked * kLmMaxGroups],  // int32 packed zeros, [rank/group_size, ceil(vocab/kLmTcQpackFactor)] (group-major)
     const int32_t g_idx[kEagle4LmRankMax],                          // optional [rank], maps input channel -> group id
     int rank,
     int vocab,
@@ -43,19 +43,23 @@ void eagle4_lm_candidate_logits_row4(
     int topk_indices[TREE_WIDTH][kEagle4LmTopKMax],   // [TREE_WIDTH, topk]
     float topk_scores[TREE_WIDTH][kEagle4LmTopKMax]) { // [TREE_WIDTH, topk]
 #pragma HLS INLINE off
-#pragma HLS ARRAY_PARTITION variable=low_rank type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=topk_indices type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=topk_scores type=complete dim=0
-#pragma HLS BIND_STORAGE variable=qweight_row_major type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=scales_row_major type=ram_2p impl=bram
-#pragma HLS BIND_STORAGE variable=qzeros_packed type=ram_2p impl=bram
-#pragma HLS ARRAY_PARTITION variable=qweight_row_major type=cyclic factor=128 dim=1
-#pragma HLS ARRAY_PARTITION variable=scales_row_major type=cyclic factor=128 dim=1
-#pragma HLS ARRAY_PARTITION variable=qzeros_packed type=cyclic factor=128 dim=1
-#pragma HLS ARRAY_PARTITION variable=g_idx type=complete dim=1
-    const int in_packs = rank / 8;
+// #pragma HLS ARRAY_PARTITION variable=low_rank type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=topk_indices type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=topk_scores type=complete dim=0
+// #pragma HLS BIND_STORAGE variable=qweight_row_major type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=scales_row_major type=ram_2p impl=bram
+// #pragma HLS BIND_STORAGE variable=qzeros_packed type=ram_2p impl=bram
+// #pragma HLS ARRAY_PARTITION variable=qweight_row_major type=cyclic factor=128 dim=1
+// #pragma HLS ARRAY_PARTITION variable=scales_row_major type=cyclic factor=128 dim=1
+// #pragma HLS ARRAY_PARTITION variable=qzeros_packed type=cyclic factor=128 dim=1
+// #pragma HLS ARRAY_PARTITION variable=g_idx type=complete dim=1
+    constexpr int kQpack = kLmTcQpackFactor;
+    constexpr int kQbits = tmac::hls::kQuantBits;
+    constexpr int kQmask = tmac::hls::kQuantMask;
+    constexpr int kMaxInPacks = (kEagle4LmRankMax + kQpack - 1) / kQpack;
+    const int in_packs = (rank + kQpack - 1) / kQpack;
     const int groups = (rank + group_size - 1) / group_size;
-    const int vocab_packed = (vocab + 7) / 8;
+    const int vocab_packed = (vocab + kQpack - 1) / kQpack;
     const bool keep_topk = (topk > 0 && topk_indices != nullptr && topk_scores != nullptr);
 
     if (keep_topk) {
@@ -77,16 +81,16 @@ void eagle4_lm_candidate_logits_row4(
         // Dequantize weights for this vocab entry (shared across all tree candidates).
         // Weight/scale/zero tensors are expected to be preloaded in BRAM at entrypoint.
         float dequant_w[kEagle4LmRankMax];
-#pragma HLS ARRAY_PARTITION variable=dequant_w complete dim=0
-        for (int p = 0; p < kEagle4LmRankMax / 8; ++p) {
-#pragma HLS UNROLL
-            const int k_base = p * 8;
+// #pragma HLS ARRAY_PARTITION variable=dequant_w complete dim=0
+        for (int p = 0; p < kMaxInPacks; ++p) {
+#pragma HLS UNROLL factor=E4D_PAR_LM_DEQUANT_PACK_UNROLL
+            const int k_base = p * kQpack;
             int32_t packed = 0;
             if (p < in_packs) {
                 packed = qweight_row_major[static_cast<size_t>(o) * static_cast<size_t>(in_packs) + p];
             }
-            for (int j = 0; j < 8; ++j) {
-#pragma HLS UNROLL
+            for (int j = 0; j < kQpack; ++j) {
+#pragma HLS UNROLL factor=E4D_PAR_LM_DEQUANT_ELEM_UNROLL
                 const int k = k_base + j;
                 if (k < rank) {
                     const int g = (g_idx != nullptr) ? g_idx[k] : (k / group_size);
@@ -94,16 +98,17 @@ void eagle4_lm_candidate_logits_row4(
                         scales_row_major[static_cast<size_t>(g) * static_cast<size_t>(vocab) +
                                          static_cast<size_t>(o)]);
 
-                    int zero = 8;
+                    int zero = kLmDefaultZeroPoint;
                     if (qzeros_packed != nullptr) {
-                        // Exported qzeros layout is [groups, ceil(vocab/8)].
+                        // Exported qzeros layout is [groups, ceil(vocab/kQpack)].
                         const int32_t z =
                             qzeros_packed[static_cast<size_t>(g) * static_cast<size_t>(vocab_packed) +
-                                          static_cast<size_t>(o >> 3)];
-                        zero = ((z >> ((o & 7) * 4)) & 0xF) + 1;
+                                          static_cast<size_t>(o / kQpack)];
+                        const int z_shift = (o % kQpack) * kQbits;
+                        zero = ((z >> z_shift) & kQmask) + 1;
                     }
 
-                    const int raw = (packed >> (j * 4)) & 0xF;
+                    const int raw = (packed >> (j * kQbits)) & kQmask;
                     dequant_w[k] = static_cast<float>(raw - zero) * scale;
                 } else {
                     dequant_w[k] = 0.0f;
@@ -114,11 +119,10 @@ void eagle4_lm_candidate_logits_row4(
         // Compute dot product for each tree candidate
         for (int t = 0; t < TREE_WIDTH; ++t) {
 #pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
-//#pragma HLS PIPELINE off
-#pragma HLS UNROLL
+#pragma HLS PIPELINE II=1
             float acc = 0.0f;
             for (int k = 0; k < kEagle4LmRankMax; ++k) {
-#pragma HLS UNROLL
+#pragma HLS UNROLL factor=E4D_PAR_LM_DOT_UNROLL
                 if (k < rank) {
                     acc += dequant_w[k] * low_rank[t][k];
                 }
@@ -147,9 +151,9 @@ void eagle4_lm_gather_dot_fp16(
     int hidden_dim,
     int num_candidates) {
 #pragma HLS INLINE off
-#pragma HLS ARRAY_PARTITION variable=hidden type=cyclic factor=16 dim=2
-#pragma HLS ARRAY_PARTITION variable=candidate_indices type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=hidden type=cyclic factor=16 dim=2
+// #pragma HLS ARRAY_PARTITION variable=candidate_indices type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
     for (int t = 0; t < TREE_WIDTH; ++t) {
 #pragma HLS loop_tripcount min=TREE_WIDTH max=TREE_WIDTH avg=TREE_WIDTH
         for (int c = 0; c < num_candidates; ++c) {
@@ -179,10 +183,10 @@ void eagle4_lm_softmax_topk(
     int* best_id,                                                 // overall best (backward compat)
     float* best_score) {                                          // overall best score
 #pragma HLS INLINE off
-#pragma HLS ARRAY_PARTITION variable=candidate_indices type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=topk_tokens_out type=complete dim=0
-#pragma HLS ARRAY_PARTITION variable=topk_probas_out type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=candidate_indices type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=gathered_logits type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=topk_tokens_out type=complete dim=0
+// #pragma HLS ARRAY_PARTITION variable=topk_probas_out type=complete dim=0
     int global_best_tok = -1;
     float global_best_val = -std::numeric_limits<float>::infinity();
 
@@ -191,7 +195,7 @@ void eagle4_lm_softmax_topk(
         // Find max for numerical stability
         float max_val = -std::numeric_limits<float>::infinity();
         for (int c = 0; c < kEagle4LmTopKMax; ++c) {
-#pragma HLS UNROLL
+#pragma HLS UNROLL factor=E4D_PAR_LM_SOFTMAX_UNROLL
             if (c < num_candidates && gathered_logits[t][c] > max_val) {
                 max_val = gathered_logits[t][c];
             }
@@ -200,7 +204,7 @@ void eagle4_lm_softmax_topk(
         // Compute exp(logit - max) and sum
         float sum_exp = 0.0f;
         for (int c = 0; c < kEagle4LmTopKMax; ++c) {
-#pragma HLS UNROLL
+#pragma HLS UNROLL factor=E4D_PAR_LM_SOFTMAX_UNROLL
             if (c < num_candidates) {
                 float e = std::exp(gathered_logits[t][c] - max_val);
                 topk_probas_out[t][c] = e;
@@ -211,7 +215,7 @@ void eagle4_lm_softmax_topk(
         // Normalize to probabilities and copy token IDs
         float inv_sum = (sum_exp > 0.0f) ? (1.0f / sum_exp) : 0.0f;
         for (int c = 0; c < kEagle4LmTopKMax; ++c) {
-#pragma HLS UNROLL
+#pragma HLS UNROLL factor=E4D_PAR_LM_SOFTMAX_UNROLL
             if (c < num_candidates) {
                 topk_probas_out[t][c] *= inv_sum;
                 topk_tokens_out[t][c] = candidate_indices[t][c];
@@ -223,7 +227,7 @@ void eagle4_lm_softmax_topk(
             global_best_val = max_val;
             // Find which candidate has max_val
             for (int c = 0; c < kEagle4LmTopKMax; ++c) {
-#pragma HLS UNROLL
+#pragma HLS UNROLL factor=E4D_PAR_LM_SOFTMAX_UNROLL
                 if (c < num_candidates && gathered_logits[t][c] == max_val) {
                     global_best_tok = candidate_indices[t][c];
                     break;

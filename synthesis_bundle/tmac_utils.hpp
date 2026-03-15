@@ -4,6 +4,14 @@
 #include <cmath>
 #include <cstdint>
 
+#ifndef TMAC_WEIGHT_BITS
+#define TMAC_WEIGHT_BITS 2
+#endif
+
+#if (TMAC_WEIGHT_BITS != 2) && (TMAC_WEIGHT_BITS != 4)
+#error "TMAC_WEIGHT_BITS must be 2 or 4"
+#endif
+
 #ifdef __SYNTHESIS__
 #include <ap_int.h>
 #include <hls_math.h>
@@ -67,6 +75,10 @@ namespace tmac {
 namespace hls {
 constexpr int VEC_W = 16;
 constexpr int TREE_WIDTH = 4;
+constexpr int kQuantBits = TMAC_WEIGHT_BITS;
+constexpr int kPack512WeightElems = 512 / TMAC_WEIGHT_BITS;
+constexpr int kI32WeightElems = 32 / TMAC_WEIGHT_BITS;
+constexpr int kQuantMask = (1 << TMAC_WEIGHT_BITS) - 1;
 } // namespace hls
 } // namespace tmac
 

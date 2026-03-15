@@ -1,0 +1,77 @@
+<dict>
+  <key>main-file</key>
+  <string>/home/y344shi/workspace/amdv80/hls_eagle4_synthesis/EAGLE/synthesis_bundle/eagle4_end_to_end/hls/.autopilot/db/eagle4_lm_head_hls.pp.0.cpp</string>
+  <key>diagnostics</key>
+  <array>
+    <dict>
+      <key>level</key>
+      <string>error</string>
+      <key>filename</key>
+      <string>/home/y344shi/workspace/xilinx_install/2025.1/Vitis/tps/lnx64/gcc-8.3.0/lib/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/bits/stl_pair.h</string>
+      <key>line</key>
+      <integer>442</integer>
+      <key>column</key>
+      <integer>40</integer>
+      <key>message</key>
+      <string>C++ requires a type specifier for all declarations</string>
+      <key>ID</key>
+      <integer>2916</integer>
+    </dict>
+    <dict>
+      <key>level</key>
+      <string>error</string>
+      <key>filename</key>
+      <string>/home/y344shi/workspace/xilinx_install/2025.1/Vitis/tps/lnx64/gcc-8.3.0/lib/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/bits/basic_string.h</string>
+      <key>line</key>
+      <integer>5896</integer>
+      <key>column</key>
+      <integer>5</integer>
+      <key>message</key>
+      <string>C++ requires a type specifier for all declarations</string>
+      <key>ID</key>
+      <integer>2916</integer>
+    </dict>
+    <dict>
+      <key>level</key>
+      <string>error</string>
+      <key>filename</key>
+      <string>/home/y344shi/workspace/xilinx_install/2025.1/Vitis/tps/lnx64/gcc-8.3.0/lib/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/bits/basic_string.h</string>
+      <key>line</key>
+      <integer>5904</integer>
+      <key>column</key>
+      <integer>5</integer>
+      <key>message</key>
+      <string>C++ requires a type specifier for all declarations</string>
+      <key>ID</key>
+      <integer>2916</integer>
+    </dict>
+    <dict>
+      <key>level</key>
+      <string>error</string>
+      <key>filename</key>
+      <string>/home/y344shi/workspace/xilinx_install/2025.1/Vitis/tps/lnx64/gcc-8.3.0/lib/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/bits/basic_string.h</string>
+      <key>line</key>
+      <integer>5910</integer>
+      <key>column</key>
+      <integer>5</integer>
+      <key>message</key>
+      <string>C++ requires a type specifier for all declarations</string>
+      <key>ID</key>
+      <integer>2916</integer>
+    </dict>
+    <dict>
+      <key>level</key>
+      <string>error</string>
+      <key>filename</key>
+      <string>/home/y344shi/workspace/xilinx_install/2025.1/Vitis/tps/lnx64/gcc-8.3.0/lib/gcc/x86_64-pc-linux-gnu/8.3.0/../../../../include/c++/8.3.0/array</string>
+      <key>line</key>
+      <integer>244</integer>
+      <key>column</key>
+      <integer>5</integer>
+      <key>message</key>
+      <string>C++ requires a type specifier for all declarations</string>
+      <key>ID</key>
+      <integer>2916</integer>
+    </dict>
+  </array>
+</dict>
